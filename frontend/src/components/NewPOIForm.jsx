@@ -13,8 +13,7 @@ function NewPOIForm({ onClose, onCreate, initialCoords }) {
     surface: '',
     pets: '',
     cell_signal: '',
-    more_info_link: '',
-    image_url: ''
+    more_info_link: ''
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -206,15 +205,6 @@ function NewPOIForm({ onClose, onCreate, initialCoords }) {
                 <option value="4">4 - Good</option>
                 <option value="5">5 - Excellent</option>
               </select>
-            </div>
-            <div className="form-section half">
-              <label>Image URL</label>
-              <input
-                type="text"
-                value={formData.image_url}
-                onChange={(e) => handleChange('image_url', e.target.value)}
-                placeholder="https://..."
-              />
             </div>
           </div>
 

@@ -11,6 +11,7 @@ import AISettings from './components/AISettings';
 import ActivitiesSettings from './components/ActivitiesSettings';
 import ErasSettings from './components/ErasSettings';
 import SurfacesSettings from './components/SurfacesSettings';
+import IconsSettings from './components/IconsSettings';
 
 function AppContent() {
   const { isAuthenticated, isAdmin, loading: authLoading } = useAuth();
@@ -18,6 +19,10 @@ function AppContent() {
   const [filteredDestinations, setFilteredDestinations] = useState([]);
   const [selectedDestination, setSelectedDestination] = useState(null);
   const [filters, setFilters] = useState({ owners: [], eras: [], surfaces: [] });
+
+  // Linear features (trails and rivers from database)
+  const [linearFeatures, setLinearFeatures] = useState([]);
+  const [selectedLinearFeature, setSelectedLinearFeature] = useState(null);
   const [activeFilters, setActiveFilters] = useState({
     owner: null,
     era: null,
@@ -75,13 +80,14 @@ function AppContent() {
     }
   }, []);
 
-  // Fetch destinations on mount
+  // Fetch destinations and linear features on mount
   useEffect(() => {
     async function fetchData() {
       try {
-        const [destResponse, filterResponse] = await Promise.all([
+        const [destResponse, filterResponse, linearResponse] = await Promise.all([
           fetch('/api/destinations'),
-          fetch('/api/filters')
+          fetch('/api/filters'),
+          fetch('/api/linear-features')
         ]);
 
         if (!destResponse.ok || !filterResponse.ok) {
@@ -90,10 +96,12 @@ function AppContent() {
 
         const destData = await destResponse.json();
         const filterData = await filterResponse.json();
+        const linearData = linearResponse.ok ? await linearResponse.json() : [];
 
         setDestinations(destData);
         setFilteredDestinations(destData);
         setFilters(filterData);
+        setLinearFeatures(linearData);
         setLoading(false);
       } catch (err) {
         setError(err.message);
@@ -169,6 +177,38 @@ function AppContent() {
     }
   };
 
+  // Handle linear feature selection (clears destination selection)
+  const handleSelectLinearFeature = (feature) => {
+    setSelectedDestination(null);
+    setNewPOI(null);
+    setPreviewCoords(null);
+    setSelectedLinearFeature(feature);
+  };
+
+  // Handle destination selection (clears linear feature selection)
+  const handleSelectDestination = (destination) => {
+    setSelectedLinearFeature(null);
+    setSelectedDestination(destination);
+  };
+
+  // Handle linear feature update
+  const handleLinearFeatureUpdate = (updatedFeature) => {
+    setLinearFeatures(prev =>
+      prev.map(f => f.id === updatedFeature.id ? updatedFeature : f)
+    );
+    if (selectedLinearFeature?.id === updatedFeature.id) {
+      setSelectedLinearFeature(updatedFeature);
+    }
+  };
+
+  // Handle linear feature deletion
+  const handleLinearFeatureDelete = (deletedId) => {
+    setLinearFeatures(prev => prev.filter(f => f.id !== deletedId));
+    if (selectedLinearFeature?.id === deletedId) {
+      setSelectedLinearFeature(null);
+    }
+  };
+
   // Start creating a new POI at given coordinates
   const handleStartNewPOI = (coords) => {
     // Clear any existing selection
@@ -187,9 +227,7 @@ function AppContent() {
       surface: '',
       pets: '',
       cell_signal: null,
-      more_info_link: '',
-      image_url: '',
-      icon_type: 'default'
+      more_info_link: ''
     });
     setPreviewCoords(coords);
   };
@@ -316,6 +354,12 @@ function AppContent() {
                 Surfaces
               </button>
               <button
+                className={`settings-tab-btn ${settingsTab === 'icons' ? 'active' : ''}`}
+                onClick={() => setSettingsTab('icons')}
+              >
+                Icons
+              </button>
+              <button
                 className={`settings-tab-btn ${settingsTab === 'news' ? 'active' : ''}`}
                 onClick={() => setSettingsTab('news')}
               >
@@ -333,6 +377,7 @@ function AppContent() {
               {settingsTab === 'activities' && <ActivitiesSettings />}
               {settingsTab === 'eras' && <ErasSettings />}
               {settingsTab === 'surfaces' && <SurfacesSettings />}
+              {settingsTab === 'icons' && <IconsSettings />}
               {settingsTab === 'news' && (
                 <div className="news-settings">
                   <h3>News & Events</h3>
@@ -354,7 +399,7 @@ function AppContent() {
           <Map
             destinations={filteredDestinations}
             selectedDestination={selectedDestination}
-            onSelectDestination={setSelectedDestination}
+            onSelectDestination={handleSelectDestination}
             isAdmin={isAdmin}
             onDestinationUpdate={handleDestinationUpdate}
             onDestinationCreate={handleDestinationCreate}
@@ -364,6 +409,9 @@ function AppContent() {
             onPreviewCoordsChange={setPreviewCoords}
             newPOI={newPOI}
             onStartNewPOI={handleStartNewPOI}
+            linearFeatures={linearFeatures}
+            selectedLinearFeature={selectedLinearFeature}
+            onSelectLinearFeature={handleSelectLinearFeature}
           />
 
           <Sidebar
@@ -372,6 +420,8 @@ function AppContent() {
             onClose={() => {
               if (newPOI) {
                 handleCancelNewPOI();
+              } else if (selectedLinearFeature) {
+                setSelectedLinearFeature(null);
               } else {
                 setSelectedDestination(null);
               }
@@ -384,6 +434,9 @@ function AppContent() {
             onCancelNewPOI={handleCancelNewPOI}
             previewCoords={previewCoords}
             onPreviewCoordsChange={setPreviewCoords}
+            linearFeature={selectedLinearFeature}
+            onLinearFeatureUpdate={handleLinearFeatureUpdate}
+            onLinearFeatureDelete={handleLinearFeatureDelete}
           />
         </main>
       )}

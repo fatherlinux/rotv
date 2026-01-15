@@ -1,8 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { MapContainer, TileLayer, Marker, Tooltip, useMap, ImageOverlay, GeoJSON, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import MapAdmin from './MapAdmin';
-import NewPOIForm from './NewPOIForm';
 
 // Custom icon definitions
 const createIcon = (iconUrl) => L.icon({
@@ -12,110 +11,74 @@ const createIcon = (iconUrl) => L.icon({
   tooltipAnchor: [0, -14]
 });
 
-const icons = {
-  'visitor-center': createIcon('/icons/visitor-center.svg'),
-  'waterfall': createIcon('/icons/waterfall.svg'),
-  'trail': createIcon('/icons/trail.svg'),
-  'historic': createIcon('/icons/historic.svg'),
-  'bridge': createIcon('/icons/bridge.svg'),
-  'train': createIcon('/icons/train.svg'),
-  'picnic': createIcon('/icons/picnic.svg'),
-  'camping': createIcon('/icons/camping.svg'),
-  'skiing': createIcon('/icons/skiing.svg'),
-  'nature': createIcon('/icons/nature.svg'),
-  'biking': createIcon('/icons/biking.svg'),
-  'music': createIcon('/icons/music.svg'),
-  'default': createIcon('/icons/default.svg')
-};
+// Default icon as fallback before database loads
+const defaultIcon = createIcon('/icons/default.svg');
 
-// Determine icon type based on destination name and activities
-function getDestinationIcon(dest) {
-  const name = (dest.name || '').toLowerCase();
-  const activities = (dest.primary_activities || '').toLowerCase();
-
-  // Check name patterns first (more specific)
-  if (name.includes('visitor center') || name.includes('exploration center') || name.includes('exploration ctr')) {
-    return icons['visitor-center'];
+// Get icon URL - either static file or API for generated icons
+function getIconUrl(icon) {
+  if (icon.svg_content) {
+    // AI-generated icon stored in database - serve from API
+    return `/api/icons/${icon.name}.svg`;
   }
-  if (name.includes('falls') || name.includes('waterfall')) {
-    return icons['waterfall'];
-  }
-  if (name.includes('bridge')) {
-    return icons['bridge'];
-  }
-  if (name.includes('cvsr') || name.includes('station') || name.includes('depot')) {
-    return icons['train'];
-  }
-  if (name.includes('ski') || name.includes('sledding')) {
-    return icons['skiing'];
-  }
-  if (name.includes('trail') || name.includes('trailhead')) {
-    return icons['trail'];
-  }
-  if (name.includes('marsh') || name.includes('gorge') || name.includes('cave') || name.includes('ledge')) {
-    return icons['nature'];
-  }
-  if (name.includes('mill') || name.includes('house') || name.includes('tavern') || name.includes('store') ||
-      name.includes('lock') || name.includes('quarry') || name.includes('farm') || name.includes('inn')) {
-    return icons['historic'];
-  }
-  if (name.includes('music') || name.includes('blossom')) {
-    return icons['music'];
-  }
-
-  // Check activities
-  if (activities.includes('camping')) return icons['camping'];
-  if (activities.includes('picnic')) return icons['picnic'];
-  if (activities.includes('biking') || activities.includes('bike')) return icons['biking'];
-  if (activities.includes('skiing') || activities.includes('sledding')) return icons['skiing'];
-  if (activities.includes('history')) return icons['historic'];
-  if (activities.includes('birding') || activities.includes('photo')) return icons['nature'];
-  if (activities.includes('concert')) return icons['music'];
-
-  return icons['default'];
+  // Static icon file
+  return `/icons/${icon.svg_filename || `${icon.name}.svg`}`;
 }
 
-// Get the icon type ID (for filtering)
-function getDestinationIconType(dest) {
+// Create Leaflet icons from database icon config
+function createIconsFromConfig(iconConfig) {
+  const icons = {};
+  iconConfig.forEach(icon => {
+    if (icon.enabled !== false) {
+      icons[icon.name] = createIcon(getIconUrl(icon));
+    }
+  });
+  // Always ensure default exists
+  if (!icons['default']) {
+    icons['default'] = createIcon('/icons/default.svg');
+  }
+  return icons;
+}
+
+// Check if a keyword exists as a whole word in text (not as a substring)
+// e.g., "house" should match "Lock House" but not "Lighthouse"
+function matchesWholeWord(text, keyword) {
+  // Escape special regex characters in keyword
+  const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // Match keyword with word boundaries
+  const regex = new RegExp(`\\b${escaped}\\b`, 'i');
+  return regex.test(text);
+}
+
+// Get icon type for a destination using database configuration
+function getDestinationIconTypeFromConfig(dest, iconConfig) {
   const name = (dest.name || '').toLowerCase();
   const activities = (dest.primary_activities || '').toLowerCase();
 
-  if (name.includes('visitor center') || name.includes('exploration center') || name.includes('exploration ctr')) {
-    return 'visitor-center';
-  }
-  if (name.includes('falls') || name.includes('waterfall')) {
-    return 'waterfall';
-  }
-  if (name.includes('bridge')) {
-    return 'bridge';
-  }
-  if (name.includes('cvsr') || name.includes('station') || name.includes('depot')) {
-    return 'train';
-  }
-  if (name.includes('ski') || name.includes('sledding')) {
-    return 'skiing';
-  }
-  if (name.includes('trail') || name.includes('trailhead')) {
-    return 'trail';
-  }
-  if (name.includes('marsh') || name.includes('gorge') || name.includes('cave') || name.includes('ledge')) {
-    return 'nature';
-  }
-  if (name.includes('mill') || name.includes('house') || name.includes('tavern') || name.includes('store') ||
-      name.includes('lock') || name.includes('quarry') || name.includes('farm') || name.includes('inn')) {
-    return 'historic';
-  }
-  if (name.includes('music') || name.includes('blossom')) {
-    return 'music';
+  // Check title keywords first (in sort order - first match wins)
+  for (const icon of iconConfig) {
+    if (icon.enabled === false) continue;
+    if (!icon.title_keywords) continue;
+
+    const keywords = icon.title_keywords.split(',').map(k => k.trim().toLowerCase());
+    for (const keyword of keywords) {
+      if (keyword && matchesWholeWord(name, keyword)) {
+        return icon.name;
+      }
+    }
   }
 
-  if (activities.includes('camping')) return 'camping';
-  if (activities.includes('picnic')) return 'picnic';
-  if (activities.includes('biking') || activities.includes('bike')) return 'biking';
-  if (activities.includes('skiing') || activities.includes('sledding')) return 'skiing';
-  if (activities.includes('history')) return 'historic';
-  if (activities.includes('birding') || activities.includes('photo')) return 'nature';
-  if (activities.includes('concert')) return 'music';
+  // Check activity fallbacks (in sort order - first match wins)
+  for (const icon of iconConfig) {
+    if (icon.enabled === false) continue;
+    if (!icon.activity_fallbacks) continue;
+
+    const fallbackActivities = icon.activity_fallbacks.split(',').map(a => a.trim().toLowerCase());
+    for (const activity of fallbackActivities) {
+      if (activity && matchesWholeWord(activities, activity)) {
+        return icon.name;
+      }
+    }
+  }
 
   return 'default';
 }
@@ -143,24 +106,39 @@ function getOwnerType(owner) {
   return 'other';
 }
 
-const ICON_TYPES = [
-  { id: 'visitor-center', label: 'Visitor Center' },
-  { id: 'waterfall', label: 'Waterfall' },
-  { id: 'trail', label: 'Trail' },
-  { id: 'historic', label: 'Historic Site' },
-  { id: 'bridge', label: 'Bridge' },
-  { id: 'train', label: 'Train Station' },
-  { id: 'nature', label: 'Nature Area' },
-  { id: 'skiing', label: 'Skiing' },
-  { id: 'biking', label: 'Biking' },
-  { id: 'picnic', label: 'Picnic Area' },
-  { id: 'camping', label: 'Camping' },
-  { id: 'music', label: 'Music Venue' },
-  { id: 'default', label: 'Other' }
-];
-
-function Legend({ showMapOverlay, onToggleMapOverlay, showVectorLayers, onToggleVectorLayers, onOpenAdmin, visibleTypes, onToggleType, onShowAll, onHideAll, activeTab, createMode, onToggleCreateMode, onCreatePOI }) {
+function Legend({ showMapOverlay, onToggleMapOverlay, showVectorLayers, onToggleVectorLayers, onOpenAdmin, visibleTypes, onToggleType, onShowAll, onHideAll, activeTab, iconConfig }) {
   const isEditTab = activeTab === 'edit';
+
+  // Convert iconConfig to the format needed for legend display
+  const iconTypes = useMemo(() => {
+    if (!iconConfig || iconConfig.length === 0) {
+      // Fallback to default set if config not loaded yet
+      return [
+        { id: 'visitor-center', label: 'Visitor Center', svg_filename: 'visitor-center.svg' },
+        { id: 'waterfall', label: 'Waterfall', svg_filename: 'waterfall.svg' },
+        { id: 'trail', label: 'Trail', svg_filename: 'trail.svg' },
+        { id: 'historic', label: 'Historic Site', svg_filename: 'historic.svg' },
+        { id: 'bridge', label: 'Bridge', svg_filename: 'bridge.svg' },
+        { id: 'train', label: 'Train Station', svg_filename: 'train.svg' },
+        { id: 'nature', label: 'Nature Area', svg_filename: 'nature.svg' },
+        { id: 'skiing', label: 'Skiing', svg_filename: 'skiing.svg' },
+        { id: 'biking', label: 'Biking', svg_filename: 'biking.svg' },
+        { id: 'picnic', label: 'Picnic Area', svg_filename: 'picnic.svg' },
+        { id: 'camping', label: 'Camping', svg_filename: 'camping.svg' },
+        { id: 'music', label: 'Music Venue', svg_filename: 'music.svg' },
+        { id: 'default', label: 'Other', svg_filename: 'default.svg' }
+      ];
+    }
+    return iconConfig
+      .filter(icon => icon.enabled !== false)
+      .map(icon => ({
+        id: icon.name,
+        label: icon.label,
+        svg_filename: icon.svg_filename || `${icon.name}.svg`,
+        svg_content: icon.svg_content,
+        iconUrl: getIconUrl(icon)
+      }));
+  }, [iconConfig]);
 
   return (
     <div className="legend">
@@ -172,13 +150,17 @@ function Legend({ showMapOverlay, onToggleMapOverlay, showVectorLayers, onToggle
         </div>
       </div>
       <div className="legend-icons">
-        {ICON_TYPES.map(type => (
+        {iconTypes.map(type => (
           <div
             key={type.id}
             className={`legend-icon-item ${visibleTypes.has(type.id) ? 'active' : 'inactive'}`}
             onClick={() => onToggleType(type.id)}
           >
-            <img src={`/icons/${type.id}.svg`} alt={type.label} />
+            {type.svg_content ? (
+              <div className="legend-icon-svg" dangerouslySetInnerHTML={{ __html: type.svg_content }} />
+            ) : (
+              <img src={type.iconUrl || `/icons/${type.svg_filename}`} alt={type.label} />
+            )}
             <span>{type.label}</span>
           </div>
         ))}
@@ -207,21 +189,7 @@ function Legend({ showMapOverlay, onToggleMapOverlay, showVectorLayers, onToggle
         <>
           <div className="legend-divider"></div>
           <h4>Edit Tools</h4>
-          <p className="edit-mode-hint">Click a marker to select, then drag to move. Changes save when you click Save.</p>
-          <label className="legend-toggle create-mode-toggle">
-            <input
-              type="checkbox"
-              checked={createMode}
-              onChange={(e) => onToggleCreateMode(e.target.checked)}
-            />
-            <span>Create POI Mode</span>
-          </label>
-          {createMode && (
-            <p className="create-mode-hint">Click on map to add new POI</p>
-          )}
-          <button className="create-poi-btn" onClick={() => onCreatePOI(null)}>
-            + Create POI (Manual)
-          </button>
+          <p className="edit-mode-hint">Click a marker or trail to select, then edit in sidebar. Drag markers to move.</p>
           <div className="legend-divider"></div>
           <h4>Map Alignment</h4>
           <button className="admin-btn" onClick={onOpenAdmin}>
@@ -233,14 +201,9 @@ function Legend({ showMapOverlay, onToggleMapOverlay, showVectorLayers, onToggle
   );
 }
 
-// Component to handle map clicks for creating new POIs
-function MapClickHandler({ createMode, onMapClick, isAdmin, onRightClick }) {
+// Component to handle map right-click for quick POI creation
+function MapClickHandler({ isAdmin, onRightClick }) {
   useMapEvents({
-    click: (e) => {
-      if (createMode) {
-        onMapClick({ lat: e.latlng.lat, lng: e.latlng.lng });
-      }
-    },
     contextmenu: (e) => {
       if (isAdmin && onRightClick) {
         e.originalEvent.preventDefault();
@@ -317,14 +280,19 @@ function DestinationMarker({ dest, icon, isSelected, isEditMode, onSelect, onDra
         className="destination-tooltip"
       >
         <div className="tooltip-content">
+          {dest.image_mime_type && (
+            <div className="tooltip-thumbnail">
+              <img src={`/api/destinations/${dest.id}/image?v=${new Date(dest.updated_at).getTime() || Date.now()}`} alt="" />
+            </div>
+          )}
           <strong>{dest.name}</strong>
+          {dest.brief_description && (
+            <p>{dest.brief_description}</p>
+          )}
           {isEditMode && (
             <p className="edit-coords">
               {dest.latitude.toFixed(6)}, {dest.longitude.toFixed(6)}
             </p>
-          )}
-          {!isEditMode && dest.brief_description && (
-            <p>{dest.brief_description}</p>
           )}
         </div>
       </Tooltip>
@@ -375,7 +343,7 @@ const DEFAULT_NPS_MAP_BOUNDS = [
   [41.4226, -81.4706]   // Northeast corner
 ];
 
-// Style functions for GeoJSON layers
+// Style for park boundary
 const boundaryStyle = {
   color: '#2d5016',
   weight: 3,
@@ -384,42 +352,76 @@ const boundaryStyle = {
   dashArray: '5, 5'
 };
 
-const trailStyle = (feature) => ({
-  color: '#8B4513',  // Brown for trails
-  weight: 2,
-  opacity: 0.8
-});
+// Default icon type IDs for initializing the filter (before config loads)
+const DEFAULT_ICON_TYPES = new Set(['visitor-center', 'waterfall', 'trail', 'historic', 'bridge', 'train', 'nature', 'skiing', 'biking', 'picnic', 'camping', 'music', 'default']);
 
-const riverStyle = {
-  color: '#1E90FF',  // Blue for river
-  weight: 4,
-  opacity: 0.9
-};
-
-// All icon type IDs for initializing the filter
-const ALL_ICON_TYPES = new Set(['visitor-center', 'waterfall', 'trail', 'historic', 'bridge', 'train', 'nature', 'skiing', 'biking', 'picnic', 'camping', 'music', 'default']);
-
-function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, onDestinationUpdate, editMode, activeTab, onDestinationCreate, previewCoords, onPreviewCoordsChange, newPOI, onStartNewPOI }) {
+function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, onDestinationUpdate, editMode, activeTab, onDestinationCreate, previewCoords, onPreviewCoordsChange, newPOI, onStartNewPOI, linearFeatures, selectedLinearFeature, onSelectLinearFeature }) {
   const [showMapOverlay, setShowMapOverlay] = useState(false);
   const [showVectorLayers, setShowVectorLayers] = useState(true);
   const [showAdmin, setShowAdmin] = useState(false);
   const [mapBounds, setMapBounds] = useState(DEFAULT_NPS_MAP_BOUNDS);
   const [overlayOpacity, setOverlayOpacity] = useState(1.0);
-  const [visibleTypes, setVisibleTypes] = useState(new Set(ALL_ICON_TYPES));
+  const [visibleTypes, setVisibleTypes] = useState(new Set(DEFAULT_ICON_TYPES));
+
+  // Icon configuration from database
+  const [iconConfig, setIconConfig] = useState([]);
+
+  // Fetch icon configuration on mount and when switching tabs
+  // This ensures icons show correctly on initial load and when new icons are created
+  useEffect(() => {
+    if (activeTab === 'view' || activeTab === 'explore' || activeTab === 'edit') {
+      fetch('/api/admin/icons')
+        .then(res => res.json())
+        .then(data => {
+          setIconConfig(data);
+          // Update visible types to include all enabled icons
+          const allTypes = new Set(data.filter(i => i.enabled !== false).map(i => i.name));
+          if (!allTypes.has('default')) allTypes.add('default');
+          setVisibleTypes(prev => {
+            // Merge new icons into visible set (keep user's filter choices)
+            const merged = new Set(prev);
+            allTypes.forEach(t => {
+              if (!iconConfig.find(i => i.name === t)) {
+                // New icon - add to visible set
+                merged.add(t);
+              }
+            });
+            return merged;
+          });
+        })
+        .catch(err => console.error('Failed to load icon config:', err));
+    }
+  }, [activeTab]);
+
+  // Memoize Leaflet icons created from config
+  const icons = useMemo(() => createIconsFromConfig(iconConfig), [iconConfig]);
+
+  // Memoize the set of all icon type IDs for filter reset
+  const allIconTypes = useMemo(() => {
+    if (iconConfig.length === 0) return DEFAULT_ICON_TYPES;
+    const types = new Set(iconConfig.filter(i => i.enabled !== false).map(i => i.name));
+    if (!types.has('default')) types.add('default');
+    return types;
+  }, [iconConfig]);
+
+  // Helper to get icon type for a destination
+  const getDestinationIconType = useCallback((dest) => {
+    if (iconConfig.length === 0) return 'default';
+    return getDestinationIconTypeFromConfig(dest, iconConfig);
+  }, [iconConfig]);
+
+  // Helper to get Leaflet icon for a destination
+  const getDestinationIcon = useCallback((dest) => {
+    const iconType = getDestinationIconType(dest);
+    return icons[iconType] || icons['default'] || defaultIcon;
+  }, [icons, getDestinationIconType]);
 
   // Admin edit mode state - editMode is passed from parent
   const [pendingUpdate, setPendingUpdate] = useState(null);
   const [saving, setSaving] = useState(false);
 
-  // Create POI mode state
-  const [createMode, setCreateMode] = useState(false);
-  const [showNewPOIForm, setShowNewPOIForm] = useState(false);
-  const [newPOICoords, setNewPOICoords] = useState(null);
-
-  // GeoJSON layer data
+  // GeoJSON layer data (boundary only - trails/rivers come from linearFeatures prop)
   const [boundary, setBoundary] = useState(null);
-  const [trails, setTrails] = useState(null);
-  const [river, setRiver] = useState(null);
 
   // Filter handlers
   const handleToggleType = (typeId) => {
@@ -434,7 +436,7 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
     });
   };
 
-  const handleShowAll = () => setVisibleTypes(new Set(ALL_ICON_TYPES));
+  const handleShowAll = () => setVisibleTypes(new Set(allIconTypes));
   const handleHideAll = () => setVisibleTypes(new Set());
 
   // Handle marker drag end
@@ -487,50 +489,51 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
     setPendingUpdate(null);
   };
 
-  // Handle map click to create new POI
-  const handleMapClick = (coords) => {
-    setNewPOICoords(coords);
-    setShowNewPOIForm(true);
-    setCreateMode(false); // Turn off create mode after click
-  };
-
-  // Open create POI form (manual or with coords)
-  const handleOpenCreatePOI = (coords) => {
-    setNewPOICoords(coords);
-    setShowNewPOIForm(true);
-  };
-
-  // Handle new POI creation
-  const handlePOICreated = (newDest) => {
-    if (onDestinationCreate) {
-      onDestinationCreate(newDest);
-    }
-    setShowNewPOIForm(false);
-    setNewPOICoords(null);
-  };
-
-  // Load GeoJSON data
+  // Load GeoJSON data (boundary only - trails/rivers come from database)
   useEffect(() => {
     fetch('/data/cvnp-boundary.geojson')
       .then(res => res.json())
       .then(data => setBoundary(data))
       .catch(err => console.error('Failed to load boundary:', err));
-
-    fetch('/data/cvnp-trails.geojson')
-      .then(res => res.json())
-      .then(data => setTrails(data))
-      .catch(err => console.error('Failed to load trails:', err));
-
-    fetch('/data/cvnp-river.geojson')
-      .then(res => res.json())
-      .then(data => setRiver(data))
-      .catch(err => console.error('Failed to load river:', err));
   }, []);
+
+  // Handle linear feature click (trail or river)
+  const handleLinearFeatureClick = (feature) => {
+    if (onSelectLinearFeature) {
+      onSelectLinearFeature(feature);
+    }
+  };
+
+  // Style functions for linear features (trails and rivers)
+  const getLinearFeatureStyle = useCallback((feature, isSelected) => {
+    // Use thicker lines for easier clicking (weight 6 normal, 8 selected)
+    const baseStyle = {
+      weight: isSelected ? 8 : 6,
+      opacity: isSelected ? 1 : 0.8
+    };
+
+    if (feature.feature_type === 'river') {
+      return {
+        ...baseStyle,
+        color: isSelected ? '#0066CC' : '#1E90FF'
+      };
+    } else {
+      // trail
+      return {
+        ...baseStyle,
+        color: isSelected ? '#5D3A00' : '#8B4513'
+      };
+    }
+  }, []);
+
+  // GeoJSON key to force re-render when selection changes
+  const linearFeaturesKey = useMemo(() => {
+    return `linear-${selectedLinearFeature?.id || 'none'}`;
+  }, [selectedLinearFeature]);
 
   return (
     <div className="map-container">
-      {editMode && <div className="edit-mode-banner">Edit Mode: Select a marker to drag and edit. Click Save to apply changes.</div>}
-      {createMode && <div className="create-mode-banner">Create Mode: Click on map to add new POI</div>}
+      {editMode && <div className="edit-mode-banner">Edit Mode: Click marker or trail to select and edit in sidebar.</div>}
       <MapContainer
         center={PARK_CENTER}
         zoom={DEFAULT_ZOOM}
@@ -552,19 +555,58 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
           />
         )}
 
-        {/* Vector layers - boundary, trails, river */}
-        {showVectorLayers && (
-          <>
-            {boundary && <GeoJSON data={boundary} style={boundaryStyle} />}
-            {river && <GeoJSON data={river} style={riverStyle} />}
-            {trails && <GeoJSON data={trails} style={trailStyle} />}
-          </>
+        {/* Vector layers - boundary (static) */}
+        {showVectorLayers && boundary && (
+          <GeoJSON data={boundary} style={boundaryStyle} />
         )}
+
+        {/* Clickable linear features (trails and rivers from database) */}
+        {showVectorLayers && linearFeatures && linearFeatures.map(feature => {
+          const isSelected = selectedLinearFeature?.id === feature.id;
+          const geojsonData = {
+            type: 'Feature',
+            properties: { id: feature.id, name: feature.name },
+            geometry: feature.geometry
+          };
+
+          return (
+            <GeoJSON
+              key={`linear-${feature.id}-${isSelected}`}
+              data={geojsonData}
+              style={() => getLinearFeatureStyle(feature, isSelected)}
+              onEachFeature={(geoFeature, layer) => {
+                // Add click handler
+                layer.on('click', () => handleLinearFeatureClick(feature));
+
+                // Build rich tooltip content (similar to destination tooltips)
+                const hasImage = feature.image_mime_type;
+                const imageUrl = hasImage ? `/api/linear-features/${feature.id}/image?v=${new Date(feature.updated_at).getTime() || Date.now()}` : null;
+
+                let tooltipHtml = '<div class="tooltip-content">';
+                if (hasImage) {
+                  tooltipHtml += `<div class="tooltip-thumbnail"><img src="${imageUrl}" alt="" /></div>`;
+                }
+                tooltipHtml += `<strong>${feature.name}</strong>`;
+                if (feature.brief_description) {
+                  tooltipHtml += `<p>${feature.brief_description}</p>`;
+                }
+                if (feature.length_miles) {
+                  tooltipHtml += `<p class="trail-info">${feature.length_miles} miles${feature.difficulty ? ' • ' + feature.difficulty : ''}</p>`;
+                }
+                tooltipHtml += '</div>';
+
+                layer.bindTooltip(tooltipHtml, {
+                  permanent: false,
+                  direction: 'auto',
+                  className: 'destination-tooltip'
+                });
+              }}
+            />
+          );
+        })}
 
         <MapUpdater selectedDestination={selectedDestination} />
         <MapClickHandler
-          createMode={createMode && isAdmin}
-          onMapClick={handleMapClick}
           isAdmin={isAdmin}
           onRightClick={onStartNewPOI}
         />
@@ -578,7 +620,7 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
               latitude: previewCoords.lat,
               longitude: previewCoords.lng
             }}
-            icon={icons[newPOI.icon_type] || icons['default']}
+            icon={getDestinationIcon(newPOI)}
             isSelected={true}
             isEditMode={true}
             onSelect={() => {}}
@@ -586,7 +628,8 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
           />
         )}
 
-        {destinations.map((dest) => {
+        {/* Only render markers after icon config is loaded to prevent flash */}
+        {iconConfig.length > 0 && destinations.map((dest) => {
           if (!dest.latitude || !dest.longitude) return null;
 
           const iconType = getDestinationIconType(dest);
@@ -632,9 +675,7 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
         onShowAll={handleShowAll}
         onHideAll={handleHideAll}
         activeTab={activeTab}
-        createMode={createMode}
-        onToggleCreateMode={setCreateMode}
-        onCreatePOI={handleOpenCreatePOI}
+        iconConfig={iconConfig}
       />
       {showAdmin && (
         <MapAdmin
@@ -658,16 +699,6 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
           onConfirm={handleConfirmUpdate}
           onCancel={handleCancelUpdate}
           saving={saving}
-        />
-      )}
-      {showNewPOIForm && (
-        <NewPOIForm
-          onClose={() => {
-            setShowNewPOIForm(false);
-            setNewPOICoords(null);
-          }}
-          onCreate={handlePOICreated}
-          initialCoords={newPOICoords}
         />
       )}
     </div>

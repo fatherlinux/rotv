@@ -285,3 +285,100 @@ export async function testApiKey(pool) {
 
   return text;
 }
+
+// Example SVGs for icon generation prompt
+const EXAMPLE_SVGS = `
+Example 1 - Waterfall (blue background, water flowing):
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <circle cx="16" cy="16" r="15" fill="#0288d1" stroke="white" stroke-width="2"/>
+  <path d="M12 8 L12 18 Q12 22 16 22 Q20 22 20 18 L20 8" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M10 24 Q16 20 22 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"/>
+</svg>
+
+Example 2 - Trail/Hiking (brown background, person hiking):
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <circle cx="16" cy="16" r="15" fill="#8B4513" stroke="white" stroke-width="2"/>
+  <circle cx="16" cy="9" r="3" fill="white"/>
+  <path d="M16 12 L16 18 M12 24 L16 18 L20 24 M13 15 L19 15" stroke="white" stroke-width="2" stroke-linecap="round" fill="none"/>
+</svg>
+
+Example 3 - Historic Building (orange background, house shape):
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <circle cx="16" cy="16" r="15" fill="#e65100" stroke="white" stroke-width="2"/>
+  <path d="M10 24 L10 14 L16 8 L22 14 L22 24 Z" fill="none" stroke="white" stroke-width="2"/>
+  <rect x="14" y="18" width="4" height="6" fill="white"/>
+</svg>
+`;
+
+/**
+ * Generate an SVG icon using Gemini AI
+ * @param {object} pool - Database pool
+ * @param {string} description - Description of what the icon should depict
+ * @param {string} color - Hex color for the background circle (e.g., "#0288d1")
+ * @returns {Promise<string>} - Generated SVG content
+ */
+export async function generateIconSvg(pool, description, color) {
+  const genAI = await createGeminiClient(pool);
+
+  // Don't use Google Search for icon generation - we want creative output
+  const model = genAI.getGenerativeModel({
+    model: 'gemini-2.0-flash'
+  });
+
+  const prompt = `You are an icon designer. Generate a simple, minimal SVG map marker icon.
+
+STRICT REQUIREMENTS:
+- ViewBox: 0 0 32 32
+- Background: A circle with cx="16" cy="16" r="15" fill="${color}" stroke="white" stroke-width="2"
+- Icon elements: White stroked paths on top of the circle, stroke-width="2" or "2.5"
+- Style: Simple, recognizable from a distance, minimal detail
+- Keep it very simple - just 2-4 path/shape elements max for the icon itself
+- Use stroke="white" and fill="none" for most paths, or fill="white" for solid shapes
+- Icon must fit INSIDE the circle (stay within the 6-26 coordinate range)
+- Output: ONLY valid SVG code, no markdown, no explanation, no extra text
+
+ICON TO CREATE: ${description}
+
+STYLE EXAMPLES (follow this exact format and simplicity level):
+${EXAMPLE_SVGS}
+
+Generate ONLY the SVG code now, starting with <svg and ending with </svg>:`;
+
+  console.log(`Generating icon SVG for: ${description} (color: ${color})`);
+
+  const result = await model.generateContent(prompt);
+  const response = result.response;
+  let text = response.text();
+
+  // Clean up the response - extract just the SVG
+  text = text.trim();
+
+  // Remove markdown code blocks if present
+  const svgMatch = text.match(/```(?:svg|xml)?\s*([\s\S]*?)```/);
+  if (svgMatch) {
+    text = svgMatch[1].trim();
+  }
+
+  // Find the SVG tag
+  const svgStart = text.indexOf('<svg');
+  const svgEnd = text.lastIndexOf('</svg>');
+
+  if (svgStart === -1 || svgEnd === -1) {
+    throw new Error('AI did not return valid SVG code. Please try again.');
+  }
+
+  text = text.substring(svgStart, svgEnd + 6); // +6 for </svg>
+
+  // Basic validation - check it has the required structure
+  if (!text.includes('viewBox="0 0 32 32"') && !text.includes("viewBox='0 0 32 32'")) {
+    // Try to fix missing viewBox
+    text = text.replace('<svg', '<svg viewBox="0 0 32 32"');
+  }
+
+  // Ensure xmlns is present
+  if (!text.includes('xmlns=')) {
+    text = text.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+  }
+
+  return text;
+}

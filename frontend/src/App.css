@@ -218,7 +218,8 @@ body {
 
 /* Hover Tooltip */
 .destination-tooltip {
-  max-width: 280px;
+  min-width: 350px;
+  max-width: 450px;
   white-space: normal;
   word-wrap: break-word;
 }
@@ -228,9 +229,10 @@ body {
 }
 
 .tooltip-content {
-  padding: 0.5rem 0.75rem;
+  padding: 0.75rem 1rem;
   white-space: normal;
   word-wrap: break-word;
+  min-width: 330px;
 }
 
 .tooltip-content strong {
@@ -247,6 +249,29 @@ body {
   line-height: 1.4;
 }
 
+.tooltip-content p.trail-info {
+  font-size: 0.75rem;
+  color: #8B4513;
+  margin-top: 0.25rem;
+  font-weight: 500;
+}
+
+/* Tooltip thumbnail image */
+.tooltip-thumbnail {
+  width: 100%;
+  height: 120px;
+  margin: -0.75rem -1rem 0.75rem -1rem;
+  width: calc(100% + 2rem);
+  overflow: hidden;
+  border-radius: 6px 6px 0 0;
+}
+
+.tooltip-thumbnail img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 /* Leaflet tooltip overrides */
 .leaflet-tooltip {
   background: white;
@@ -255,7 +280,8 @@ body {
   box-shadow: 0 3px 12px rgba(0,0,0,0.2);
   padding: 0;
   white-space: normal;
-  max-width: 280px;
+  min-width: 350px;
+  max-width: 450px;
 }
 
 .leaflet-tooltip-top:before {
@@ -352,6 +378,8 @@ body {
 .sidebar-image {
   width: 100%;
   height: 200px;
+  min-height: 200px;
+  flex-shrink: 0;
   overflow: hidden;
   background: #f5f5f5;
 }
@@ -1603,15 +1631,6 @@ body {
 
 .edit-section.half {
   flex: 1;
-}
-
-.image-preview {
-  margin-top: 0.5rem;
-  max-width: 100%;
-  max-height: 120px;
-  object-fit: cover;
-  border-radius: 4px;
-  border: 1px solid #ddd;
 }
 
 .icon-type-selector {
@@ -3868,3 +3887,959 @@ body {
   color: #666;
   font-style: italic;
 }
+
+/* Icons Settings */
+.icons-settings {
+  margin-top: 1rem;
+}
+
+.icons-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.icons-toolbar .sync-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.icons-toolbar .sync-btn {
+  padding: 0.5rem 1rem;
+  background: #f0f0f0;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background 0.2s ease;
+}
+
+.icons-toolbar .sync-btn:hover:not(:disabled) {
+  background: #e0e0e0;
+}
+
+.icons-toolbar .sync-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.icons-list {
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.icon-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  border-bottom: 1px solid #e0e0e0;
+  background: white;
+  cursor: grab;
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+.icon-item:last-child {
+  border-bottom: none;
+}
+
+.icon-item:nth-child(even) {
+  background: #f9f9f9;
+}
+
+.icon-item:hover {
+  background: #f0f7eb;
+}
+
+.icon-item.dragging {
+  opacity: 0.5;
+  background: #e8f5e9;
+  cursor: grabbing;
+}
+
+.icon-item.drag-over {
+  background: #c8e6c9;
+  border-top: 2px solid #4a7c23;
+  margin-top: -2px;
+}
+
+.icon-item.disabled {
+  opacity: 0.6;
+  background: #f5f5f5;
+}
+
+.icon-drag-handle {
+  color: #999;
+  font-size: 1rem;
+  cursor: grab;
+  user-select: none;
+  padding: 0.25rem;
+  letter-spacing: -2px;
+  align-self: center;
+}
+
+.icon-drag-handle:hover {
+  color: #666;
+}
+
+.icon-preview-container {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f0f0f0;
+  border-radius: 6px;
+}
+
+.icon-preview {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+}
+
+.icon-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.icon-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.icon-label {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: #333;
+}
+
+.icon-name {
+  font-size: 0.8rem;
+  color: #888;
+}
+
+.icon-keywords,
+.icon-activities {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.25rem;
+}
+
+.keywords-label,
+.activities-label {
+  font-size: 0.75rem;
+  color: #666;
+  font-weight: 500;
+}
+
+.keyword-chip,
+.activity-chip {
+  display: inline-block;
+  padding: 0.1rem 0.4rem;
+  background: #e3f2fd;
+  color: #1565c0;
+  border-radius: 3px;
+  font-size: 0.75rem;
+}
+
+.activity-chip {
+  background: #fff3e0;
+  color: #e65100;
+}
+
+.icon-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.icon-actions button {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8rem;
+  border: 1px solid #ddd;
+  background: white;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.icon-actions button:hover {
+  background: #f0f0f0;
+}
+
+.icon-actions .delete-btn-small {
+  color: #c62828;
+  border-color: #ef9a9a;
+}
+
+.icon-actions .delete-btn-small:hover {
+  background: #ffebee;
+}
+
+/* Toggle switch */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 22px;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #ccc;
+  transition: 0.3s;
+  border-radius: 22px;
+}
+
+.toggle-slider:before {
+  position: absolute;
+  content: "";
+  height: 16px;
+  width: 16px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: 0.3s;
+  border-radius: 50%;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  background-color: #4a7c23;
+}
+
+.toggle-switch input:checked + .toggle-slider:before {
+  transform: translateX(18px);
+}
+
+/* Icon Edit Form */
+.icon-edit {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.icon-edit-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+
+.icon-edit-row .icon-preview {
+  width: 36px;
+  height: 36px;
+  padding: 4px;
+  background: #f0f0f0;
+  border-radius: 6px;
+}
+
+.icon-edit-fields {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.icon-edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.icon-edit-field.full-width {
+  width: 100%;
+}
+
+.icon-edit-field label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #555;
+}
+
+.icon-edit-field input[type="text"] {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 0.9rem;
+}
+
+.icon-edit-field input[type="text"]:focus {
+  outline: none;
+  border-color: #4a7c23;
+}
+
+.icon-edit-field .field-hint {
+  font-size: 0.7rem;
+  color: #888;
+  margin: 0;
+}
+
+.icon-edit-field .checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.icon-edit-field .checkbox-label input {
+  width: auto;
+}
+
+.icon-edit-buttons {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.icon-edit-buttons button {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.85rem;
+  border: 1px solid #ddd;
+  background: white;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.icon-edit-buttons button:first-child {
+  background: #4a7c23;
+  color: white;
+  border-color: #4a7c23;
+}
+
+.icon-edit-buttons button:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.no-icons {
+  padding: 1rem;
+  text-align: center;
+  color: #666;
+  font-style: italic;
+}
+
+.sync-message {
+  padding: 0.75rem 1rem;
+  border-radius: 4px;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+
+.sync-message.success {
+  background: #e8f5e9;
+  color: #2e7d32;
+  border: 1px solid #a5d6a7;
+}
+
+.sync-message.error {
+  background: #ffebee;
+  color: #c62828;
+  border: 1px solid #ef9a9a;
+}
+
+/* Generate New Icon Button */
+.generate-icon-btn {
+  padding: 0.5rem 1rem;
+  background: #4a7c23;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.generate-icon-btn:hover {
+  background: #2d5016;
+}
+
+/* Icon Generator Modal */
+.icon-generator-modal {
+  background: white;
+  border-radius: 12px;
+  width: 95%;
+  max-width: 700px;
+  max-height: 90vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+.icon-generator-modal .modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid #e0e0e0;
+  background: #f9f9f9;
+}
+
+.icon-generator-modal .modal-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  color: #333;
+}
+
+.icon-generator-modal .modal-close {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  color: #666;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.icon-generator-modal .modal-close:hover {
+  color: #333;
+}
+
+.icon-generator-modal .modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.5rem;
+}
+
+.icon-generator-modal .modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding: 1rem 1.5rem;
+  border-top: 1px solid #e0e0e0;
+  background: #f9f9f9;
+}
+
+.icon-generator-modal .modal-footer button {
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 1px solid #ddd;
+  background: white;
+}
+
+.icon-generator-modal .modal-footer button:hover:not(:disabled) {
+  background: #f0f0f0;
+}
+
+.icon-generator-modal .modal-footer button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.icon-generator-modal .modal-footer .save-btn {
+  background: #4a7c23;
+  color: white;
+  border-color: #4a7c23;
+}
+
+.icon-generator-modal .modal-footer .save-btn:hover:not(:disabled) {
+  background: #2d5016;
+}
+
+/* Generator Layout */
+.generator-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+
+@media (max-width: 600px) {
+  .generator-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.generator-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.generator-form .form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.generator-form .form-group label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #333;
+}
+
+.generator-form .form-group input[type="text"],
+.generator-form .form-group textarea {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  font-family: inherit;
+}
+
+.generator-form .form-group input[type="text"]:focus,
+.generator-form .form-group textarea:focus {
+  outline: none;
+  border-color: #4a7c23;
+}
+
+.generator-form .form-group textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+/* Color Palette */
+.color-palette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.color-swatch {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 3px solid transparent;
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.color-swatch:hover {
+  transform: scale(1.1);
+}
+
+.color-swatch.selected {
+  border-color: #333;
+  box-shadow: 0 0 0 2px white, 0 0 0 4px #333;
+}
+
+.custom-color {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.custom-color label {
+  font-size: 0.8rem;
+  color: #666;
+}
+
+.custom-color input {
+  width: 90px;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-family: monospace;
+}
+
+.custom-color .color-preview {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid #ddd;
+}
+
+/* Generator Actions */
+.generator-actions {
+  margin-top: 0.5rem;
+}
+
+.generate-btn {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  background: #0288d1;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.generate-btn:hover:not(:disabled) {
+  background: #0277bd;
+}
+
+.generate-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Generator Preview */
+.generator-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.generator-preview > label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #333;
+}
+
+.preview-container {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f5f5f5;
+  border: 2px dashed #ddd;
+  border-radius: 8px;
+  min-height: 180px;
+  padding: 1rem;
+}
+
+.preview-placeholder {
+  color: #999;
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.svg-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.svg-preview svg {
+  width: 128px;
+  height: 128px;
+}
+
+.preview-sizes {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  background: #f9f9f9;
+  border-radius: 6px;
+}
+
+.size-label {
+  font-size: 0.8rem;
+  color: #666;
+}
+
+.preview-sizes .svg-preview.size-32 svg {
+  width: 32px;
+  height: 32px;
+}
+
+.preview-sizes .svg-preview.size-24 svg {
+  width: 24px;
+  height: 24px;
+}
+
+.preview-sizes .svg-preview.size-16 svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Legend icon for generated icons */
+.legend-icon-svg {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.legend-icon-svg svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* ============================================
+   Image Uploader Component
+   ============================================ */
+
+.image-uploader {
+  margin-bottom: 0;
+}
+
+.image-uploader > label {
+  display: none; /* Hide label when at top of sidebar */
+}
+
+.image-upload-error {
+  background: #fee;
+  color: #c00;
+  padding: 0.5rem;
+  border-radius: 4px;
+  margin-bottom: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.image-drop-zone {
+  border: 2px dashed #ccc;
+  border-radius: 0;
+  padding: 2rem;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: #f0f0f0;
+  min-height: 180px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.image-drop-zone:hover {
+  border-color: #2d5016;
+  background: #f5f8f2;
+}
+
+.image-drop-zone.drag-active {
+  border-color: #4a7c23;
+  background: #e8f5e0;
+  border-style: solid;
+}
+
+.image-drop-zone.uploading {
+  cursor: default;
+  border-color: #ccc;
+}
+
+.drop-zone-icon {
+  color: #888;
+  margin-bottom: 0.75rem;
+}
+
+.drop-zone-icon svg {
+  opacity: 0.6;
+}
+
+.image-drop-zone:hover .drop-zone-icon svg {
+  opacity: 0.8;
+}
+
+.drop-zone-text {
+  font-size: 0.95rem;
+  color: #555;
+  margin-bottom: 0.5rem;
+  line-height: 1.4;
+}
+
+.drop-zone-hint {
+  font-size: 0.8rem;
+  color: #888;
+}
+
+.upload-progress {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  color: #555;
+}
+
+.upload-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid #ddd;
+  border-top-color: #4a7c23;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.image-preview-container {
+  position: relative;
+  border-radius: 0;
+  overflow: hidden;
+  background: #f0f0f0;
+  height: 200px;
+}
+
+.image-preview {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.image-load-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #888;
+  font-size: 0.9rem;
+}
+
+.image-preview-actions {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  background: linear-gradient(transparent, rgba(0,0,0,0.6));
+}
+
+.drive-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255,255,255,0.9);
+  color: #4285f4;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  margin-right: auto;
+}
+
+.drive-badge svg {
+  color: #4285f4;
+}
+
+.image-change-btn,
+.image-delete-btn {
+  padding: 0.35rem 0.75rem;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.image-change-btn {
+  background: rgba(255,255,255,0.9);
+  color: #333;
+}
+
+.image-change-btn:hover {
+  background: #fff;
+}
+
+.image-delete-btn {
+  background: rgba(200,50,50,0.85);
+  color: #fff;
+}
+
+.image-delete-btn:hover {
+  background: #c00;
+}
+
+.image-change-btn:disabled,
+.image-delete-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.edit-hint {
+  display: block;
+  font-size: 0.8rem;
+  color: #888;
+  margin-top: 0.25rem;
+  font-style: italic;
+}
+
+/* ============================================
+   Linear Features (Trails & Rivers)
+   ============================================ */
+
+/* Feature type badges */
+.feature-type-badge {
+  display: inline-block;
+  padding: 0.25rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.feature-type-badge.trail {
+  background: #8B4513;
+  color: white;
+}
+
+.feature-type-badge.river {
+  background: #1E90FF;
+  color: white;
+}
+
+/* Difficulty badges */
+.difficulty-badge {
+  display: inline-block;
+  padding: 0.2rem 0.5rem;
+  border-radius: 3px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+.difficulty-badge.easy {
+  background: #c8e6c9;
+  color: #2e7d32;
+}
+
+.difficulty-badge.moderate {
+  background: #fff3e0;
+  color: #e65100;
+}
+
+.difficulty-badge.difficult {
+  background: #ffebee;
+  color: #c62828;
+}
+
+/* Linear feature tooltip on map */
+.linear-feature-tooltip {
+  background: rgba(0, 0, 0, 0.85) !important;
+  color: white !important;
+  border: none !important;
+  border-radius: 4px !important;
+  padding: 0.5rem 0.75rem !important;
+  font-size: 0.85rem !important;
+  font-weight: 500 !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3) !important;
+}
+
+.linear-feature-tooltip::before {
+  display: none !important;
+}
+
+/* Trail/river hover effect on map (applied via Leaflet) */
+.leaflet-interactive.trail-hover,
+.leaflet-interactive.river-hover {
+  cursor: pointer;
+}
+
+/* Trail selection highlighting handled via GeoJSON style prop */

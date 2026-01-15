@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import ImageUploader from './ImageUploader';
 
 function getOwnerClass(owner) {
   if (!owner) return 'owner-other';
@@ -49,17 +50,28 @@ function EditableCellSignal({ level, onChange }) {
   );
 }
 
-// Read-only view component
-function ReadOnlyView({ destination }) {
+// Read-only view component - works for both destinations and linear features
+function ReadOnlyView({ destination, isLinearFeature }) {
+  // Cache-bust image URL using updated_at timestamp
+  const imageEndpoint = isLinearFeature ? 'linear-features' : 'destinations';
+  const imageUrl = destination.image_mime_type
+    ? `/api/${imageEndpoint}/${destination.id}/image?v=${new Date(destination.updated_at).getTime() || Date.now()}`
+    : null;
+
+  // Determine placeholder icon based on type
+  const placeholderIcon = isLinearFeature
+    ? (destination.feature_type === 'river' ? '🌊' : '🥾')
+    : '🏞️';
+
   return (
     <>
-      {/* Image section */}
+      {/* Image section - URL computed from ID */}
       <div className="sidebar-image">
-        {destination.image_url ? (
-          <img src={destination.image_url} alt={destination.name} />
+        {imageUrl ? (
+          <img src={imageUrl} alt={destination.name} />
         ) : (
           <div className="image-placeholder">
-            <span className="placeholder-icon">🏞️</span>
+            <span className="placeholder-icon">{placeholderIcon}</span>
             <span className="placeholder-text">Image coming soon</span>
           </div>
         )}
@@ -67,6 +79,18 @@ function ReadOnlyView({ destination }) {
 
       <div className="sidebar-content">
         <div className="badges-row">
+          {/* Linear feature type badge */}
+          {isLinearFeature && (
+            <span className={`feature-type-badge ${destination.feature_type}`}>
+              {destination.feature_type === 'river' ? 'River/Waterway' : 'Trail'}
+            </span>
+          )}
+          {/* Difficulty badge for trails */}
+          {isLinearFeature && destination.difficulty && (
+            <span className={`difficulty-badge ${destination.difficulty.toLowerCase()}`}>
+              {destination.difficulty}
+            </span>
+          )}
           {destination.era && (
             <span className="era-badge-large">{destination.era}</span>
           )}
@@ -94,6 +118,13 @@ function ReadOnlyView({ destination }) {
         <div className="section">
           <h3>Visitor Information</h3>
           <div className="details-grid">
+            {/* Trail-specific: length */}
+            {isLinearFeature && destination.length_miles && (
+              <div className="detail-item">
+                <label>Length</label>
+                <span>{destination.length_miles} miles</span>
+              </div>
+            )}
             {destination.primary_activities && (
               <div className="detail-item">
                 <label>Activities</label>
@@ -121,7 +152,8 @@ function ReadOnlyView({ destination }) {
           </div>
         </div>
 
-        {destination.latitude && destination.longitude && (
+        {/* Location - only for point destinations, not linear features */}
+        {!isLinearFeature && destination.latitude && destination.longitude && (
           <div className="section">
             <h3>Location</h3>
             <p>{formatCoordinate(destination.latitude, 'lat')}, {formatCoordinate(destination.longitude, 'lng')}</p>
@@ -143,8 +175,8 @@ function ReadOnlyView({ destination }) {
   );
 }
 
-// Edit view component
-function EditView({ destination, editedData, setEditedData, onSave, onCancel, onDelete, saving, deleting, onPreviewCoordsChange, isNewPOI }) {
+// Edit view component - works for both destinations and linear features
+function EditView({ destination, editedData, setEditedData, onSave, onCancel, onDelete, saving, deleting, onPreviewCoordsChange, isNewPOI, onImageUpdate, isLinearFeature }) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [aiError, setAiError] = useState(null);
   const [researchSources, setResearchSources] = useState(null);
@@ -383,6 +415,36 @@ function EditView({ destination, editedData, setEditedData, onSave, onCancel, on
   return (
     <div className="edit-view-container">
       <div className="edit-view-scroll">
+      {/* Image section at top - matches view mode layout */}
+      {!isNewPOI && destination?.id ? (
+        <ImageUploader
+          destinationId={destination.id}
+          hasImage={!!editedData.image_mime_type}
+          onImageChange={(hasImage, driveFileId) => {
+            setEditedData(prev => ({
+              ...prev,
+              image_mime_type: hasImage ? 'image/jpeg' : null,
+              image_drive_file_id: driveFileId
+            }));
+            // Also update parent state so view mode shows the new image
+            if (onImageUpdate) {
+              onImageUpdate(hasImage, driveFileId);
+            }
+          }}
+          disabled={saving}
+          isLinearFeature={isLinearFeature}
+        />
+      ) : (
+        <div className="sidebar-image">
+          <div className="image-placeholder">
+            <span className="placeholder-icon">
+              {isLinearFeature ? (destination?.feature_type === 'river' ? '🌊' : '🥾') : '🏞️'}
+            </span>
+            <span className="placeholder-text">{isNewPOI ? 'Add image after creation' : 'No image'}</span>
+          </div>
+        </div>
+      )}
+
       {aiError && (
         <div className="ai-error-banner">
           <span>AI Error: {aiError}</span>
@@ -552,26 +614,69 @@ function EditView({ destination, editedData, setEditedData, onSave, onCancel, on
         </div>
       </div>
 
-      <div className="edit-row">
-        <div className="edit-section half">
-          <label>Latitude</label>
-          <input
-            type="number"
-            step="0.000001"
-            value={editedData.latitude || ''}
-            onChange={(e) => handleCoordChange('latitude', e.target.value)}
-          />
+      {/* Linear feature specific fields */}
+      {isLinearFeature && (
+        <>
+          <div className="edit-row">
+            <div className="edit-section half">
+              <label>Feature Type</label>
+              <select
+                value={editedData.feature_type || 'trail'}
+                onChange={(e) => handleChange('feature_type', e.target.value)}
+              >
+                <option value="trail">Trail</option>
+                <option value="river">River/Waterway</option>
+              </select>
+            </div>
+            <div className="edit-section half">
+              <label>Difficulty</label>
+              <select
+                value={editedData.difficulty || ''}
+                onChange={(e) => handleChange('difficulty', e.target.value)}
+              >
+                <option value="">Not specified</option>
+                <option value="Easy">Easy</option>
+                <option value="Moderate">Moderate</option>
+                <option value="Difficult">Difficult</option>
+              </select>
+            </div>
+          </div>
+          <div className="edit-section">
+            <label>Length (miles)</label>
+            <input
+              type="number"
+              step="0.1"
+              value={editedData.length_miles || ''}
+              onChange={(e) => handleChange('length_miles', e.target.value ? parseFloat(e.target.value) : null)}
+              placeholder="e.g., 2.5"
+            />
+          </div>
+        </>
+      )}
+
+      {/* Lat/long fields - only for point destinations */}
+      {!isLinearFeature && (
+        <div className="edit-row">
+          <div className="edit-section half">
+            <label>Latitude</label>
+            <input
+              type="number"
+              step="0.000001"
+              value={editedData.latitude || ''}
+              onChange={(e) => handleCoordChange('latitude', e.target.value)}
+            />
+          </div>
+          <div className="edit-section half">
+            <label>Longitude</label>
+            <input
+              type="number"
+              step="0.000001"
+              value={editedData.longitude || ''}
+              onChange={(e) => handleCoordChange('longitude', e.target.value)}
+            />
+          </div>
         </div>
-        <div className="edit-section half">
-          <label>Longitude</label>
-          <input
-            type="number"
-            step="0.000001"
-            value={editedData.longitude || ''}
-            onChange={(e) => handleCoordChange('longitude', e.target.value)}
-          />
-        </div>
-      </div>
+      )}
 
       <div className="edit-section">
         <label>More Info Link</label>
@@ -582,6 +687,7 @@ function EditView({ destination, editedData, setEditedData, onSave, onCancel, on
           placeholder="https://..."
         />
       </div>
+
       </div>
 
       <div className="edit-buttons-footer">
@@ -688,36 +794,40 @@ function EditView({ destination, editedData, setEditedData, onSave, onCancel, on
   );
 }
 
-function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinationUpdate, onDestinationDelete, onSaveNewPOI, onCancelNewPOI, previewCoords, onPreviewCoordsChange }) {
+function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinationUpdate, onDestinationDelete, onSaveNewPOI, onCancelNewPOI, previewCoords, onPreviewCoordsChange, linearFeature, onLinearFeatureUpdate, onLinearFeatureDelete }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editedData, setEditedData] = useState({});
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  // Reset edit state when destination changes
+  // Determine what we're displaying
+  const displayItem = linearFeature || destination;
+  const isLinearFeature = !!linearFeature;
+
+  // Reset edit state when selection changes
   useEffect(() => {
-    if (destination) {
-      setEditedData({ ...destination });
+    if (displayItem) {
+      setEditedData({ ...displayItem });
       // Auto-enter edit mode if admin and editMode is on, or if creating new POI
       setIsEditing((isAdmin && editMode) || isNewPOI);
     } else {
       setIsEditing(false);
     }
-  }, [destination, isAdmin, editMode, isNewPOI]);
+  }, [displayItem, isAdmin, editMode, isNewPOI]);
 
-  // Sync editedData coords when previewCoords changes (from map drag)
+  // Sync editedData coords when previewCoords changes (from map drag) - only for destinations
   useEffect(() => {
-    if (previewCoords && isEditing) {
+    if (previewCoords && isEditing && !isLinearFeature) {
       setEditedData(prev => ({
         ...prev,
         latitude: previewCoords.lat,
         longitude: previewCoords.lng
       }));
     }
-  }, [previewCoords, isEditing]);
+  }, [previewCoords, isEditing, isLinearFeature]);
 
-  const handleSave = async () => {
-    // Validate required fields
+  // Save handler for destinations
+  const handleSaveDestination = async () => {
     if (!editedData.name || !editedData.name.trim()) {
       alert('Name is required');
       return;
@@ -726,7 +836,6 @@ function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinat
     setSaving(true);
     try {
       if (isNewPOI) {
-        // Creating new POI
         const poiData = {
           ...editedData,
           latitude: previewCoords?.lat || editedData.latitude,
@@ -734,7 +843,6 @@ function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinat
         };
         await onSaveNewPOI(poiData);
       } else {
-        // Updating existing POI
         const response = await fetch(`/api/admin/destinations/${destination.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
@@ -760,16 +868,50 @@ function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinat
     }
   };
 
+  // Save handler for linear features
+  const handleSaveLinearFeature = async () => {
+    if (!editedData.name || !editedData.name.trim()) {
+      alert('Name is required');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const response = await fetch(`/api/admin/linear-features/${linearFeature.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(editedData)
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to save');
+      }
+
+      const updated = await response.json();
+      if (onLinearFeatureUpdate) {
+        onLinearFeatureUpdate(updated);
+      }
+      setIsEditing(false);
+    } catch (err) {
+      alert(`Error saving: ${err.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleCancel = () => {
     if (isNewPOI && onCancelNewPOI) {
       onCancelNewPOI();
     } else {
-      setEditedData({ ...destination });
+      setEditedData({ ...displayItem });
       setIsEditing(false);
     }
   };
 
-  const handleDelete = async () => {
+  // Delete handler for destinations
+  const handleDeleteDestination = async () => {
     setDeleting(true);
     try {
       const response = await fetch(`/api/admin/destinations/${destination.id}`, {
@@ -793,10 +935,76 @@ function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinat
     }
   };
 
-  if (!destination) {
+  // Delete handler for linear features
+  const handleDeleteLinearFeature = async () => {
+    setDeleting(true);
+    try {
+      const response = await fetch(`/api/admin/linear-features/${linearFeature.id}`, {
+        method: 'DELETE',
+        credentials: 'include'
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to delete');
+      }
+
+      if (onLinearFeatureDelete) {
+        onLinearFeatureDelete(linearFeature.id);
+      }
+      onClose();
+    } catch (err) {
+      alert(`Error deleting: ${err.message}`);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  if (!displayItem) {
     return <div className="sidebar" />;
   }
 
+  // Render linear feature view - use same components as destinations
+  if (isLinearFeature) {
+    return (
+      <div className={`sidebar open ${isEditing ? 'editing' : ''}`}>
+        <div className="sidebar-header">
+          <h2>{isEditing ? 'Edit: ' : ''}{linearFeature.name}</h2>
+          <div className="header-buttons">
+            <button className="close-btn" onClick={onClose}>&times;</button>
+          </div>
+        </div>
+
+        {isEditing ? (
+          <EditView
+            destination={linearFeature}
+            editedData={editedData}
+            setEditedData={setEditedData}
+            onSave={handleSaveLinearFeature}
+            onCancel={handleCancel}
+            onDelete={handleDeleteLinearFeature}
+            saving={saving}
+            deleting={deleting}
+            isNewPOI={false}
+            isLinearFeature={true}
+            onImageUpdate={(hasImage, driveFileId) => {
+              if (onLinearFeatureUpdate) {
+                onLinearFeatureUpdate({
+                  ...linearFeature,
+                  image_mime_type: hasImage ? 'image/jpeg' : null,
+                  image_drive_file_id: driveFileId
+                });
+              }
+            }}
+          />
+        ) : (
+          <ReadOnlyView destination={linearFeature} isLinearFeature={true} />
+        )}
+      </div>
+    );
+  }
+
+  // Render destination view
   return (
     <div className={`sidebar ${destination ? 'open' : ''} ${isEditing ? 'editing' : ''}`}>
       <div className="sidebar-header">
@@ -811,13 +1019,22 @@ function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinat
           destination={destination}
           editedData={editedData}
           setEditedData={setEditedData}
-          onSave={handleSave}
+          onSave={handleSaveDestination}
           onCancel={handleCancel}
-          onDelete={handleDelete}
+          onDelete={handleDeleteDestination}
           saving={saving}
           deleting={deleting}
           onPreviewCoordsChange={onPreviewCoordsChange}
           isNewPOI={isNewPOI}
+          onImageUpdate={(hasImage, driveFileId) => {
+            if (onDestinationUpdate) {
+              onDestinationUpdate({
+                ...destination,
+                image_mime_type: hasImage ? 'image/jpeg' : null,
+                image_drive_file_id: driveFileId
+              });
+            }
+          }}
         />
       ) : (
         <ReadOnlyView destination={destination} />

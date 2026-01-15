@@ -33,12 +33,17 @@ case "${1:-help}" in
     run)
         echo "Starting Roots of The Valley..."
         echo "PostgreSQL data will be stored in: $DATA_DIR"
+        # Set up permissions if directory is empty or newly created
+        if [ ! -f "$DATA_DIR/PG_VERSION" ]; then
+            echo "Setting up data directory permissions..."
+            podman unshare chown 1000:1000 "$DATA_DIR" 2>/dev/null || true
+            podman unshare chmod 700 "$DATA_DIR" 2>/dev/null || true
+        fi
         podman run -d \
             --name "$CONTAINER_NAME" \
-            --security-opt label=disable \
-            --userns=keep-id \
-            --network=host \
-            -v "$DATA_DIR:/data/pgdata:Z" \
+            --privileged \
+            -p 8080:8080 \
+            -v "$DATA_DIR:/data/pgdata" \
             $ENV_ARGS \
             "$IMAGE_NAME"
         echo "Application running at http://localhost:8080"
@@ -61,12 +66,17 @@ case "${1:-help}" in
 
     dev)
         echo "Running in development mode (foreground)..."
+        # Set up permissions if directory is empty or newly created
+        if [ ! -f "$DATA_DIR/PG_VERSION" ]; then
+            echo "Setting up data directory permissions..."
+            podman unshare chown 1000:1000 "$DATA_DIR" 2>/dev/null || true
+            podman unshare chmod 700 "$DATA_DIR" 2>/dev/null || true
+        fi
         podman run --rm -it \
             --name "$CONTAINER_NAME" \
-            --security-opt label=disable \
-            --userns=keep-id \
+            --privileged \
             -p 8080:8080 \
-            -v "$DATA_DIR:/data/pgdata:Z" \
+            -v "$DATA_DIR:/data/pgdata" \
             $ENV_ARGS \
             "$IMAGE_NAME"
         ;;
