@@ -14,13 +14,21 @@ FROM registry.access.redhat.com/ubi9/ubi:latest
 LABEL maintainer="fatherlinux"
 LABEL description="Roots of The Valley - Cuyahoga Valley National Park destination explorer"
 
-# Install PostgreSQL and Node.js
-RUN dnf install -y \
-    postgresql-server \
-    postgresql \
-    nodejs \
-    npm \
-    && dnf clean all
+# Install Node.js first
+RUN dnf install -y nodejs npm && dnf clean all
+
+# Add PostgreSQL official repository and install PostgreSQL 15
+RUN dnf install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-x86_64/pgdg-redhat-repo-latest.noarch.rpm && \
+    dnf -qy module disable postgresql && \
+    dnf install -y postgresql15-server postgresql15 && \
+    dnf clean all
+
+# Create symlinks for PostgreSQL commands
+RUN ln -s /usr/pgsql-15/bin/initdb /usr/local/bin/initdb && \
+    ln -s /usr/pgsql-15/bin/pg_ctl /usr/local/bin/pg_ctl && \
+    ln -s /usr/pgsql-15/bin/postgres /usr/local/bin/postgres && \
+    ln -s /usr/pgsql-15/bin/psql /usr/local/bin/psql && \
+    ln -s /usr/pgsql-15/bin/pg_isready /usr/local/bin/pg_isready
 
 # Create app user with specific UID for consistent bind mount permissions
 RUN useradd -u 1000 -m -s /bin/bash rotv
