@@ -68,8 +68,8 @@ app.use('/auth', authRoutes);
 // Mount admin routes
 app.use('/api/admin', createAdminRouter(pool));
 
-// Import trails and rivers from GeoJSON files
-async function importLinearFeaturesFromGeoJSON(client) {
+// Import trails and rivers from GeoJSON files into unified pois table
+async function importGeoJSONFeatures(client) {
   const staticPath = process.env.STATIC_PATH || path.join(__dirname, '../frontend/public');
   const dataPath = path.join(staticPath, 'data');
 
@@ -106,9 +106,9 @@ async function importLinearFeaturesFromGeoJSON(client) {
 
     for (const trail of consolidatedTrails) {
       await client.query(
-        `INSERT INTO linear_features (name, feature_type, geometry)
+        `INSERT INTO pois (name, poi_type, geometry)
          VALUES ($1, 'trail', $2)
-         ON CONFLICT (name, feature_type) DO NOTHING`,
+         ON CONFLICT (name) DO UPDATE SET geometry = EXCLUDED.geometry WHERE pois.poi_type = 'trail'`,
         [trail.name, JSON.stringify(trail.geometry)]
       );
     }
@@ -121,16 +121,16 @@ async function importLinearFeaturesFromGeoJSON(client) {
 
     for (const river of consolidatedRivers) {
       await client.query(
-        `INSERT INTO linear_features (name, feature_type, geometry)
+        `INSERT INTO pois (name, poi_type, geometry)
          VALUES ($1, 'river', $2)
-         ON CONFLICT (name, feature_type) DO NOTHING`,
+         ON CONFLICT (name) DO UPDATE SET geometry = EXCLUDED.geometry WHERE pois.poi_type = 'river'`,
         [river.name, JSON.stringify(river.geometry)]
       );
     }
     console.log(`Imported ${consolidatedRivers.length} rivers`);
 
   } catch (err) {
-    console.error('Error importing linear features:', err.message);
+    console.error('Error importing GeoJSON features:', err.message);
   }
 }
 
@@ -138,13 +138,24 @@ async function importLinearFeaturesFromGeoJSON(client) {
 async function initDatabase() {
   const client = await pool.connect();
   try {
-    // Destinations table
+    // Unified POIs table (replaces destinations and linear_features)
     await client.query(`
-      CREATE TABLE IF NOT EXISTS destinations (
+      CREATE TABLE IF NOT EXISTS pois (
         id SERIAL PRIMARY KEY,
-        name VARCHAR(255) NOT NULL,
-        latitude DECIMAL(10, 7),
-        longitude DECIMAL(10, 7),
+        name VARCHAR(255) NOT NULL UNIQUE,
+
+        -- POI type: 'point', 'trail', or 'river'
+        poi_type VARCHAR(50) NOT NULL DEFAULT 'point',
+
+        -- Point geometry (for point POIs)
+        latitude DECIMAL(10, 8),
+        longitude DECIMAL(11, 8),
+
+        -- Linear geometry (for trail/river POIs)
+        geometry JSONB,
+        geometry_drive_file_id VARCHAR(255),
+
+        -- Shared metadata fields
         property_owner VARCHAR(255),
         brief_description TEXT,
         era VARCHAR(255),
@@ -154,37 +165,91 @@ async function initDatabase() {
         pets VARCHAR(50),
         cell_signal INTEGER,
         more_info_link TEXT,
+
+        -- Trail-specific fields
+        length_miles DECIMAL(6, 2),
+        difficulty VARCHAR(50),
+
+        -- Image storage
+        image_data BYTEA,
+        image_mime_type VARCHAR(50),
+        image_drive_file_id VARCHAR(255),
+
+        -- Sync fields
+        locally_modified BOOLEAN DEFAULT FALSE,
+        deleted BOOLEAN DEFAULT FALSE,
+        synced BOOLEAN DEFAULT FALSE,
+
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(name)
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    // Add columns if they don't exist (for existing databases)
+    // Create index for faster lookups by type
     await client.query(`
-      ALTER TABLE destinations ADD COLUMN IF NOT EXISTS locally_modified BOOLEAN DEFAULT FALSE
-    `);
-    await client.query(`
-      ALTER TABLE destinations ADD COLUMN IF NOT EXISTS deleted BOOLEAN DEFAULT FALSE
-    `);
-    await client.query(`
-      ALTER TABLE destinations ADD COLUMN IF NOT EXISTS synced BOOLEAN DEFAULT FALSE
-    `);
-    // Remove deprecated columns (icons auto-determined, image URL computed from ID)
-    await client.query(`
-      ALTER TABLE destinations DROP COLUMN IF EXISTS icon_type
-    `);
-    await client.query(`
-      ALTER TABLE destinations DROP COLUMN IF EXISTS image_url
+      CREATE INDEX IF NOT EXISTS idx_pois_type ON pois(poi_type)
     `);
 
-    // Image storage columns - store actual image data in database for all users to access
-    await client.query(`
-      ALTER TABLE destinations ADD COLUMN IF NOT EXISTS image_data BYTEA
+    // Migrate data from old tables if they exist
+    const destTableExists = await client.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables WHERE table_name = 'destinations'
+      )
     `);
-    await client.query(`
-      ALTER TABLE destinations ADD COLUMN IF NOT EXISTS image_mime_type VARCHAR(50)
+
+    if (destTableExists.rows[0].exists) {
+      // Migrate destinations to pois table
+      const migrated = await client.query(`
+        INSERT INTO pois (name, poi_type, latitude, longitude, property_owner, brief_description,
+                          era, historical_description, primary_activities, surface, pets,
+                          cell_signal, more_info_link, image_data, image_mime_type, image_drive_file_id,
+                          locally_modified, deleted, synced, created_at, updated_at)
+        SELECT name, 'point', latitude, longitude, property_owner, brief_description,
+               era, historical_description, primary_activities, surface, pets,
+               cell_signal, more_info_link, image_data, image_mime_type, image_drive_file_id,
+               COALESCE(locally_modified, FALSE), COALESCE(deleted, FALSE), COALESCE(synced, FALSE),
+               created_at, updated_at
+        FROM destinations
+        WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+        ON CONFLICT (name) DO NOTHING
+        RETURNING id
+      `);
+      if (migrated.rowCount > 0) {
+        console.log(`Migrated ${migrated.rowCount} destinations to pois table`);
+      }
+    }
+
+    const linearTableExists = await client.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables WHERE table_name = 'linear_features'
+      )
     `);
+
+    if (linearTableExists.rows[0].exists) {
+      // Migrate linear_features to pois table
+      const migrated = await client.query(`
+        INSERT INTO pois (name, poi_type, geometry, property_owner, brief_description,
+                          era, historical_description, primary_activities, surface, pets,
+                          cell_signal, more_info_link, length_miles, difficulty,
+                          image_data, image_mime_type, image_drive_file_id,
+                          locally_modified, deleted, synced, created_at, updated_at)
+        SELECT name, feature_type, geometry, property_owner, brief_description,
+               era, historical_description, primary_activities, surface, pets,
+               cell_signal, more_info_link, length_miles, difficulty,
+               image_data, image_mime_type, image_drive_file_id,
+               COALESCE(locally_modified, FALSE), COALESCE(deleted, FALSE), COALESCE(synced, FALSE),
+               created_at, updated_at
+        FROM linear_features
+        ON CONFLICT (name) DO UPDATE SET
+          geometry = EXCLUDED.geometry,
+          poi_type = EXCLUDED.poi_type
+        WHERE pois.poi_type IN ('trail', 'river')
+        RETURNING id
+      `);
+      if (migrated.rowCount > 0) {
+        console.log(`Migrated ${migrated.rowCount} linear features to pois table`);
+      }
+    }
 
     // Sync queue table for async operations
     await client.query(`
@@ -386,35 +451,7 @@ async function initDatabase() {
       )
     `);
 
-    // Linear features table for trails and rivers (with GeoJSON geometry)
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS linear_features (
-        id SERIAL PRIMARY KEY,
-        name VARCHAR(255) NOT NULL,
-        feature_type VARCHAR(50) NOT NULL,
-        geometry JSONB NOT NULL,
-        property_owner VARCHAR(255),
-        brief_description TEXT,
-        era VARCHAR(255),
-        historical_description TEXT,
-        primary_activities TEXT,
-        surface VARCHAR(255),
-        pets VARCHAR(50),
-        cell_signal INTEGER,
-        more_info_link TEXT,
-        length_miles DECIMAL(6, 2),
-        difficulty VARCHAR(50),
-        image_data BYTEA,
-        image_mime_type VARCHAR(50),
-        image_drive_file_id VARCHAR(255),
-        locally_modified BOOLEAN DEFAULT FALSE,
-        deleted BOOLEAN DEFAULT FALSE,
-        synced BOOLEAN DEFAULT FALSE,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(name, feature_type)
-      )
-    `);
+    // Note: linear_features table is deprecated - data migrated to pois table above
 
     // Seed default icons if table is empty
     const iconCount = await client.query('SELECT COUNT(*) FROM icons');
@@ -444,11 +481,11 @@ async function initDatabase() {
       ALTER TABLE activities DROP COLUMN IF EXISTS icon
     `);
 
-    // Import trails and rivers from GeoJSON if table is empty
-    const linearCount = await client.query('SELECT COUNT(*) FROM linear_features');
+    // Import trails and rivers from GeoJSON if no linear features exist in pois table
+    const linearCount = await client.query(`SELECT COUNT(*) FROM pois WHERE poi_type IN ('trail', 'river')`);
     if (parseInt(linearCount.rows[0].count) === 0) {
       console.log('Importing trails and rivers from GeoJSON...');
-      await importLinearFeaturesFromGeoJSON(client);
+      await importGeoJSONFeatures(client);
     }
 
     console.log('Database initialized');
@@ -457,17 +494,100 @@ async function initDatabase() {
   }
 }
 
-// API Routes
+// API Routes - Unified POIs
+app.get('/api/pois', async (req, res) => {
+  try {
+    // Get all POIs (points, trails, rivers) - exclude image_data (large binary)
+    const result = await pool.query(`
+      SELECT id, name, poi_type, latitude, longitude, geometry, geometry_drive_file_id,
+             property_owner, brief_description, era, historical_description,
+             primary_activities, surface, pets, cell_signal, more_info_link,
+             length_miles, difficulty, image_mime_type, image_drive_file_id,
+             locally_modified, deleted, synced, created_at, updated_at
+      FROM pois
+      WHERE (deleted IS NULL OR deleted = FALSE)
+      ORDER BY poi_type, name
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching POIs:', error);
+    res.status(500).json({ error: 'Failed to fetch POIs' });
+  }
+});
+
+app.get('/api/pois/:id', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT id, name, poi_type, latitude, longitude, geometry, geometry_drive_file_id,
+             property_owner, brief_description, era, historical_description,
+             primary_activities, surface, pets, cell_signal, more_info_link,
+             length_miles, difficulty, image_mime_type, image_drive_file_id,
+             locally_modified, deleted, synced, created_at, updated_at
+      FROM pois WHERE id = $1`,
+      [req.params.id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'POI not found' });
+    }
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error fetching POI:', error);
+    res.status(500).json({ error: 'Failed to fetch POI' });
+  }
+});
+
+// Serve POI images from database (public endpoint)
+app.get('/api/pois/:id/image', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      'SELECT image_data, image_mime_type FROM pois WHERE id = $1 AND image_data IS NOT NULL',
+      [id]
+    );
+
+    if (result.rows.length === 0 || !result.rows[0].image_data) {
+      return res.status(404).json({ error: 'Image not found' });
+    }
+
+    const { image_data, image_mime_type } = result.rows[0];
+    res.setHeader('Content-Type', image_mime_type || 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.send(image_data);
+  } catch (error) {
+    console.error('Error serving POI image:', error);
+    res.status(500).json({ error: 'Failed to serve image' });
+  }
+});
+
+app.get('/api/filters', async (req, res) => {
+  try {
+    const owners = await pool.query('SELECT DISTINCT property_owner FROM pois WHERE property_owner IS NOT NULL ORDER BY property_owner');
+    const eras = await pool.query('SELECT DISTINCT era FROM pois WHERE era IS NOT NULL ORDER BY era');
+    const surfaces = await pool.query('SELECT DISTINCT surface FROM pois WHERE surface IS NOT NULL ORDER BY surface');
+
+    res.json({
+      owners: owners.rows.map(r => r.property_owner),
+      eras: eras.rows.map(r => r.era),
+      surfaces: surfaces.rows.map(r => r.surface)
+    });
+  } catch (error) {
+    console.error('Error fetching filters:', error);
+    res.status(500).json({ error: 'Failed to fetch filters' });
+  }
+});
+
+// Legacy API endpoints for backward compatibility during transition
 app.get('/api/destinations', async (req, res) => {
   try {
-    // Exclude image_data (large binary) - images served via /api/destinations/:id/image
     const result = await pool.query(`
-      SELECT id, name, latitude, longitude, property_owner, brief_description,
-             era, historical_description, primary_activities, surface, pets,
-             cell_signal, more_info_link, image_mime_type, image_drive_file_id,
+      SELECT id, name, poi_type, latitude, longitude,
+             property_owner, brief_description, era, historical_description,
+             primary_activities, surface, pets, cell_signal, more_info_link,
+             image_mime_type, image_drive_file_id,
              locally_modified, deleted, synced, created_at, updated_at
-      FROM destinations
-      WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+      FROM pois
+      WHERE poi_type = 'point'
+        AND latitude IS NOT NULL AND longitude IS NOT NULL
         AND (deleted IS NULL OR deleted = FALSE)
       ORDER BY name
     `);
@@ -480,13 +600,13 @@ app.get('/api/destinations', async (req, res) => {
 
 app.get('/api/destinations/:id', async (req, res) => {
   try {
-    // Exclude image_data (large binary) - images served via /api/destinations/:id/image
     const result = await pool.query(`
-      SELECT id, name, latitude, longitude, property_owner, brief_description,
-             era, historical_description, primary_activities, surface, pets,
-             cell_signal, more_info_link, image_mime_type, image_drive_file_id,
+      SELECT id, name, poi_type, latitude, longitude,
+             property_owner, brief_description, era, historical_description,
+             primary_activities, surface, pets, cell_signal, more_info_link,
+             image_mime_type, image_drive_file_id,
              locally_modified, deleted, synced, created_at, updated_at
-      FROM destinations WHERE id = $1`,
+      FROM pois WHERE id = $1`,
       [req.params.id]
     );
     if (result.rows.length === 0) {
@@ -499,20 +619,90 @@ app.get('/api/destinations/:id', async (req, res) => {
   }
 });
 
-app.get('/api/filters', async (req, res) => {
+// Legacy destination image endpoint - redirect to unified pois endpoint
+app.get('/api/destinations/:id/image', async (req, res) => {
   try {
-    const owners = await pool.query('SELECT DISTINCT property_owner FROM destinations WHERE property_owner IS NOT NULL ORDER BY property_owner');
-    const eras = await pool.query('SELECT DISTINCT era FROM destinations WHERE era IS NOT NULL ORDER BY era');
-    const surfaces = await pool.query('SELECT DISTINCT surface FROM destinations WHERE surface IS NOT NULL ORDER BY surface');
+    const { id } = req.params;
+    const result = await pool.query(
+      'SELECT image_data, image_mime_type FROM pois WHERE id = $1 AND image_data IS NOT NULL',
+      [id]
+    );
 
-    res.json({
-      owners: owners.rows.map(r => r.property_owner),
-      eras: eras.rows.map(r => r.era),
-      surfaces: surfaces.rows.map(r => r.surface)
-    });
+    if (result.rows.length === 0 || !result.rows[0].image_data) {
+      return res.status(404).json({ error: 'Image not found' });
+    }
+
+    const { image_data, image_mime_type } = result.rows[0];
+    res.setHeader('Content-Type', image_mime_type || 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.send(image_data);
   } catch (error) {
-    console.error('Error fetching filters:', error);
-    res.status(500).json({ error: 'Failed to fetch filters' });
+    console.error('Error serving destination image:', error);
+    res.status(500).json({ error: 'Failed to serve image' });
+  }
+});
+
+// Legacy linear-features endpoints for backward compatibility
+app.get('/api/linear-features', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT id, name, poi_type as feature_type, geometry,
+             property_owner, brief_description, era, historical_description,
+             primary_activities, surface, pets, cell_signal, more_info_link,
+             length_miles, difficulty, image_mime_type, image_drive_file_id,
+             locally_modified, deleted, synced, created_at, updated_at
+      FROM pois
+      WHERE poi_type IN ('trail', 'river')
+        AND (deleted IS NULL OR deleted = FALSE)
+      ORDER BY poi_type, name
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching linear features:', error);
+    res.status(500).json({ error: 'Failed to fetch linear features' });
+  }
+});
+
+app.get('/api/linear-features/:id', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT id, name, poi_type as feature_type, geometry,
+             property_owner, brief_description, era, historical_description,
+             primary_activities, surface, pets, cell_signal, more_info_link,
+             length_miles, difficulty, image_mime_type, image_drive_file_id,
+             locally_modified, deleted, synced, created_at, updated_at
+      FROM pois WHERE id = $1`,
+      [req.params.id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Linear feature not found' });
+    }
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error fetching linear feature:', error);
+    res.status(500).json({ error: 'Failed to fetch linear feature' });
+  }
+});
+
+app.get('/api/linear-features/:id/image', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      'SELECT image_data, image_mime_type FROM pois WHERE id = $1 AND image_data IS NOT NULL',
+      [id]
+    );
+
+    if (result.rows.length === 0 || !result.rows[0].image_data) {
+      return res.status(404).json({ error: 'Image not found' });
+    }
+
+    const { image_data, image_mime_type } = result.rows[0];
+    res.setHeader('Content-Type', image_mime_type || 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.send(image_data);
+  } catch (error) {
+    console.error('Error serving linear feature image:', error);
+    res.status(500).json({ error: 'Failed to serve image' });
   }
 });
 
@@ -534,98 +724,11 @@ app.get('/api/icons/:name.svg', async (req, res) => {
     }
 
     res.setHeader('Content-Type', 'image/svg+xml');
-    res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 1 day
+    res.setHeader('Cache-Control', 'public, max-age=86400');
     res.send(result.rows[0].svg_content);
   } catch (error) {
     console.error('Error serving icon:', error);
     res.status(500).json({ error: 'Failed to serve icon' });
-  }
-});
-
-// Serve destination images from database (public endpoint - no auth required)
-app.get('/api/destinations/:id/image', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const result = await pool.query(
-      'SELECT image_data, image_mime_type FROM destinations WHERE id = $1 AND image_data IS NOT NULL',
-      [id]
-    );
-
-    if (result.rows.length === 0 || !result.rows[0].image_data) {
-      return res.status(404).json({ error: 'Image not found' });
-    }
-
-    const { image_data, image_mime_type } = result.rows[0];
-    res.setHeader('Content-Type', image_mime_type || 'image/jpeg');
-    res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 1 day
-    res.send(image_data);
-  } catch (error) {
-    console.error('Error serving destination image:', error);
-    res.status(500).json({ error: 'Failed to serve image' });
-  }
-});
-
-// Linear features API (trails, rivers) - public endpoints
-app.get('/api/linear-features', async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT id, name, feature_type, geometry, property_owner, brief_description,
-             era, historical_description, primary_activities, surface, pets,
-             cell_signal, more_info_link, length_miles, difficulty,
-             image_mime_type, image_drive_file_id,
-             locally_modified, deleted, synced, created_at, updated_at
-      FROM linear_features
-      WHERE deleted IS NULL OR deleted = FALSE
-      ORDER BY feature_type, name
-    `);
-    res.json(result.rows);
-  } catch (error) {
-    console.error('Error fetching linear features:', error);
-    res.status(500).json({ error: 'Failed to fetch linear features' });
-  }
-});
-
-app.get('/api/linear-features/:id', async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT id, name, feature_type, geometry, property_owner, brief_description,
-             era, historical_description, primary_activities, surface, pets,
-             cell_signal, more_info_link, length_miles, difficulty,
-             image_mime_type, image_drive_file_id,
-             locally_modified, deleted, synced, created_at, updated_at
-      FROM linear_features WHERE id = $1`,
-      [req.params.id]
-    );
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Linear feature not found' });
-    }
-    res.json(result.rows[0]);
-  } catch (error) {
-    console.error('Error fetching linear feature:', error);
-    res.status(500).json({ error: 'Failed to fetch linear feature' });
-  }
-});
-
-// Serve linear feature images from database (public endpoint)
-app.get('/api/linear-features/:id/image', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const result = await pool.query(
-      'SELECT image_data, image_mime_type FROM linear_features WHERE id = $1 AND image_data IS NOT NULL',
-      [id]
-    );
-
-    if (result.rows.length === 0 || !result.rows[0].image_data) {
-      return res.status(404).json({ error: 'Image not found' });
-    }
-
-    const { image_data, image_mime_type } = result.rows[0];
-    res.setHeader('Content-Type', image_mime_type || 'image/jpeg');
-    res.setHeader('Cache-Control', 'public, max-age=86400');
-    res.send(image_data);
-  } catch (error) {
-    console.error('Error serving linear feature image:', error);
-    res.status(500).json({ error: 'Failed to serve image' });
   }
 });
 

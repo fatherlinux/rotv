@@ -40,7 +40,7 @@ function SyncSettings() {
   }, [fetchStatus]);
 
   const handlePush = async () => {
-    if (!confirm('This will replace ALL data in Google Sheets with the current database contents. Continue?')) {
+    if (!confirm('This will replace ALL data in Google Drive (spreadsheet + files) with the current database contents. Continue?')) {
       return;
     }
 
@@ -62,14 +62,14 @@ function SyncSettings() {
         setError(result.error || 'Push failed');
       }
     } catch (err) {
-      setError('Failed to push to Google Sheets');
+      setError('Failed to push to Google Drive');
     } finally {
       setSyncing(false);
     }
   };
 
   const handlePull = async () => {
-    if (!confirm('This will replace ALL data in the database with Google Sheets contents. Any local changes will be lost. Continue?')) {
+    if (!confirm('This will replace ALL data in the database with Google Drive contents (spreadsheet + files). Any local changes will be lost. Continue?')) {
       return;
     }
 
@@ -93,7 +93,7 @@ function SyncSettings() {
         setError(result.error || 'Pull failed');
       }
     } catch (err) {
-      setError('Failed to pull from Google Sheets');
+      setError('Failed to pull from Google Drive');
     } finally {
       setSyncing(false);
     }
@@ -128,7 +128,7 @@ function SyncSettings() {
   };
 
   const handleClearQueue = async () => {
-    if (!confirm('This will discard all pending sync operations. Changes will not be pushed to Google Sheets. Continue?')) {
+    if (!confirm('This will discard all pending sync operations. Changes will not be pushed to Google Drive. Continue?')) {
       return;
     }
 
@@ -296,7 +296,7 @@ function SyncSettings() {
   if (loading) {
     return (
       <div className="sync-settings">
-        <h3>Google Sheets Sync</h3>
+        <h3>Google Drive Integration</h3>
         <p>Loading sync status...</p>
       </div>
     );
@@ -304,9 +304,9 @@ function SyncSettings() {
 
   return (
     <div className="sync-settings">
-      <h3>Google Sheets Sync</h3>
+      <h3>Google Drive Integration</h3>
       <p className="sync-description">
-        Synchronize destination data between the local database and Google Sheets.
+        Synchronize POI data between the local database and Google Drive.
       </p>
 
       {error && (
@@ -318,6 +318,72 @@ function SyncSettings() {
       {message && (
         <div className="sync-success">
           {message}
+        </div>
+      )}
+
+      {/* Google Drive Storage Info */}
+      {syncStatus && syncStatus.drive && syncStatus.drive.configured && (
+        <div className="sync-drive-info">
+          <h4>Google Drive Storage</h4>
+          <div className="drive-folder-structure">
+            {syncStatus.drive.folders.root && (
+              <div className="drive-folder root-folder">
+                <a
+                  href={syncStatus.drive.folders.root.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="folder-link"
+                >
+                  <span className="folder-icon">📁</span>
+                  <span className="folder-name">{syncStatus.drive.folders.root.name}</span>
+                </a>
+                <div className="subfolder-list">
+                  {syncStatus.drive.folders.icons && (
+                    <div className="drive-folder subfolder">
+                      <a
+                        href={syncStatus.drive.folders.icons.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="folder-link"
+                      >
+                        <span className="folder-icon">🎨</span>
+                        <span className="folder-name">Icons</span>
+                        <span className="file-count">({syncStatus.drive.folders.icons.file_count} files)</span>
+                      </a>
+                    </div>
+                  )}
+                  {syncStatus.drive.folders.images && (
+                    <div className="drive-folder subfolder">
+                      <a
+                        href={syncStatus.drive.folders.images.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="folder-link"
+                      >
+                        <span className="folder-icon">🖼️</span>
+                        <span className="folder-name">Images</span>
+                        <span className="file-count">({syncStatus.drive.folders.images.file_count} files)</span>
+                      </a>
+                    </div>
+                  )}
+                  {syncStatus.drive.folders.geospatial && (
+                    <div className="drive-folder subfolder">
+                      <a
+                        href={syncStatus.drive.folders.geospatial.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="folder-link"
+                      >
+                        <span className="folder-icon">🗺️</span>
+                        <span className="folder-name">Geospatial</span>
+                        <span className="file-count">({syncStatus.drive.folders.geospatial.file_count} files)</span>
+                      </a>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -444,10 +510,36 @@ function SyncSettings() {
             </span>
           </div>
           <div className="sync-status-item">
-            <label>Unsynced Destinations</label>
+            <label>Unsynced POIs</label>
             <span className={syncStatus.unsynced_destinations > 0 ? 'pending-highlight' : ''}>
               {syncStatus.unsynced_destinations}
             </span>
+          </div>
+        </div>
+      )}
+
+      {/* Sync Queue Details */}
+      {syncStatus && syncStatus.sync_queue && syncStatus.sync_queue.length > 0 && (
+        <div className="sync-queue-details">
+          <h4>Pending Sync Queue</h4>
+          <p className="queue-description">
+            These changes are waiting to be synced to Google Drive. Click "Process Queue" to sync them.
+          </p>
+          <div className="sync-queue-list">
+            <div className="queue-item queue-header">
+              <span className="queue-operation">Operation</span>
+              <span className="queue-item-name">POI Name</span>
+              <span className="queue-table">Table</span>
+              <span className="queue-time">Queued At</span>
+            </div>
+            {syncStatus.sync_queue.map((item) => (
+              <div key={item.id} className={`queue-item queue-${item.operation.toLowerCase()}`}>
+                <span className="queue-operation">{item.operation}</span>
+                <span className="queue-item-name">{item.item_name || `ID: ${item.record_id}`}</span>
+                <span className="queue-table">{item.table_name}</span>
+                <span className="queue-time">{formatDate(item.created_at)}</span>
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -457,7 +549,7 @@ function SyncSettings() {
         <div className="sync-actions">
           <div className="sync-action-group">
             <h4>Sync Changes</h4>
-            <p className="action-hint">Push pending changes to Google Sheets</p>
+            <p className="action-hint">Push pending changes to Google Drive</p>
             <div className="sync-buttons">
               <button
                 className="sync-btn process-btn"
@@ -478,21 +570,21 @@ function SyncSettings() {
 
           <div className="sync-action-group">
             <h4>Full Sync</h4>
-            <p className="action-hint">Replace all data in one direction. This will synchronize every tab in the Google Sheet.</p>
+            <p className="action-hint">Replace all data in one direction. This will synchronize the spreadsheet and all files.</p>
             <div className="sync-buttons">
               <button
                 className="sync-btn push-btn"
                 onClick={handlePush}
                 disabled={syncing}
               >
-                {syncing ? 'Syncing...' : 'Push to Sheets'}
+                {syncing ? 'Syncing...' : 'Push to Google Drive'}
               </button>
               <button
                 className="sync-btn pull-btn"
                 onClick={handlePull}
                 disabled={syncing}
               >
-                {syncing ? 'Syncing...' : 'Pull from Sheets'}
+                {syncing ? 'Syncing...' : 'Pull from Google Drive'}
               </button>
             </div>
           </div>
@@ -515,8 +607,8 @@ function SyncSettings() {
           </button>
         </div>
         <p className="danger-hint">
-          This will delete all destinations from the local PostgreSQL database.
-          Use "Pull from Sheets" to restore data from Google Sheets after wiping.
+          This will delete all POIs from the local PostgreSQL database.
+          Use "Pull from Google Drive" to restore data after wiping.
         </p>
       </div>
     </div>

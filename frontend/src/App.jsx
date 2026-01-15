@@ -39,6 +39,13 @@ function AppContent() {
   // Settings sub-tab state: 'activities', 'news', 'google'
   const [settingsTab, setSettingsTab] = useState('activities');
 
+  // Reset to View tab when user loses admin status (e.g., logout)
+  useEffect(() => {
+    if (!isAdmin && (activeTab === 'edit' || activeTab === 'settings')) {
+      setActiveTab('view');
+    }
+  }, [isAdmin, activeTab]);
+
   // Preview coordinates for real-time editing sync between Map and Sidebar
   const [previewCoords, setPreviewCoords] = useState(null);
 
@@ -286,7 +293,7 @@ function AppContent() {
   return (
     <div className="app">
       <header className="header">
-        <div className="header-left">
+        <div className="header-left" onClick={() => setActiveTab('view')} style={{ cursor: 'pointer' }}>
           <h1>Roots of The Valley</h1>
           <span className="subtitle">Explore Cuyahoga Valley's History</span>
         </div>

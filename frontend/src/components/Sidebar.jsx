@@ -877,11 +877,15 @@ function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinat
 
     setSaving(true);
     try {
+      // Exclude geometry from save payload - it's not editable via sidebar
+      // and including it makes the request too large
+      const { geometry, ...dataWithoutGeometry } = editedData;
+
       const response = await fetch(`/api/admin/linear-features/${linearFeature.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify(editedData)
+        body: JSON.stringify(dataWithoutGeometry)
       });
 
       if (!response.ok) {

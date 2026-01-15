@@ -3,6 +3,7 @@ import { Readable } from 'stream';
 const ROOT_FOLDER_NAME = 'Roots of The Valley';
 const ICONS_FOLDER_NAME = 'Icons';
 const IMAGES_FOLDER_NAME = 'Images';
+const GEOSPATIAL_FOLDER_NAME = 'Geospatial';
 
 /**
  * Get a Drive setting from the database
@@ -81,7 +82,7 @@ async function createFolder(drive, name, parentId = null) {
 
 /**
  * Ensure the ROTV folder structure exists in Google Drive
- * Creates: Roots of The Valley / Icons, Images
+ * Creates: Roots of The Valley / Icons, Images, Geospatial
  * Returns folder IDs
  */
 export async function ensureDriveFolders(drive, pool) {
@@ -109,7 +110,15 @@ export async function ensureDriveFolders(drive, pool) {
     await setDriveSetting(pool, 'images_folder_id', imagesFolderId);
   }
 
-  return { rootFolderId, iconsFolderId, imagesFolderId };
+  // Check if Geospatial folder exists
+  let geospatialFolderId = await getDriveSetting(pool, 'geospatial_folder_id');
+  if (!geospatialFolderId || !(await folderExists(drive, geospatialFolderId))) {
+    console.log('Creating Geospatial folder...');
+    geospatialFolderId = await createFolder(drive, GEOSPATIAL_FOLDER_NAME, rootFolderId);
+    await setDriveSetting(pool, 'geospatial_folder_id', geospatialFolderId);
+  }
+
+  return { rootFolderId, iconsFolderId, imagesFolderId, geospatialFolderId };
 }
 
 /**
@@ -229,6 +238,70 @@ export async function uploadImageToDrive(drive, pool, filename, buffer, mimeType
 }
 
 /**
+ * Upload a GeoJSON file to the Geospatial folder in Drive
+ * Used for storing trail/river geometry data
+ * Returns the Drive file ID
+ */
+export async function uploadGeoJSONToDrive(drive, pool, filename, geojsonData) {
+  const { geospatialFolderId } = await ensureDriveFolders(drive, pool);
+
+  // Ensure filename ends with .geojson
+  if (!filename.endsWith('.geojson')) {
+    filename = `${filename}.geojson`;
+  }
+
+  const content = typeof geojsonData === 'string' ? geojsonData : JSON.stringify(geojsonData, null, 2);
+
+  // Check if file already exists
+  const existingFileId = await findFileInFolder(drive, geospatialFolderId, filename);
+
+  let fileId;
+  if (existingFileId) {
+    // Update existing file
+    await drive.files.update({
+      fileId: existingFileId,
+      media: {
+        mimeType: 'application/geo+json',
+        body: Readable.from([content])
+      }
+    });
+    fileId = existingFileId;
+  } else {
+    // Create new file
+    const response = await drive.files.create({
+      requestBody: {
+        name: filename,
+        mimeType: 'application/geo+json',
+        parents: [geospatialFolderId]
+      },
+      media: {
+        mimeType: 'application/geo+json',
+        body: Readable.from([content])
+      },
+      fields: 'id'
+    });
+    fileId = response.data.id;
+  }
+
+  return fileId;
+}
+
+/**
+ * Download a GeoJSON file from Drive and parse it
+ */
+export async function downloadGeoJSONFromDrive(drive, fileId) {
+  const buffer = await downloadFileFromDrive(drive, fileId);
+  if (!buffer) return null;
+
+  try {
+    return JSON.parse(buffer.toString('utf-8'));
+  } catch (error) {
+    console.error('Failed to parse GeoJSON from Drive:', error.message);
+    return null;
+  }
+}
+
+/**
  * Find a file by name in a specific folder
  */
 async function findFileInFolder(drive, folderId, filename) {
@@ -322,14 +395,16 @@ export function getDriveImageUrl(fileId) {
 }
 
 /**
- * Count files in the Icons and Images folders
+ * Count files in the Icons, Images, and Geospatial folders
  */
 export async function countDriveFiles(drive, pool) {
   const iconsFolderId = await getDriveSetting(pool, 'icons_folder_id');
   const imagesFolderId = await getDriveSetting(pool, 'images_folder_id');
+  const geospatialFolderId = await getDriveSetting(pool, 'geospatial_folder_id');
 
   let iconsCount = 0;
   let imagesCount = 0;
+  let geospatialCount = 0;
 
   if (iconsFolderId) {
     try {
@@ -357,5 +432,18 @@ export async function countDriveFiles(drive, pool) {
     }
   }
 
-  return { iconsCount, imagesCount };
+  if (geospatialFolderId) {
+    try {
+      const response = await drive.files.list({
+        q: `'${geospatialFolderId}' in parents and trashed = false`,
+        fields: 'files(id)',
+        pageSize: 1000
+      });
+      geospatialCount = response.data.files?.length || 0;
+    } catch (error) {
+      console.error('Error counting geospatial files:', error.message);
+    }
+  }
+
+  return { iconsCount, imagesCount, geospatialCount };
 }

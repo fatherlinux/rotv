@@ -7,7 +7,12 @@ const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:8080';
 
 // Google OAuth - single flow for all users
 // Admins get drive.file scope and credentials stored in database
-router.get('/google', passport.authenticate('google'));
+// accessType: 'offline' requests a refresh token
+// prompt: 'consent' forces consent screen to ensure we get refresh token
+router.get('/google', passport.authenticate('google', {
+  accessType: 'offline',
+  prompt: 'consent'
+}));
 
 router.get('/google/callback',
   passport.authenticate('google', { failureRedirect: `${FRONTEND_URL}?auth=failed` }),

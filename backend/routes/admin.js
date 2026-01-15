@@ -10,6 +10,8 @@ const __dirname = path.dirname(__filename);
 import {
   createSheetsService,
   createDriveService,
+  createSheetsServiceWithRefresh,
+  createDriveServiceWithRefresh,
   isFileTrashed,
   getSyncStatus,
   pushAllToSheets,
@@ -49,15 +51,16 @@ const router = express.Router();
 
 export function createAdminRouter(pool) {
   // Helper to queue sync operation after a change
-  async function queueDestinationSync(operation, recordId, data) {
+  async function queuePOISync(operation, recordId, data) {
     try {
-      await queueSyncOperation(pool, operation, 'destinations', recordId, data);
+      await queueSyncOperation(pool, operation, 'pois', recordId, data);
     } catch (error) {
       console.error('Failed to queue sync operation:', error.message);
     }
   }
-  // Update destination coordinates
-  router.put('/destinations/:id/coordinates', isAdmin, async (req, res) => {
+
+  // Update POI coordinates (for point type POIs)
+  router.put('/pois/:id/coordinates', isAdmin, async (req, res) => {
     const { id } = req.params;
     const { latitude, longitude } = req.body;
 
@@ -65,7 +68,6 @@ export function createAdminRouter(pool) {
       return res.status(400).json({ error: 'Latitude and longitude are required' });
     }
 
-    // Validate coordinates are within reasonable bounds for CVNP area
     const lat = parseFloat(latitude);
     const lng = parseFloat(longitude);
 
@@ -79,7 +81,49 @@ export function createAdminRouter(pool) {
 
     try {
       const result = await pool.query(
-        `UPDATE destinations
+        `UPDATE pois
+         SET latitude = $1, longitude = $2, updated_at = CURRENT_TIMESTAMP, locally_modified = TRUE, synced = FALSE
+         WHERE id = $3
+         RETURNING *`,
+        [lat, lng, id]
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'POI not found' });
+      }
+
+      await queuePOISync('UPDATE', id, result.rows[0]);
+      console.log(`Admin ${req.user.email} updated coordinates for POI ${id}: ${lat}, ${lng}`);
+      res.json(result.rows[0]);
+    } catch (error) {
+      console.error('Error updating coordinates:', error);
+      res.status(500).json({ error: 'Failed to update coordinates' });
+    }
+  });
+
+  // Legacy endpoint - redirect to unified POI endpoint
+  router.put('/destinations/:id/coordinates', isAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { latitude, longitude } = req.body;
+
+    if (latitude === undefined || longitude === undefined) {
+      return res.status(400).json({ error: 'Latitude and longitude are required' });
+    }
+
+    const lat = parseFloat(latitude);
+    const lng = parseFloat(longitude);
+
+    if (isNaN(lat) || isNaN(lng)) {
+      return res.status(400).json({ error: 'Invalid coordinate values' });
+    }
+
+    if (lat < 40.5 || lat > 42.0 || lng < -82.5 || lng > -80.5) {
+      return res.status(400).json({ error: 'Coordinates outside valid range for Cuyahoga Valley area' });
+    }
+
+    try {
+      const result = await pool.query(
+        `UPDATE pois
          SET latitude = $1, longitude = $2, updated_at = CURRENT_TIMESTAMP, locally_modified = TRUE, synced = FALSE
          WHERE id = $3
          RETURNING *`,
@@ -90,9 +134,7 @@ export function createAdminRouter(pool) {
         return res.status(404).json({ error: 'Destination not found' });
       }
 
-      // Queue sync operation
-      await queueDestinationSync('UPDATE', id, result.rows[0]);
-
+      await queuePOISync('UPDATE', id, result.rows[0]);
       console.log(`Admin ${req.user.email} updated coordinates for destination ${id}: ${lat}, ${lng}`);
       res.json(result.rows[0]);
     } catch (error) {
@@ -101,7 +143,65 @@ export function createAdminRouter(pool) {
     }
   });
 
-  // Update destination (all editable fields)
+  // Update POI (all editable fields) - unified endpoint
+  router.put('/pois/:id', isAdmin, async (req, res) => {
+    const { id } = req.params;
+    const allowedFields = [
+      'name', 'poi_type', 'latitude', 'longitude', 'geometry', 'geometry_drive_file_id',
+      'property_owner', 'brief_description', 'era', 'historical_description',
+      'primary_activities', 'surface', 'pets', 'cell_signal', 'more_info_link',
+      'length_miles', 'difficulty'
+    ];
+    const updates = {};
+    const values = [];
+    let paramIndex = 1;
+
+    for (const field of allowedFields) {
+      if (req.body[field] !== undefined) {
+        updates[field] = `$${paramIndex}`;
+        // Handle geometry as JSON
+        if (field === 'geometry' && typeof req.body[field] === 'object') {
+          values.push(JSON.stringify(req.body[field]));
+        } else {
+          values.push(req.body[field]);
+        }
+        paramIndex++;
+      }
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: 'No valid fields to update' });
+    }
+
+    const setClause = Object.entries(updates)
+      .map(([field, param]) => `${field} = ${param}`)
+      .join(', ');
+
+    values.push(id);
+
+    try {
+      const result = await pool.query(
+        `UPDATE pois
+         SET ${setClause}, updated_at = CURRENT_TIMESTAMP, locally_modified = TRUE, synced = FALSE
+         WHERE id = $${paramIndex}
+         RETURNING *`,
+        values
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'POI not found' });
+      }
+
+      await queuePOISync('UPDATE', id, result.rows[0]);
+      console.log(`Admin ${req.user.email} updated POI ${id}:`, Object.keys(updates).join(', '));
+      res.json(result.rows[0]);
+    } catch (error) {
+      console.error('Error updating POI:', error);
+      res.status(500).json({ error: 'Failed to update POI' });
+    }
+  });
+
+  // Legacy: Update destination (redirect to pois)
   router.put('/destinations/:id', isAdmin, async (req, res) => {
     const { id } = req.params;
     const allowedFields = [
@@ -133,7 +233,7 @@ export function createAdminRouter(pool) {
 
     try {
       const result = await pool.query(
-        `UPDATE destinations
+        `UPDATE pois
          SET ${setClause}, updated_at = CURRENT_TIMESTAMP, locally_modified = TRUE, synced = FALSE
          WHERE id = $${paramIndex}
          RETURNING *`,
@@ -144,9 +244,7 @@ export function createAdminRouter(pool) {
         return res.status(404).json({ error: 'Destination not found' });
       }
 
-      // Queue sync operation
-      await queueDestinationSync('UPDATE', id, result.rows[0]);
-
+      await queuePOISync('UPDATE', id, result.rows[0]);
       console.log(`Admin ${req.user.email} updated destination ${id}:`, Object.keys(updates).join(', '));
       res.json(result.rows[0]);
     } catch (error) {
@@ -200,14 +298,14 @@ export function createAdminRouter(pool) {
 
     try {
       const result = await pool.query(
-        `INSERT INTO destinations (${fields.join(', ')}, created_at, updated_at, locally_modified, synced)
+        `INSERT INTO pois (${fields.join(', ')}, created_at, updated_at, locally_modified, synced)
          VALUES (${placeholders}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, TRUE, FALSE)
          RETURNING *`,
         values
       );
 
       // Queue sync operation
-      await queueDestinationSync('INSERT', result.rows[0].id, result.rows[0]);
+      await queuePOISync('INSERT', result.rows[0].id, result.rows[0]);
 
       console.log(`Admin ${req.user.email} created new destination: ${name}`);
       res.status(201).json(result.rows[0]);
@@ -223,7 +321,7 @@ export function createAdminRouter(pool) {
 
     try {
       const result = await pool.query(
-        `UPDATE destinations
+        `UPDATE pois
          SET deleted = TRUE, locally_modified = TRUE, synced = FALSE, updated_at = CURRENT_TIMESTAMP
          WHERE id = $1
          RETURNING id, name`,
@@ -235,7 +333,7 @@ export function createAdminRouter(pool) {
       }
 
       // Queue sync operation (delete from sheet)
-      await queueDestinationSync('DELETE', id, { name: result.rows[0].name });
+      await queuePOISync('DELETE', id, { name: result.rows[0].name });
 
       console.log(`Admin ${req.user.email} deleted destination ${id}: ${result.rows[0].name}`);
       res.json({ success: true, deleted: result.rows[0] });
@@ -488,7 +586,7 @@ export function createAdminRouter(pool) {
         // Format is "Activity1, Activity2, Activity3" (comma-space separated)
         // Need to handle: exact match, start of list, middle of list, end of list
         const updateResult = await pool.query(
-          `UPDATE destinations
+          `UPDATE pois
            SET primary_activities = CASE
              WHEN primary_activities = $1 THEN $2
              WHEN primary_activities LIKE $1 || ', %' THEN $2 || SUBSTRING(primary_activities FROM LENGTH($1) + 1)
@@ -503,7 +601,7 @@ export function createAdminRouter(pool) {
           [oldName, newName]
         );
         if (updateResult.rowCount > 0) {
-          console.log(`Updated ${updateResult.rowCount} destinations with renamed activity: ${oldName} -> ${newName}`);
+          console.log(`Updated ${updateResult.rowCount} POIs with renamed activity: ${oldName} -> ${newName}`);
         }
       }
 
@@ -703,7 +801,7 @@ export function createAdminRouter(pool) {
       const newName = name.trim();
       if (oldName !== newName) {
         const updateResult = await pool.query(
-          `UPDATE destinations
+          `UPDATE pois
            SET era = $2,
                updated_at = CURRENT_TIMESTAMP,
                locally_modified = TRUE,
@@ -712,7 +810,7 @@ export function createAdminRouter(pool) {
           [oldName, newName]
         );
         if (updateResult.rowCount > 0) {
-          console.log(`Updated ${updateResult.rowCount} destinations with renamed era: ${oldName} -> ${newName}`);
+          console.log(`Updated ${updateResult.rowCount} POIs with renamed era: ${oldName} -> ${newName}`);
         }
       }
 
@@ -877,7 +975,7 @@ export function createAdminRouter(pool) {
       const newName = name.trim();
       if (oldName !== newName) {
         const updateResult = await pool.query(
-          `UPDATE destinations
+          `UPDATE pois
            SET surface = $2,
                updated_at = CURRENT_TIMESTAMP,
                locally_modified = TRUE,
@@ -886,7 +984,7 @@ export function createAdminRouter(pool) {
           [oldName, newName]
         );
         if (updateResult.rowCount > 0) {
-          console.log(`Updated ${updateResult.rowCount} destinations with renamed surface: ${oldName} -> ${newName}`);
+          console.log(`Updated ${updateResult.rowCount} POIs with renamed surface: ${oldName} -> ${newName}`);
         }
       }
 
@@ -1235,11 +1333,13 @@ export function createAdminRouter(pool) {
         return res.json(status);
       }
 
-      // Verify credentials by trying to use them
+      // Verify credentials by trying to use them (with auto-refresh)
+      const drive = await createDriveServiceWithRefresh(credentials, pool, req.user.id);
+
       if (spreadsheetInfo.configured) {
         // Try to access the configured spreadsheet
         try {
-          const sheets = createSheetsService(credentials);
+          const sheets = await createSheetsServiceWithRefresh(credentials, pool, req.user.id);
           await sheets.spreadsheets.get({
             spreadsheetId: spreadsheetInfo.id,
             fields: 'spreadsheetId'
@@ -1247,7 +1347,6 @@ export function createAdminRouter(pool) {
 
           // Check if the spreadsheet is in the trash
           try {
-            const drive = createDriveService(credentials);
             const trashed = await isFileTrashed(drive, spreadsheetInfo.id);
             if (trashed === true) {
               status.spreadsheet_trashed = true;
@@ -1277,6 +1376,67 @@ export function createAdminRouter(pool) {
       } else {
         // No spreadsheet configured - assume it's ready if we have credentials
         status.drive_access_verified = true;
+      }
+
+      // Get Drive folder information
+      try {
+        const { countDriveFiles, getDriveFolderLink, getDriveSetting } = await import('../services/driveImageService.js');
+
+        const rootFolderId = await getDriveSetting(pool, 'root_folder_id');
+        const iconsFolderId = await getDriveSetting(pool, 'icons_folder_id');
+        const imagesFolderId = await getDriveSetting(pool, 'images_folder_id');
+        const geospatialFolderId = await getDriveSetting(pool, 'geospatial_folder_id');
+
+        const folderLink = await getDriveFolderLink(pool);
+        const fileCounts = await countDriveFiles(drive, pool);
+
+        status.drive = {
+          configured: !!rootFolderId,
+          folder_url: folderLink,
+          folders: {
+            root: rootFolderId ? {
+              id: rootFolderId,
+              name: 'Roots of The Valley',
+              url: `https://drive.google.com/drive/folders/${rootFolderId}`
+            } : null,
+            icons: iconsFolderId ? {
+              id: iconsFolderId,
+              name: 'Icons',
+              file_count: fileCounts.iconsCount,
+              url: `https://drive.google.com/drive/folders/${iconsFolderId}`
+            } : null,
+            images: imagesFolderId ? {
+              id: imagesFolderId,
+              name: 'Images',
+              file_count: fileCounts.imagesCount,
+              url: `https://drive.google.com/drive/folders/${imagesFolderId}`
+            } : null,
+            geospatial: geospatialFolderId ? {
+              id: geospatialFolderId,
+              name: 'Geospatial',
+              file_count: fileCounts.geospatialCount,
+              url: `https://drive.google.com/drive/folders/${geospatialFolderId}`
+            } : null
+          }
+        };
+      } catch (driveInfoError) {
+        console.warn('Could not get Drive folder info:', driveInfoError.message);
+        status.drive = { configured: false };
+      }
+
+      // Get sync queue details
+      try {
+        const queueResult = await pool.query(`
+          SELECT id, operation, table_name, record_id,
+                 data->>'name' as item_name, created_at
+          FROM sync_queue
+          ORDER BY created_at ASC
+          LIMIT 50
+        `);
+        status.sync_queue = queueResult.rows;
+      } catch (queueError) {
+        console.warn('Could not get sync queue:', queueError.message);
+        status.sync_queue = [];
       }
 
       res.json(status);
@@ -1379,8 +1539,8 @@ export function createAdminRouter(pool) {
       const drive = createDriveService(req.user.oauth_credentials);
       const result = await createAppSpreadsheet(sheets, pool, req.user.id, drive);
 
-      // Automatically push all data to the new spreadsheet
-      const destCount = await pushAllToSheets(sheets, pool);
+      // Automatically push all data to the new spreadsheet (including GeoJSON upload)
+      const destCount = await pushAllToSheets(sheets, pool, drive);
       const actCount = await pushActivitiesToSheets(sheets, pool);
       const erasCount = await pushErasToSheets(sheets, pool);
       const surfacesCount = await pushSurfacesToSheets(sheets, pool);
@@ -1413,6 +1573,7 @@ export function createAdminRouter(pool) {
   });
 
   // Push all data from database to Google Sheets (Destinations + Activities + Eras + Surfaces + Icons + Integration)
+  // Also uploads GeoJSON geometry to Drive for linear features
   router.post('/sync/push', isAdmin, async (req, res) => {
     try {
       // Check if user has Google OAuth credentials
@@ -1423,10 +1584,12 @@ export function createAdminRouter(pool) {
         });
       }
 
-      const sheets = createSheetsService(req.user.oauth_credentials);
+      // Use refresh-enabled services to auto-refresh expired tokens
+      const sheets = await createSheetsServiceWithRefresh(req.user.oauth_credentials, pool, req.user.id);
+      const drive = await createDriveServiceWithRefresh(req.user.oauth_credentials, pool, req.user.id);
 
-      // Push Destinations
-      const destCount = await pushAllToSheets(sheets, pool);
+      // Push Destinations (including GeoJSON upload for linear features)
+      const destCount = await pushAllToSheets(sheets, pool, drive);
 
       // Push Activities
       const actCount = await pushActivitiesToSheets(sheets, pool);
@@ -1479,8 +1642,9 @@ export function createAdminRouter(pool) {
         });
       }
 
-      const sheets = createSheetsService(req.user.oauth_credentials);
-      const drive = createDriveService(req.user.oauth_credentials);
+      // Use refresh-enabled services to auto-refresh expired tokens
+      const sheets = await createSheetsServiceWithRefresh(req.user.oauth_credentials, pool, req.user.id);
+      const drive = await createDriveServiceWithRefresh(req.user.oauth_credentials, pool, req.user.id);
 
       // Pull Integration settings first (includes Drive folder IDs needed for icon downloads)
       const integrationCount = await pullIntegrationFromSheets(sheets, pool);
@@ -1554,11 +1718,11 @@ export function createAdminRouter(pool) {
     }
   });
 
-  // Wipe the local database (delete all destinations)
+  // Wipe the local database (delete all POIs)
   router.delete('/sync/wipe-database', isAdmin, async (req, res) => {
     try {
-      // Delete all destinations
-      const destResult = await pool.query('DELETE FROM destinations RETURNING id');
+      // Delete all POIs
+      const destResult = await pool.query('DELETE FROM pois RETURNING id');
       const destCount = destResult.rowCount;
 
       // Clear sync queue
@@ -1632,7 +1796,7 @@ export function createAdminRouter(pool) {
 
     try {
       // Check if destination exists
-      const destCheck = await pool.query('SELECT id, name, image_drive_file_id FROM destinations WHERE id = $1', [id]);
+      const destCheck = await pool.query('SELECT id, name, image_drive_file_id FROM pois WHERE id = $1', [id]);
       if (destCheck.rows.length === 0) {
         return res.status(404).json({ error: 'Destination not found' });
       }
@@ -1642,7 +1806,7 @@ export function createAdminRouter(pool) {
       // Store image in database (primary storage - accessible by all users)
       // Image URL is computed from ID: /api/destinations/{id}/image
       await pool.query(
-        `UPDATE destinations
+        `UPDATE pois
          SET image_data = $1, image_mime_type = $2,
              updated_at = CURRENT_TIMESTAMP, locally_modified = TRUE, synced = FALSE
          WHERE id = $3`,
@@ -1670,7 +1834,7 @@ export function createAdminRouter(pool) {
 
           // Update Drive file ID reference
           await pool.query(
-            'UPDATE destinations SET image_drive_file_id = $1 WHERE id = $2',
+            'UPDATE pois SET image_drive_file_id = $1 WHERE id = $2',
             [driveFileId, id]
           );
 
@@ -1704,7 +1868,7 @@ export function createAdminRouter(pool) {
 
     try {
       // Check if destination exists and has an image
-      const destCheck = await pool.query('SELECT id, name, image_data, image_drive_file_id FROM destinations WHERE id = $1', [id]);
+      const destCheck = await pool.query('SELECT id, name, image_data, image_drive_file_id FROM pois WHERE id = $1', [id]);
       if (destCheck.rows.length === 0) {
         return res.status(404).json({ error: 'Destination not found' });
       }
@@ -1728,7 +1892,7 @@ export function createAdminRouter(pool) {
 
       // Clear all image data from database
       await pool.query(
-        `UPDATE destinations
+        `UPDATE pois
          SET image_data = NULL, image_mime_type = NULL, image_drive_file_id = NULL,
              updated_at = CURRENT_TIMESTAMP, locally_modified = TRUE, synced = FALSE
          WHERE id = $1`,
@@ -1816,7 +1980,7 @@ export function createAdminRouter(pool) {
   router.get('/linear-features', isAdmin, async (req, res) => {
     try {
       const result = await pool.query(`
-        SELECT * FROM linear_features
+        SELECT * FROM pois
         WHERE deleted IS NULL OR deleted = FALSE
         ORDER BY feature_type, name
       `);
@@ -1845,8 +2009,8 @@ export function createAdminRouter(pool) {
       }
 
       const result = await pool.query(`
-        INSERT INTO linear_features (
-          name, feature_type, geometry, property_owner, brief_description,
+        INSERT INTO pois (
+          name, poi_type, geometry, property_owner, brief_description,
           era, historical_description, primary_activities, surface, pets,
           cell_signal, more_info_link, length_miles, difficulty, locally_modified
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, TRUE)
@@ -1874,10 +2038,15 @@ export function createAdminRouter(pool) {
     try {
       const { id } = req.params;
       const allowedFields = [
-        'name', 'feature_type', 'geometry', 'property_owner', 'brief_description',
+        'name', 'poi_type', 'geometry', 'property_owner', 'brief_description',
         'era', 'historical_description', 'primary_activities', 'surface', 'pets',
         'cell_signal', 'more_info_link', 'length_miles', 'difficulty'
       ];
+
+      // Map feature_type to poi_type for backward compatibility
+      if (req.body.feature_type && !req.body.poi_type) {
+        req.body.poi_type = req.body.feature_type;
+      }
 
       const updates = [];
       const values = [];
@@ -1897,17 +2066,26 @@ export function createAdminRouter(pool) {
 
       updates.push(`updated_at = CURRENT_TIMESTAMP`);
       updates.push(`locally_modified = TRUE`);
+      updates.push(`synced = FALSE`);
       values.push(id);
 
+      // Return all columns except geometry (which can be very large)
       const result = await pool.query(`
-        UPDATE linear_features SET ${updates.join(', ')}
+        UPDATE pois SET ${updates.join(', ')}
         WHERE id = $${paramIndex}
-        RETURNING *
+        RETURNING id, name, poi_type, latitude, longitude, property_owner,
+                  brief_description, era, historical_description, primary_activities,
+                  surface, pets, cell_signal, more_info_link, length_miles, difficulty,
+                  image_mime_type, image_drive_file_id, geometry_drive_file_id,
+                  locally_modified, deleted, synced, created_at, updated_at
       `, values);
 
       if (result.rows.length === 0) {
         return res.status(404).json({ error: 'Linear feature not found' });
       }
+
+      // Queue sync operation (only store essential data, not full geometry)
+      await queuePOISync('UPDATE', id, { id, name: result.rows[0].name, poi_type: result.rows[0].poi_type });
 
       console.log(`Admin ${req.user.email} updated linear feature ${id}`);
       res.json(result.rows[0]);
@@ -1922,8 +2100,8 @@ export function createAdminRouter(pool) {
     try {
       const { id } = req.params;
       const result = await pool.query(`
-        UPDATE linear_features
-        SET deleted = TRUE, updated_at = CURRENT_TIMESTAMP, locally_modified = TRUE
+        UPDATE pois
+        SET deleted = TRUE, updated_at = CURRENT_TIMESTAMP, locally_modified = TRUE, synced = FALSE
         WHERE id = $1
         RETURNING id, name
       `, [id]);
@@ -1931,6 +2109,9 @@ export function createAdminRouter(pool) {
       if (result.rows.length === 0) {
         return res.status(404).json({ error: 'Linear feature not found' });
       }
+
+      // Queue sync operation
+      await queuePOISync('DELETE', id, result.rows[0]);
 
       console.log(`Admin ${req.user.email} deleted linear feature ${id}`);
       res.json({ success: true, deleted: result.rows[0] });
@@ -1950,7 +2131,7 @@ export function createAdminRouter(pool) {
       }
 
       const result = await pool.query(`
-        UPDATE linear_features
+        UPDATE pois
         SET image_data = $1, image_mime_type = $2, updated_at = CURRENT_TIMESTAMP, locally_modified = TRUE
         WHERE id = $3
         RETURNING id, name, image_mime_type
@@ -1977,7 +2158,7 @@ export function createAdminRouter(pool) {
       const { id } = req.params;
 
       const result = await pool.query(`
-        UPDATE linear_features
+        UPDATE pois
         SET image_data = NULL, image_mime_type = NULL, image_drive_file_id = NULL,
             updated_at = CURRENT_TIMESTAMP, locally_modified = TRUE
         WHERE id = $1
@@ -2044,10 +2225,11 @@ export function createAdminRouter(pool) {
           for (const trail of consolidatedTrails) {
             try {
               await pool.query(`
-                INSERT INTO linear_features (name, feature_type, geometry)
+                INSERT INTO pois (name, poi_type, geometry)
                 VALUES ($1, 'trail', $2)
-                ON CONFLICT (name, feature_type) DO UPDATE SET
+                ON CONFLICT (name) DO UPDATE SET
                   geometry = EXCLUDED.geometry,
+                  poi_type = EXCLUDED.poi_type,
                   updated_at = CURRENT_TIMESTAMP
               `, [trail.name, JSON.stringify(trail.geometry)]);
               results.trails++;
@@ -2070,10 +2252,11 @@ export function createAdminRouter(pool) {
           for (const river of consolidatedRivers) {
             try {
               await pool.query(`
-                INSERT INTO linear_features (name, feature_type, geometry)
+                INSERT INTO pois (name, poi_type, geometry)
                 VALUES ($1, 'river', $2)
-                ON CONFLICT (name, feature_type) DO UPDATE SET
+                ON CONFLICT (name) DO UPDATE SET
                   geometry = EXCLUDED.geometry,
+                  poi_type = EXCLUDED.poi_type,
                   updated_at = CURRENT_TIMESTAMP
               `, [river.name, JSON.stringify(river.geometry)]);
               results.rivers++;
