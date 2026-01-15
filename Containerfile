@@ -19,7 +19,6 @@ RUN dnf install -y nodejs npm && dnf clean all
 
 # Add PostgreSQL official repository and install PostgreSQL 15
 RUN dnf install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-x86_64/pgdg-redhat-repo-latest.noarch.rpm && \
-    dnf -qy module disable postgresql && \
     dnf install -y postgresql15-server postgresql15 && \
     dnf clean all
 
