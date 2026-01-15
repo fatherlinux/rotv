@@ -1109,8 +1109,9 @@ export async function pullAllFromSheets(sheets, pool, drive = null) {
 
 /**
  * Process the sync queue - push pending changes to sheets
+ * Also uploads GeoJSON to Drive for linear features (trails/rivers)
  */
-export async function processSyncQueue(sheets, pool) {
+export async function processSyncQueue(sheets, pool, drive = null) {
   const spreadsheetId = await getSpreadsheetId(pool);
   if (!spreadsheetId) {
     throw new Error('No spreadsheet configured. Please create a spreadsheet first.');
@@ -1130,6 +1131,51 @@ export async function processSyncQueue(sheets, pool) {
 
       // Handle POI sync (unified table)
       if (item.table_name === 'destinations' || item.table_name === 'pois') {
+        // For linear features, we need to fetch full data and upload GeoJSON
+        if (drive && item.operation !== 'DELETE') {
+          const poiResult = await pool.query('SELECT * FROM pois WHERE id = $1', [item.record_id]);
+          if (poiResult.rows.length > 0) {
+            const poi = poiResult.rows[0];
+
+            // Upload GeoJSON for trails/rivers with geometry
+            if (poi.geometry && (poi.poi_type === 'trail' || poi.poi_type === 'river')) {
+              try {
+                const safeName = poi.name.replace(/[^a-zA-Z0-9-_]/g, '-').toLowerCase();
+                const filename = `${poi.poi_type}-${safeName}`;
+
+                const geojsonFeature = {
+                  type: 'Feature',
+                  properties: {
+                    name: poi.name,
+                    poi_type: poi.poi_type,
+                    brief_description: poi.brief_description,
+                    length_miles: poi.length_miles,
+                    difficulty: poi.difficulty
+                  },
+                  geometry: poi.geometry
+                };
+
+                const driveFileId = await uploadGeoJSONToDrive(drive, pool, filename, geojsonFeature);
+
+                // Update database with Drive file ID if changed
+                if (driveFileId !== poi.geometry_drive_file_id) {
+                  await pool.query(
+                    'UPDATE pois SET geometry_drive_file_id = $1 WHERE id = $2',
+                    [driveFileId, poi.id]
+                  );
+                  // Update data for sheet sync
+                  data.geometry_drive_file_id = driveFileId;
+                }
+
+                console.log(`Uploaded GeoJSON for ${poi.name} to Drive: ${driveFileId}`);
+              } catch (geoError) {
+                console.warn(`Failed to upload GeoJSON for ${poi.name}:`, geoError.message);
+                // Continue without failing - the sheet sync can still proceed
+              }
+            }
+          }
+        }
+
         if (item.operation === 'INSERT') {
           await appendPOI(sheets, spreadsheetId, data);
         } else if (item.operation === 'UPDATE') {

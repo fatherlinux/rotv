@@ -1699,8 +1699,9 @@ export function createAdminRouter(pool) {
         });
       }
 
-      const sheets = createSheetsService(req.user.oauth_credentials);
-      const result = await processSyncQueue(sheets, pool);
+      const sheets = await createSheetsServiceWithRefresh(req.user.oauth_credentials, pool, req.user.id);
+      const drive = await createDriveServiceWithRefresh(req.user.oauth_credentials, pool, req.user.id);
+      const result = await processSyncQueue(sheets, pool, drive);
 
       console.log(`Admin ${req.user.email} processed sync queue: ${result.processed} operations`);
       res.json({
