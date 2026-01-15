@@ -1,5 +1,5 @@
 # Stage 1: Build frontend
-FROM registry.access.redhat.com/ubi9/nodejs-20:latest AS frontend-builder
+FROM registry.access.redhat.com/ubi10/nodejs-24:latest AS frontend-builder
 
 USER 0
 WORKDIR /app/frontend
@@ -9,7 +9,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # Stage 2: Final image with Postgres + Node.js
-FROM registry.access.redhat.com/ubi9/ubi:latest
+FROM registry.access.redhat.com/ubi10/ubi:latest
 
 LABEL maintainer="fatherlinux"
 LABEL description="Roots of The Valley - Cuyahoga Valley National Park destination explorer"
@@ -17,17 +17,17 @@ LABEL description="Roots of The Valley - Cuyahoga Valley National Park destinati
 # Install Node.js first
 RUN dnf install -y nodejs npm && dnf clean all
 
-# Add PostgreSQL official repository and install PostgreSQL 15
-RUN dnf install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-x86_64/pgdg-redhat-repo-latest.noarch.rpm && \
-    dnf install -y postgresql15-server postgresql15 && \
+# Add PostgreSQL official repository and install PostgreSQL 17
+RUN dnf install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-10-x86_64/pgdg-redhat-repo-latest.noarch.rpm && \
+    dnf install -y postgresql17-server postgresql17 && \
     dnf clean all
 
 # Create symlinks for PostgreSQL commands
-RUN ln -s /usr/pgsql-15/bin/initdb /usr/local/bin/initdb && \
-    ln -s /usr/pgsql-15/bin/pg_ctl /usr/local/bin/pg_ctl && \
-    ln -s /usr/pgsql-15/bin/postgres /usr/local/bin/postgres && \
-    ln -s /usr/pgsql-15/bin/psql /usr/local/bin/psql && \
-    ln -s /usr/pgsql-15/bin/pg_isready /usr/local/bin/pg_isready
+RUN ln -s /usr/pgsql-17/bin/initdb /usr/local/bin/initdb && \
+    ln -s /usr/pgsql-17/bin/pg_ctl /usr/local/bin/pg_ctl && \
+    ln -s /usr/pgsql-17/bin/postgres /usr/local/bin/postgres && \
+    ln -s /usr/pgsql-17/bin/psql /usr/local/bin/psql && \
+    ln -s /usr/pgsql-17/bin/pg_isready /usr/local/bin/pg_isready
 
 # Create app user with specific UID for consistent bind mount permissions
 RUN useradd -u 1000 -m -s /bin/bash rotv
