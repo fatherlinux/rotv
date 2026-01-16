@@ -132,6 +132,21 @@ async function importGeoJSONFeatures(client) {
     }
     console.log(`Imported ${consolidatedRivers.length} rivers`);
 
+    // Import boundaries
+    const boundaryFile = path.join(dataPath, 'cvnp-boundary.geojson');
+    const boundaryData = JSON.parse(await fs.readFile(boundaryFile, 'utf-8'));
+
+    for (const feature of boundaryData.features) {
+      const name = feature.properties?.name || 'Park Boundary';
+      await client.query(
+        `INSERT INTO pois (name, poi_type, geometry)
+         VALUES ($1, 'boundary', $2)
+         ON CONFLICT (name) DO UPDATE SET geometry = EXCLUDED.geometry WHERE pois.poi_type = 'boundary'`,
+        [name, JSON.stringify(feature.geometry)]
+      );
+    }
+    console.log(`Imported ${boundaryData.features.length} boundaries`);
+
   } catch (err) {
     console.error('Error importing GeoJSON features:', err.message);
   }
@@ -145,9 +160,9 @@ async function initDatabase() {
     await client.query(`
       CREATE TABLE IF NOT EXISTS pois (
         id SERIAL PRIMARY KEY,
-        name VARCHAR(255) NOT NULL UNIQUE,
+        name VARCHAR(255) NOT NULL,
 
-        -- POI type: 'point', 'trail', or 'river'
+        -- POI type: 'point', 'trail', 'river', or 'boundary'
         poi_type VARCHAR(50) NOT NULL DEFAULT 'point',
 
         -- Point geometry (for point POIs)
@@ -191,6 +206,18 @@ async function initDatabase() {
     // Create index for faster lookups by type
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_pois_type ON pois(poi_type)
+    `);
+
+    // Create unique constraint on (name, poi_type) to allow same-named features of different types
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'pois_name_poi_type_key') THEN
+          -- Drop old name-only constraint if it exists
+          ALTER TABLE pois DROP CONSTRAINT IF EXISTS pois_name_key;
+          -- Add new constraint
+          ALTER TABLE pois ADD CONSTRAINT pois_name_poi_type_key UNIQUE (name, poi_type);
+        END IF;
+      END $$;
     `);
 
     // Migrate data from old tables if they exist
@@ -246,7 +273,7 @@ async function initDatabase() {
         ON CONFLICT (name) DO UPDATE SET
           geometry = EXCLUDED.geometry,
           poi_type = EXCLUDED.poi_type
-        WHERE pois.poi_type IN ('trail', 'river')
+        WHERE pois.poi_type IN ('trail', 'river', 'boundary')
         RETURNING id
       `);
       if (migrated.rowCount > 0) {
@@ -479,12 +506,8 @@ async function initDatabase() {
       ALTER TABLE activities DROP COLUMN IF EXISTS icon
     `);
 
-    // Import trails and rivers from GeoJSON if no linear features exist in pois table
-    const linearCount = await client.query(`SELECT COUNT(*) FROM pois WHERE poi_type IN ('trail', 'river')`);
-    if (parseInt(linearCount.rows[0].count) === 0) {
-      console.log('Importing trails and rivers from GeoJSON...');
-      await importGeoJSONFeatures(client);
-    }
+    // NOTE: Trails and rivers should only be imported via Google Sheets sync
+    // The importGeoJSONFeatures function is available via admin route for manual import if needed
 
     console.log('Database initialized');
   } finally {
@@ -650,7 +673,7 @@ app.get('/api/linear-features', async (req, res) => {
              length_miles, difficulty, image_mime_type, image_drive_file_id,
              locally_modified, deleted, synced, created_at, updated_at
       FROM pois
-      WHERE poi_type IN ('trail', 'river')
+      WHERE poi_type IN ('trail', 'river', 'boundary')
         AND (deleted IS NULL OR deleted = FALSE)
       ORDER BY poi_type, name
     `);

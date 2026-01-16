@@ -25,6 +25,26 @@ const ICONS_SHEET_NAME = 'Icons';
 const INTEGRATION_SHEET_NAME = 'Google Integration';
 const LINEAR_FEATURES_SHEET_NAME = 'Trails & Rivers';
 
+// Concurrency limit for parallel Google API calls (Google allows ~10/sec per user)
+const PARALLEL_BATCH_SIZE = 5;
+
+/**
+ * Process items in parallel batches to avoid rate limiting
+ * @param {Array} items - Array of items to process
+ * @param {Function} processor - Async function to process each item
+ * @param {number} batchSize - Number of concurrent operations (default: PARALLEL_BATCH_SIZE)
+ * @returns {Array} Results from all processed items
+ */
+async function processInParallelBatches(items, processor, batchSize = PARALLEL_BATCH_SIZE) {
+  const results = [];
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize);
+    const batchResults = await Promise.allSettled(batch.map(processor));
+    results.push(...batchResults);
+  }
+  return results;
+}
+
 // Column mapping for the unified POIs spreadsheet
 // Supports point POIs (lat/long) and linear POIs (trails/rivers with geometry)
 const COLUMNS = {
@@ -822,46 +842,47 @@ export async function pushAllToSheets(sheets, pool, drive = null) {
 
   const pois = result.rows;
 
-  // Upload GeoJSON to Drive for linear features
+  // Upload GeoJSON to Drive for linear features (parallelized)
   if (drive) {
-    for (const poi of pois) {
-      if (poi.geometry && (poi.poi_type === 'trail' || poi.poi_type === 'river')) {
-        try {
-          // Create a sanitized filename from the POI name
-          const safeName = poi.name.replace(/[^a-zA-Z0-9-_]/g, '-').toLowerCase();
-          const filename = `${poi.poi_type}-${safeName}`;
+    const linearFeatures = pois.filter(poi =>
+      poi.geometry && (poi.poi_type === 'trail' || poi.poi_type === 'river' || poi.poi_type === 'boundary')
+    );
 
-          // Create a GeoJSON Feature for this POI
-          const geojsonFeature = {
-            type: 'Feature',
-            properties: {
-              name: poi.name,
-              poi_type: poi.poi_type,
-              brief_description: poi.brief_description,
-              length_miles: poi.length_miles,
-              difficulty: poi.difficulty
-            },
-            geometry: poi.geometry
-          };
+    if (linearFeatures.length > 0) {
+      console.log(`Uploading ${linearFeatures.length} GeoJSON files in parallel batches of ${PARALLEL_BATCH_SIZE}...`);
 
-          // Upload to Drive
-          const driveFileId = await uploadGeoJSONToDrive(drive, pool, filename, geojsonFeature);
+      await processInParallelBatches(linearFeatures, async (poi) => {
+        // Create a sanitized filename from the POI name
+        const safeName = poi.name.replace(/[^a-zA-Z0-9-_]/g, '-').toLowerCase();
+        const filename = `${poi.poi_type}-${safeName}`;
 
-          // Update database with Drive file ID if it changed
-          if (driveFileId !== poi.geometry_drive_file_id) {
-            await pool.query(
-              'UPDATE pois SET geometry_drive_file_id = $1 WHERE id = $2',
-              [driveFileId, poi.id]
-            );
-            poi.geometry_drive_file_id = driveFileId;
-          }
+        // Create a GeoJSON Feature for this POI
+        const geojsonFeature = {
+          type: 'Feature',
+          properties: {
+            name: poi.name,
+            poi_type: poi.poi_type,
+            brief_description: poi.brief_description,
+            length_miles: poi.length_miles,
+            difficulty: poi.difficulty
+          },
+          geometry: poi.geometry
+        };
 
-          console.log(`Uploaded GeoJSON for ${poi.name} to Drive: ${driveFileId}`);
-        } catch (geoError) {
-          console.warn(`Failed to upload GeoJSON for ${poi.name}:`, geoError.message);
-          // Continue without failing the entire push
+        // Upload to Drive
+        const driveFileId = await uploadGeoJSONToDrive(drive, pool, filename, geojsonFeature);
+
+        // Update database with Drive file ID if it changed
+        if (driveFileId !== poi.geometry_drive_file_id) {
+          await pool.query(
+            'UPDATE pois SET geometry_drive_file_id = $1 WHERE id = $2',
+            [driveFileId, poi.id]
+          );
+          poi.geometry_drive_file_id = driveFileId;
         }
-      }
+
+        console.log(`Uploaded GeoJSON for ${poi.name} to Drive: ${driveFileId}`);
+      });
     }
   }
 
@@ -915,12 +936,13 @@ export async function pullAllFromSheets(sheets, pool, drive = null) {
 
   // Separate point POIs from linear POIs
   const pointPOIs = pois.filter(p => p.poi_type === 'point' || !p.poi_type);
-  const linearPOIs = pois.filter(p => p.poi_type === 'trail' || p.poi_type === 'river');
+  const linearPOIs = pois.filter(p => p.poi_type === 'trail' || p.poi_type === 'river' || p.poi_type === 'boundary');
 
   // Clear local point-type POIs only (preserve trails and rivers with geometry)
   await pool.query(`DELETE FROM pois WHERE poi_type = 'point'`);
 
-  // Insert point POIs from sheets
+  // Insert point POIs from sheets (DB inserts are fast, do sequentially for data integrity)
+  const insertedPointPOIs = [];
   for (const poi of pointPOIs) {
     if (!poi.name) continue;
 
@@ -931,6 +953,23 @@ export async function pullAllFromSheets(sheets, pool, drive = null) {
         pets, cell_signal, more_info_link, image_drive_file_id,
         synced, locally_modified, deleted, created_at, updated_at
       ) VALUES ($1, 'point', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, TRUE, FALSE, FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      ON CONFLICT (name, poi_type) DO UPDATE SET
+        latitude = EXCLUDED.latitude,
+        longitude = EXCLUDED.longitude,
+        property_owner = EXCLUDED.property_owner,
+        brief_description = EXCLUDED.brief_description,
+        era = EXCLUDED.era,
+        historical_description = EXCLUDED.historical_description,
+        primary_activities = EXCLUDED.primary_activities,
+        surface = EXCLUDED.surface,
+        pets = EXCLUDED.pets,
+        cell_signal = EXCLUDED.cell_signal,
+        more_info_link = EXCLUDED.more_info_link,
+        image_drive_file_id = EXCLUDED.image_drive_file_id,
+        synced = TRUE,
+        locally_modified = FALSE,
+        deleted = FALSE,
+        updated_at = CURRENT_TIMESTAMP
       RETURNING id
     `, [
       poi.name, poi.latitude, poi.longitude, poi.property_owner,
@@ -939,118 +978,121 @@ export async function pullAllFromSheets(sheets, pool, drive = null) {
       poi.more_info_link, poi.image_drive_file_id
     ]);
 
-    const poiId = result.rows[0].id;
-
-    // Download image from Drive if available
-    if (poi.image_drive_file_id && drive) {
-      try {
-        const imageBuffer = await downloadFileFromDrive(drive, poi.image_drive_file_id);
-        if (imageBuffer) {
-          let mimeType = 'image/jpeg';
-          if (imageBuffer[0] === 0x89 && imageBuffer[1] === 0x50) mimeType = 'image/png';
-          else if (imageBuffer[0] === 0x47 && imageBuffer[1] === 0x49) mimeType = 'image/gif';
-          else if (imageBuffer[0] === 0x52 && imageBuffer[1] === 0x49) mimeType = 'image/webp';
-
-          await pool.query(`
-            UPDATE pois SET image_data = $1, image_mime_type = $2 WHERE id = $3
-          `, [imageBuffer, mimeType, poiId]);
-
-          console.log(`Downloaded image for POI: ${poi.name}`);
-        }
-      } catch (imageError) {
-        console.warn(`Failed to download image for ${poi.name}:`, imageError.message);
-      }
+    if (poi.image_drive_file_id) {
+      insertedPointPOIs.push({ id: result.rows[0].id, name: poi.name, image_drive_file_id: poi.image_drive_file_id });
     }
   }
 
-  // Update or create linear POIs
-  for (const poi of linearPOIs) {
-    if (!poi.name) continue;
+  // Download images for point POIs in parallel batches
+  if (drive && insertedPointPOIs.length > 0) {
+    console.log(`Downloading ${insertedPointPOIs.length} point POI images in parallel batches of ${PARALLEL_BATCH_SIZE}...`);
 
-    // Check if linear feature exists in database
-    const existing = await pool.query(
-      'SELECT id, image_drive_file_id, geometry_drive_file_id FROM pois WHERE name = $1 AND poi_type = $2',
-      [poi.name, poi.poi_type]
-    );
+    await processInParallelBatches(insertedPointPOIs, async (poi) => {
+      const imageBuffer = await downloadFileFromDrive(drive, poi.image_drive_file_id);
+      if (imageBuffer) {
+        let mimeType = 'image/jpeg';
+        if (imageBuffer[0] === 0x89 && imageBuffer[1] === 0x50) mimeType = 'image/png';
+        else if (imageBuffer[0] === 0x47 && imageBuffer[1] === 0x49) mimeType = 'image/gif';
+        else if (imageBuffer[0] === 0x52 && imageBuffer[1] === 0x49) mimeType = 'image/webp';
 
-    if (existing.rows.length > 0) {
-      const existingId = existing.rows[0].id;
-      const existingGeoDriveId = existing.rows[0].geometry_drive_file_id;
-
-      // Download geometry from Drive if file ID changed
-      let geometry = null;
-      if (poi.geometry_drive_file_id && drive && poi.geometry_drive_file_id !== existingGeoDriveId) {
-        try {
-          const geojson = await downloadGeoJSONFromDrive(drive, poi.geometry_drive_file_id);
-          if (geojson && geojson.geometry) {
-            geometry = geojson.geometry;
-            console.log(`Downloaded GeoJSON for linear feature: ${poi.name}`);
-          }
-        } catch (geoError) {
-          console.warn(`Failed to download GeoJSON for ${poi.name}:`, geoError.message);
-        }
-      }
-
-      // Update metadata (and geometry if downloaded)
-      if (geometry) {
         await pool.query(`
-          UPDATE pois SET
-            property_owner = $1, brief_description = $2, era = $3,
-            historical_description = $4, primary_activities = $5, surface = $6,
-            pets = $7, cell_signal = $8, more_info_link = $9,
-            length_miles = $10, difficulty = $11, image_drive_file_id = $12,
-            geometry_drive_file_id = $13, geometry = $14, updated_at = CURRENT_TIMESTAMP,
-            synced = TRUE, locally_modified = FALSE
-          WHERE id = $15
-        `, [
-          poi.property_owner, poi.brief_description, poi.era,
-          poi.historical_description, poi.primary_activities, poi.surface,
-          poi.pets, poi.cell_signal, poi.more_info_link,
-          poi.length_miles, poi.difficulty, poi.image_drive_file_id,
-          poi.geometry_drive_file_id, JSON.stringify(geometry), existingId
-        ]);
-      } else {
-        await pool.query(`
-          UPDATE pois SET
-            property_owner = $1, brief_description = $2, era = $3,
-            historical_description = $4, primary_activities = $5, surface = $6,
-            pets = $7, cell_signal = $8, more_info_link = $9,
-            length_miles = $10, difficulty = $11, image_drive_file_id = $12,
-            geometry_drive_file_id = $13, updated_at = CURRENT_TIMESTAMP,
-            synced = TRUE, locally_modified = FALSE
-          WHERE id = $14
-        `, [
-          poi.property_owner, poi.brief_description, poi.era,
-          poi.historical_description, poi.primary_activities, poi.surface,
-          poi.pets, poi.cell_signal, poi.more_info_link,
-          poi.length_miles, poi.difficulty, poi.image_drive_file_id,
-          poi.geometry_drive_file_id, existingId
-        ]);
+          UPDATE pois SET image_data = $1, image_mime_type = $2 WHERE id = $3
+        `, [imageBuffer, mimeType, poi.id]);
+
+        console.log(`Downloaded image for POI: ${poi.name}`);
       }
+    });
+  }
 
-      // Download image if changed
-      if (poi.image_drive_file_id && drive && poi.image_drive_file_id !== existing.rows[0].image_drive_file_id) {
-        try {
-          const imageBuffer = await downloadFileFromDrive(drive, poi.image_drive_file_id);
-          if (imageBuffer) {
-            let mimeType = 'image/jpeg';
-            if (imageBuffer[0] === 0x89 && imageBuffer[1] === 0x50) mimeType = 'image/png';
-            else if (imageBuffer[0] === 0x47 && imageBuffer[1] === 0x49) mimeType = 'image/gif';
-            else if (imageBuffer[0] === 0x52 && imageBuffer[1] === 0x49) mimeType = 'image/webp';
+  // Update or create linear POIs (parallelized Drive downloads)
+  if (linearPOIs.length > 0 && drive) {
+    console.log(`Processing ${linearPOIs.length} linear POIs with parallel Drive downloads...`);
 
-            await pool.query(`
-              UPDATE pois SET image_data = $1, image_mime_type = $2 WHERE id = $3
-            `, [imageBuffer, mimeType, existingId]);
+    // Collect all download tasks for GeoJSON and images
+    const geoJsonDownloads = [];
+    const imageDownloads = [];
+    const newLinearPOIs = [];
 
-            console.log(`Downloaded image for linear feature: ${poi.name}`);
-          }
-        } catch (imageError) {
-          console.warn(`Failed to download image for ${poi.name}:`, imageError.message);
+    // First pass: update metadata and identify what needs downloading
+    for (const poi of linearPOIs) {
+      if (!poi.name) continue;
+
+      const existing = await pool.query(
+        'SELECT id, image_drive_file_id, geometry_drive_file_id FROM pois WHERE name = $1 AND poi_type = $2',
+        [poi.name, poi.poi_type]
+      );
+
+      if (existing.rows.length > 0) {
+        const existingId = existing.rows[0].id;
+        const existingGeoDriveId = existing.rows[0].geometry_drive_file_id;
+        const existingImgDriveId = existing.rows[0].image_drive_file_id;
+
+        // Queue GeoJSON download if file ID changed
+        if (poi.geometry_drive_file_id && poi.geometry_drive_file_id !== existingGeoDriveId) {
+          geoJsonDownloads.push({ id: existingId, name: poi.name, geometry_drive_file_id: poi.geometry_drive_file_id, poi });
+        } else {
+          // Update metadata without geometry
+          await pool.query(`
+            UPDATE pois SET
+              property_owner = $1, brief_description = $2, era = $3,
+              historical_description = $4, primary_activities = $5, surface = $6,
+              pets = $7, cell_signal = $8, more_info_link = $9,
+              length_miles = $10, difficulty = $11, image_drive_file_id = $12,
+              geometry_drive_file_id = $13, updated_at = CURRENT_TIMESTAMP,
+              synced = TRUE, locally_modified = FALSE
+            WHERE id = $14
+          `, [
+            poi.property_owner, poi.brief_description, poi.era,
+            poi.historical_description, poi.primary_activities, poi.surface,
+            poi.pets, poi.cell_signal, poi.more_info_link,
+            poi.length_miles, poi.difficulty, poi.image_drive_file_id,
+            poi.geometry_drive_file_id, existingId
+          ]);
         }
+
+        // Queue image download if file ID changed
+        if (poi.image_drive_file_id && poi.image_drive_file_id !== existingImgDriveId) {
+          imageDownloads.push({ id: existingId, name: poi.name, image_drive_file_id: poi.image_drive_file_id });
+        }
+      } else if (poi.geometry_drive_file_id) {
+        // New linear feature - queue for creation
+        newLinearPOIs.push(poi);
       }
-    } else if (poi.geometry_drive_file_id && drive) {
-      // New linear feature with geometry in Drive - download and create it
-      try {
+    }
+
+    // Download GeoJSON files in parallel batches
+    if (geoJsonDownloads.length > 0) {
+      console.log(`Downloading ${geoJsonDownloads.length} GeoJSON files in parallel batches of ${PARALLEL_BATCH_SIZE}...`);
+
+      await processInParallelBatches(geoJsonDownloads, async (item) => {
+        const geojson = await downloadGeoJSONFromDrive(drive, item.geometry_drive_file_id);
+        if (geojson && geojson.geometry) {
+          await pool.query(`
+            UPDATE pois SET
+              property_owner = $1, brief_description = $2, era = $3,
+              historical_description = $4, primary_activities = $5, surface = $6,
+              pets = $7, cell_signal = $8, more_info_link = $9,
+              length_miles = $10, difficulty = $11, image_drive_file_id = $12,
+              geometry_drive_file_id = $13, geometry = $14, updated_at = CURRENT_TIMESTAMP,
+              synced = TRUE, locally_modified = FALSE
+            WHERE id = $15
+          `, [
+            item.poi.property_owner, item.poi.brief_description, item.poi.era,
+            item.poi.historical_description, item.poi.primary_activities, item.poi.surface,
+            item.poi.pets, item.poi.cell_signal, item.poi.more_info_link,
+            item.poi.length_miles, item.poi.difficulty, item.poi.image_drive_file_id,
+            item.poi.geometry_drive_file_id, JSON.stringify(geojson.geometry), item.id
+          ]);
+          console.log(`Downloaded GeoJSON for linear feature: ${item.name}`);
+        }
+      });
+    }
+
+    // Create new linear features with parallel GeoJSON downloads
+    if (newLinearPOIs.length > 0) {
+      console.log(`Creating ${newLinearPOIs.length} new linear features with parallel downloads...`);
+
+      await processInParallelBatches(newLinearPOIs, async (poi) => {
         const geojson = await downloadGeoJSONFromDrive(drive, poi.geometry_drive_file_id);
         if (geojson && geojson.geometry) {
           const result = await pool.query(`
@@ -1071,30 +1113,63 @@ export async function pullAllFromSheets(sheets, pool, drive = null) {
 
           console.log(`Created linear feature from Drive: ${poi.name}`);
 
-          // Download image if available
+          // Queue image download for new feature
           if (poi.image_drive_file_id) {
-            try {
-              const imageBuffer = await downloadFileFromDrive(drive, poi.image_drive_file_id);
-              if (imageBuffer) {
-                let mimeType = 'image/jpeg';
-                if (imageBuffer[0] === 0x89 && imageBuffer[1] === 0x50) mimeType = 'image/png';
-                else if (imageBuffer[0] === 0x47 && imageBuffer[1] === 0x49) mimeType = 'image/gif';
-                else if (imageBuffer[0] === 0x52 && imageBuffer[1] === 0x49) mimeType = 'image/webp';
-
-                await pool.query(`
-                  UPDATE pois SET image_data = $1, image_mime_type = $2 WHERE id = $3
-                `, [imageBuffer, mimeType, result.rows[0].id]);
-              }
-            } catch (imgErr) {
-              console.warn(`Failed to download image for new linear feature ${poi.name}:`, imgErr.message);
-            }
+            imageDownloads.push({ id: result.rows[0].id, name: poi.name, image_drive_file_id: poi.image_drive_file_id });
           }
         }
-      } catch (geoError) {
-        console.warn(`Failed to create linear feature ${poi.name} from Drive:`, geoError.message);
+      });
+    }
+
+    // Download all images in parallel batches
+    if (imageDownloads.length > 0) {
+      console.log(`Downloading ${imageDownloads.length} linear POI images in parallel batches of ${PARALLEL_BATCH_SIZE}...`);
+
+      await processInParallelBatches(imageDownloads, async (item) => {
+        const imageBuffer = await downloadFileFromDrive(drive, item.image_drive_file_id);
+        if (imageBuffer) {
+          let mimeType = 'image/jpeg';
+          if (imageBuffer[0] === 0x89 && imageBuffer[1] === 0x50) mimeType = 'image/png';
+          else if (imageBuffer[0] === 0x47 && imageBuffer[1] === 0x49) mimeType = 'image/gif';
+          else if (imageBuffer[0] === 0x52 && imageBuffer[1] === 0x49) mimeType = 'image/webp';
+
+          await pool.query(`
+            UPDATE pois SET image_data = $1, image_mime_type = $2 WHERE id = $3
+          `, [imageBuffer, mimeType, item.id]);
+
+          console.log(`Downloaded image for linear feature: ${item.name}`);
+        }
+      });
+    }
+  } else if (linearPOIs.length > 0) {
+    // No drive - just update metadata sequentially
+    for (const poi of linearPOIs) {
+      if (!poi.name) continue;
+
+      const existing = await pool.query(
+        'SELECT id FROM pois WHERE name = $1 AND poi_type = $2',
+        [poi.name, poi.poi_type]
+      );
+
+      if (existing.rows.length > 0) {
+        await pool.query(`
+          UPDATE pois SET
+            property_owner = $1, brief_description = $2, era = $3,
+            historical_description = $4, primary_activities = $5, surface = $6,
+            pets = $7, cell_signal = $8, more_info_link = $9,
+            length_miles = $10, difficulty = $11, image_drive_file_id = $12,
+            geometry_drive_file_id = $13, updated_at = CURRENT_TIMESTAMP,
+            synced = TRUE, locally_modified = FALSE
+          WHERE id = $14
+        `, [
+          poi.property_owner, poi.brief_description, poi.era,
+          poi.historical_description, poi.primary_activities, poi.surface,
+          poi.pets, poi.cell_signal, poi.more_info_link,
+          poi.length_miles, poi.difficulty, poi.image_drive_file_id,
+          poi.geometry_drive_file_id, existing.rows[0].id
+        ]);
       }
     }
-    // Note: Linear features without geometry_drive_file_id cannot be created from sheet
   }
 
   // Update sync status
@@ -1110,6 +1185,7 @@ export async function pullAllFromSheets(sheets, pool, drive = null) {
 /**
  * Process the sync queue - push pending changes to sheets
  * Also uploads GeoJSON to Drive for linear features (trails/rivers)
+ * Parallelized for better performance with large queues
  */
 export async function processSyncQueue(sheets, pool, drive = null) {
   const spreadsheetId = await getSpreadsheetId(pool);
@@ -1125,75 +1201,140 @@ export async function processSyncQueue(sheets, pool, drive = null) {
   let processed = 0;
   const errors = [];
 
-  for (const item of queue) {
-    try {
-      const data = item.data;
+  if (queue.length === 0) {
+    return { processed, errors };
+  }
 
-      // Handle POI sync (unified table)
-      if (item.table_name === 'destinations' || item.table_name === 'pois') {
-        // For linear features, we need to fetch full data and upload GeoJSON
-        if (drive && item.operation !== 'DELETE') {
-          const poiResult = await pool.query('SELECT * FROM pois WHERE id = $1', [item.record_id]);
-          if (poiResult.rows.length > 0) {
-            const poi = poiResult.rows[0];
+  console.log(`Processing ${queue.length} sync queue items...`);
 
-            // Upload GeoJSON for trails/rivers with geometry
-            if (poi.geometry && (poi.poi_type === 'trail' || poi.poi_type === 'river')) {
-              try {
-                const safeName = poi.name.replace(/[^a-zA-Z0-9-_]/g, '-').toLowerCase();
-                const filename = `${poi.poi_type}-${safeName}`;
+  // Phase 1: Upload GeoJSON files for linear features in parallel batches
+  if (drive) {
+    const geoJsonUploads = [];
 
-                const geojsonFeature = {
-                  type: 'Feature',
-                  properties: {
-                    name: poi.name,
-                    poi_type: poi.poi_type,
-                    brief_description: poi.brief_description,
-                    length_miles: poi.length_miles,
-                    difficulty: poi.difficulty
-                  },
-                  geometry: poi.geometry
-                };
+    for (const item of queue) {
+      if (item.operation === 'DELETE') continue;
+      if (item.table_name !== 'destinations' && item.table_name !== 'pois') continue;
 
-                const driveFileId = await uploadGeoJSONToDrive(drive, pool, filename, geojsonFeature);
-
-                // Update database with Drive file ID if changed
-                if (driveFileId !== poi.geometry_drive_file_id) {
-                  await pool.query(
-                    'UPDATE pois SET geometry_drive_file_id = $1 WHERE id = $2',
-                    [driveFileId, poi.id]
-                  );
-                  // Update data for sheet sync
-                  data.geometry_drive_file_id = driveFileId;
-                }
-
-                console.log(`Uploaded GeoJSON for ${poi.name} to Drive: ${driveFileId}`);
-              } catch (geoError) {
-                console.warn(`Failed to upload GeoJSON for ${poi.name}:`, geoError.message);
-                // Continue without failing - the sheet sync can still proceed
-              }
-            }
-          }
-        }
-
-        if (item.operation === 'INSERT') {
-          await appendPOI(sheets, spreadsheetId, data);
-        } else if (item.operation === 'UPDATE') {
-          await updatePOI(sheets, spreadsheetId, data.name, data);
-        } else if (item.operation === 'DELETE') {
-          await deletePOI(sheets, spreadsheetId, data.name);
+      const poiResult = await pool.query('SELECT * FROM pois WHERE id = $1', [item.record_id]);
+      if (poiResult.rows.length > 0) {
+        const poi = poiResult.rows[0];
+        if (poi.geometry && (poi.poi_type === 'trail' || poi.poi_type === 'river' || poi.poi_type === 'boundary')) {
+          geoJsonUploads.push({ item, poi });
         }
       }
+    }
 
+    if (geoJsonUploads.length > 0) {
+      console.log(`Uploading ${geoJsonUploads.length} GeoJSON files in parallel batches of ${PARALLEL_BATCH_SIZE}...`);
+
+      await processInParallelBatches(geoJsonUploads, async ({ item, poi }) => {
+        const safeName = poi.name.replace(/[^a-zA-Z0-9-_]/g, '-').toLowerCase();
+        const filename = `${poi.poi_type}-${safeName}`;
+
+        const geojsonFeature = {
+          type: 'Feature',
+          properties: {
+            name: poi.name,
+            poi_type: poi.poi_type,
+            brief_description: poi.brief_description,
+            length_miles: poi.length_miles,
+            difficulty: poi.difficulty
+          },
+          geometry: poi.geometry
+        };
+
+        const driveFileId = await uploadGeoJSONToDrive(drive, pool, filename, geojsonFeature);
+
+        // Update database with Drive file ID if changed
+        if (driveFileId !== poi.geometry_drive_file_id) {
+          await pool.query(
+            'UPDATE pois SET geometry_drive_file_id = $1 WHERE id = $2',
+            [driveFileId, poi.id]
+          );
+          // Update data for sheet sync
+          item.data.geometry_drive_file_id = driveFileId;
+        }
+
+        console.log(`Uploaded GeoJSON for ${poi.name} to Drive: ${driveFileId}`);
+      });
+    }
+  }
+
+  // Phase 2: Process Sheets operations in parallel batches
+  // Group by operation type for better ordering (deletes first, then updates, then inserts)
+  const deleteOps = queue.filter(i => i.operation === 'DELETE');
+  const updateOps = queue.filter(i => i.operation === 'UPDATE');
+  const insertOps = queue.filter(i => i.operation === 'INSERT');
+
+  // Track which table types we've already synced (to avoid redundant pushes)
+  const syncedTables = new Set();
+
+  const processSheetOp = async (item) => {
+    const data = item.data;
+
+    if (item.table_name === 'destinations' || item.table_name === 'pois') {
+      if (item.operation === 'INSERT') {
+        await appendPOI(sheets, spreadsheetId, data);
+      } else if (item.operation === 'UPDATE') {
+        await updatePOI(sheets, spreadsheetId, data.name, data);
+      } else if (item.operation === 'DELETE') {
+        await deletePOI(sheets, spreadsheetId, data.name);
+      }
       await pool.query(`
         UPDATE pois SET synced = TRUE WHERE id = $1
       `, [item.record_id]);
+    } else if (item.table_name === 'activities' && !syncedTables.has('activities')) {
+      // For small reference tables, do a full push (more reliable than row-level updates)
+      // Add to set BEFORE awaiting to prevent race conditions in parallel processing
+      syncedTables.add('activities');
+      await pushActivitiesToSheets(sheets, pool);
+      console.log('Synced activities table to Google Sheets');
+    } else if (item.table_name === 'eras' && !syncedTables.has('eras')) {
+      syncedTables.add('eras');
+      await pushErasToSheets(sheets, pool);
+      console.log('Synced eras table to Google Sheets');
+    } else if (item.table_name === 'surfaces' && !syncedTables.has('surfaces')) {
+      syncedTables.add('surfaces');
+      await pushSurfacesToSheets(sheets, pool);
+      console.log('Synced surfaces table to Google Sheets');
+    } else if (item.table_name === 'icons' && !syncedTables.has('icons')) {
+      syncedTables.add('icons');
+      await pushIconsToSheets(sheets, pool);
+      console.log('Synced icons table to Google Sheets');
+    } else if (item.table_name === 'settings' && !syncedTables.has('settings')) {
+      syncedTables.add('settings');
+      await pushIntegrationToSheets(sheets, pool);
+      console.log('Synced settings (Integration) table to Google Sheets');
+    }
 
-      await pool.query('DELETE FROM sync_queue WHERE id = $1', [item.id]);
-      processed++;
-    } catch (error) {
-      console.error(`Sync error for queue item ${item.id}:`, error.message);
-      errors.push({ id: item.id, error: error.message });
+    await pool.query('DELETE FROM sync_queue WHERE id = $1', [item.id]);
+    return item.id;
+  };
+
+  // Process in order: deletes -> updates -> inserts, each in parallel batches
+  for (const [opName, opQueue] of [['DELETE', deleteOps], ['UPDATE', updateOps], ['INSERT', insertOps]]) {
+    if (opQueue.length > 0) {
+      console.log(`Processing ${opQueue.length} ${opName} operations in parallel batches of ${PARALLEL_BATCH_SIZE}...`);
+
+      const results = await processInParallelBatches(opQueue, async (item) => {
+        try {
+          await processSheetOp(item);
+          return { success: true, id: item.id };
+        } catch (error) {
+          console.error(`Sync error for queue item ${item.id}:`, error.message);
+          return { success: false, id: item.id, error: error.message };
+        }
+      });
+
+      for (const result of results) {
+        if (result.status === 'fulfilled' && result.value.success) {
+          processed++;
+        } else if (result.status === 'fulfilled' && !result.value.success) {
+          errors.push({ id: result.value.id, error: result.value.error });
+        } else if (result.status === 'rejected') {
+          errors.push({ id: 'unknown', error: result.reason?.message || 'Unknown error' });
+        }
+      }
     }
   }
 
@@ -2505,7 +2646,7 @@ export async function pushLinearFeaturesToSheets(sheets, pool) {
            historical_description, primary_activities, surface, pets,
            cell_signal, more_info_link, length_miles, difficulty, image_drive_file_id
     FROM pois
-    WHERE poi_type IN ('trail', 'river')
+    WHERE poi_type IN ('trail', 'river', 'boundary')
       AND (deleted IS NULL OR deleted = FALSE)
     ORDER BY poi_type, name
   `);

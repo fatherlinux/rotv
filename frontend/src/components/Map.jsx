@@ -106,7 +106,7 @@ function getOwnerType(owner) {
   return 'other';
 }
 
-function Legend({ showMapOverlay, onToggleMapOverlay, showVectorLayers, onToggleVectorLayers, onOpenAdmin, visibleTypes, onToggleType, onShowAll, onHideAll, activeTab, iconConfig }) {
+function Legend({ showMapOverlay, onToggleMapOverlay, showVectorLayers, onToggleVectorLayers, onOpenAdmin, visibleTypes, onToggleType, onShowAll, onHideAll, activeTab, iconConfig, onFileSelect, selectedFileName, importType, onImportTypeChange, onImportFile, importingFile, importMessage, onDismissMessage }) {
   const isEditTab = activeTab === 'edit';
 
   // Convert iconConfig to the format needed for legend display
@@ -188,8 +188,43 @@ function Legend({ showMapOverlay, onToggleMapOverlay, showVectorLayers, onToggle
       {isEditTab && (
         <>
           <div className="legend-divider"></div>
-          <h4>Edit Tools</h4>
-          <p className="edit-mode-hint">Click a marker or trail to select, then edit in sidebar. Drag markers to move.</p>
+          <h4>Import Spatial Data</h4>
+          <p className="edit-mode-hint">Import trails, rivers, or boundaries from GeoJSON files:</p>
+          <div className="spatial-import-form">
+            <input
+              type="file"
+              accept=".geojson,.json"
+              onChange={onFileSelect}
+              className="file-input-visible"
+            />
+            <select
+              className="import-type-select"
+              value={importType}
+              onChange={(e) => onImportTypeChange(e.target.value)}
+            >
+              <option value="trail">Trail</option>
+              <option value="river">River</option>
+              <option value="boundary">Boundary</option>
+            </select>
+            <button
+              className="admin-btn import-btn"
+              onClick={onImportFile}
+              disabled={importingFile || !selectedFileName}
+            >
+              {importingFile ? 'Importing...' : 'Import'}
+            </button>
+          </div>
+          {importMessage && (
+            <div className={`import-message import-${importMessage.type}`}>
+              <span>{importMessage.text}</span>
+              {importMessage.type === 'warning' && (
+                <button className="admin-btn" onClick={() => window.location.reload()}>
+                  Refresh
+                </button>
+              )}
+              <button className="dismiss-btn" onClick={onDismissMessage}>×</button>
+            </div>
+          )}
           <div className="legend-divider"></div>
           <h4>Map Alignment</h4>
           <button className="admin-btn" onClick={onOpenAdmin}>
@@ -343,15 +378,6 @@ const DEFAULT_NPS_MAP_BOUNDS = [
   [41.4226, -81.4706]   // Northeast corner
 ];
 
-// Style for park boundary
-const boundaryStyle = {
-  color: '#2d5016',
-  weight: 3,
-  fillColor: '#4a7c23',
-  fillOpacity: 0.15,
-  dashArray: '5, 5'
-};
-
 // Default icon type IDs for initializing the filter (before config loads)
 const DEFAULT_ICON_TYPES = new Set(['visitor-center', 'waterfall', 'trail', 'historic', 'bridge', 'train', 'nature', 'skiing', 'biking', 'picnic', 'camping', 'music', 'default']);
 
@@ -362,6 +388,11 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
   const [mapBounds, setMapBounds] = useState(DEFAULT_NPS_MAP_BOUNDS);
   const [overlayOpacity, setOverlayOpacity] = useState(1.0);
   const [visibleTypes, setVisibleTypes] = useState(new Set(DEFAULT_ICON_TYPES));
+  const [selectedFileName, setSelectedFileName] = useState(null); // Just for UI display
+  const [importType, setImportType] = useState('trail');
+  const [importingFile, setImportingFile] = useState(false);
+  const [importMessage, setImportMessage] = useState(null);
+  const fileRef = useRef(null); // Store File object in ref to avoid React re-renders
 
   // Icon configuration from database
   const [iconConfig, setIconConfig] = useState([]);
@@ -420,8 +451,7 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
   const [pendingUpdate, setPendingUpdate] = useState(null);
   const [saving, setSaving] = useState(false);
 
-  // GeoJSON layer data (boundary only - trails/rivers come from linearFeatures prop)
-  const [boundary, setBoundary] = useState(null);
+  // Note: Boundaries now come from linearFeatures prop along with trails/rivers
 
   // Filter handlers
   const handleToggleType = (typeId) => {
@@ -438,6 +468,77 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
 
   const handleShowAll = () => setVisibleTypes(new Set(allIconTypes));
   const handleHideAll = () => setVisibleTypes(new Set());
+
+  // Handle file selection - store in ref (no re-render), update name for UI
+  const handleFileSelect = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    fileRef.current = file; // Store in ref - no re-render
+    setSelectedFileName(file.name); // Update UI
+  };
+
+  // Handle file import - read File from ref and send as JSON
+  const handleImportFile = async () => {
+    const file = fileRef.current;
+    if (!file) return;
+
+    setImportingFile(true);
+    setImportMessage(null);
+
+    try {
+      // Read file content
+      const content = await file.text();
+
+      // Parse to validate it's valid JSON
+      let geojson;
+      try {
+        geojson = JSON.parse(content);
+      } catch (e) {
+        setImportMessage({ type: 'error', text: 'Invalid JSON file' });
+        setImportingFile(false);
+        return;
+      }
+
+      // Send as JSON
+      const response = await fetch('/api/admin/spatial/import', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          feature_type: importType,
+          geojson: geojson,
+          filename: file.name
+        })
+      });
+
+      const result = await response.json();
+      if (response.ok) {
+        setImportMessage({
+          type: 'success',
+          text: `Imported ${result.imported} ${importType}${result.imported !== 1 ? 's' : ''}. Refreshing...`
+        });
+        fileRef.current = null;
+        setSelectedFileName(null);
+        setTimeout(() => window.location.reload(), 1500);
+      } else {
+        setImportMessage({ type: 'error', text: result.error || 'Import failed' });
+      }
+    } catch (err) {
+      setImportMessage({ type: 'error', text: err.message || 'Import failed' });
+    } finally {
+      setImportingFile(false);
+    }
+  };
+
+  // Clear import message
+  const handleDismissMessage = () => {
+    setImportMessage(null);
+  };
+
+  // Cancel file selection
+  const handleCancelImport = () => {
+    setSelectedFile(null);
+  };
 
   // Handle marker drag end
   const handleMarkerDragEnd = (dest, newLat, newLng) => {
@@ -489,13 +590,7 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
     setPendingUpdate(null);
   };
 
-  // Load GeoJSON data (boundary only - trails/rivers come from database)
-  useEffect(() => {
-    fetch('/data/cvnp-boundary.geojson')
-      .then(res => res.json())
-      .then(data => setBoundary(data))
-      .catch(err => console.error('Failed to load boundary:', err));
-  }, []);
+  // Note: All linear features (trails, rivers, boundaries) now come from database via linearFeatures prop
 
   // Handle linear feature click (trail or river)
   const handleLinearFeatureClick = (feature) => {
@@ -516,6 +611,16 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
       return {
         ...baseStyle,
         color: isSelected ? '#0066CC' : '#1E90FF'
+      };
+    } else if (feature.feature_type === 'boundary') {
+      // Park boundaries - dashed green outline with fill
+      return {
+        color: isSelected ? '#1a3d0a' : '#2d5016',
+        weight: isSelected ? 4 : 3,
+        fillColor: '#4a7c23',
+        fillOpacity: isSelected ? 0.25 : 0.15,
+        dashArray: '5, 5',
+        opacity: 1
       };
     } else {
       // trail
@@ -555,12 +660,7 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
           />
         )}
 
-        {/* Vector layers - boundary (static) */}
-        {showVectorLayers && boundary && (
-          <GeoJSON data={boundary} style={boundaryStyle} />
-        )}
-
-        {/* Clickable linear features (trails and rivers from database) */}
+        {/* Clickable linear features (trails, rivers, and boundaries from database) */}
         {showVectorLayers && linearFeatures && linearFeatures.map(feature => {
           const isSelected = selectedLinearFeature?.id === feature.id;
           const geojsonData = {
@@ -676,6 +776,15 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
         onHideAll={handleHideAll}
         activeTab={activeTab}
         iconConfig={iconConfig}
+        onFileSelect={handleFileSelect}
+        selectedFileName={selectedFileName}
+        importType={importType}
+        onImportTypeChange={setImportType}
+        onImportFile={handleImportFile}
+        importingFile={importingFile}
+        onCancelImport={handleCancelImport}
+        importMessage={importMessage}
+        onDismissMessage={handleDismissMessage}
       />
       {showAdmin && (
         <MapAdmin

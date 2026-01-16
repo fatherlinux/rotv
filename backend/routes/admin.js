@@ -55,7 +55,52 @@ export function createAdminRouter(pool) {
     try {
       await queueSyncOperation(pool, operation, 'pois', recordId, data);
     } catch (error) {
-      console.error('Failed to queue sync operation:', error.message);
+      console.error('Failed to queue POI sync operation:', error.message);
+    }
+  }
+
+  // Helper to queue activity sync
+  async function queueActivitySync(operation, recordId, data) {
+    try {
+      await queueSyncOperation(pool, operation, 'activities', recordId, data);
+    } catch (error) {
+      console.error('Failed to queue activity sync operation:', error.message);
+    }
+  }
+
+  // Helper to queue era sync
+  async function queueEraSync(operation, recordId, data) {
+    try {
+      await queueSyncOperation(pool, operation, 'eras', recordId, data);
+    } catch (error) {
+      console.error('Failed to queue era sync operation:', error.message);
+    }
+  }
+
+  // Helper to queue surface sync
+  async function queueSurfaceSync(operation, recordId, data) {
+    try {
+      await queueSyncOperation(pool, operation, 'surfaces', recordId, data);
+    } catch (error) {
+      console.error('Failed to queue surface sync operation:', error.message);
+    }
+  }
+
+  // Helper to queue icon sync
+  async function queueIconSync(operation, recordId, data) {
+    try {
+      await queueSyncOperation(pool, operation, 'icons', recordId, data);
+    } catch (error) {
+      console.error('Failed to queue icon sync operation:', error.message);
+    }
+  }
+
+  // Helper to queue settings sync
+  async function queueSettingsSync(operation, recordId, data) {
+    try {
+      await queueSyncOperation(pool, operation, 'settings', recordId, data);
+    } catch (error) {
+      console.error('Failed to queue settings sync operation:', error.message);
     }
   }
 
@@ -392,6 +437,10 @@ export function createAdminRouter(pool) {
       );
 
       console.log(`Admin ${req.user.email} updated setting: ${key}`);
+
+      // Queue sync operation for settings
+      await queueSettingsSync('UPDATE', 0, { key, value });
+
       res.json({ success: true });
     } catch (error) {
       console.error('Error updating setting:', error);
@@ -432,8 +481,10 @@ export function createAdminRouter(pool) {
     }
 
     try {
+      // Create sheets client for auto-restore of API key from Integration sheet if needed
+      const sheets = req.user.oauth_credentials ? createSheetsService(req.user.oauth_credentials) : null;
       const { generateTextWithCustomPrompt } = await import('../services/geminiService.js');
-      const text = await generateTextWithCustomPrompt(pool, customPrompt);
+      const text = await generateTextWithCustomPrompt(pool, customPrompt, sheets);
 
       console.log(`Admin ${req.user.email} generated content for: ${destination?.name || 'unknown'}`);
       res.json({ generated_text: text });
@@ -449,8 +500,10 @@ export function createAdminRouter(pool) {
   // Test API key validity
   router.post('/ai/test-key', isAdmin, async (req, res) => {
     try {
+      // Create sheets client for auto-restore of API key from Integration sheet if needed
+      const sheets = req.user.oauth_credentials ? createSheetsService(req.user.oauth_credentials) : null;
       const { testApiKey } = await import('../services/geminiService.js');
-      const response = await testApiKey(pool);
+      const response = await testApiKey(pool, sheets);
 
       console.log(`Admin ${req.user.email} tested Gemini API key - success`);
       res.json({ success: true, message: 'API key is valid', response });
@@ -492,8 +545,10 @@ export function createAdminRouter(pool) {
       );
       const availableSurfaces = surfacesResult.rows.map(row => row.name);
 
+      // Create sheets client for auto-restore of API key from Integration sheet if needed
+      const sheets = req.user.oauth_credentials ? createSheetsService(req.user.oauth_credentials) : null;
       const { researchLocation } = await import('../services/geminiService.js');
-      const data = await researchLocation(pool, destination, availableActivities, availableEras, availableSurfaces);
+      const data = await researchLocation(pool, destination, availableActivities, availableEras, availableSurfaces, sheets);
 
       console.log(`Admin ${req.user.email} researched location: ${destination.name}`);
       res.json(data);
@@ -544,6 +599,7 @@ export function createAdminRouter(pool) {
       );
 
       console.log(`Admin ${req.user.email} created activity: ${name}`);
+      await queueActivitySync('INSERT', result.rows[0].id, result.rows[0]);
       res.status(201).json(result.rows[0]);
     } catch (error) {
       if (error.code === '23505') {
@@ -606,6 +662,7 @@ export function createAdminRouter(pool) {
       }
 
       console.log(`Admin ${req.user.email} updated activity: ${name}`);
+      await queueActivitySync('UPDATE', id, result.rows[0]);
       res.json(result.rows[0]);
     } catch (error) {
       if (error.code === '23505') {
@@ -621,6 +678,9 @@ export function createAdminRouter(pool) {
     const { id } = req.params;
 
     try {
+      // Get activity data before deleting for queue
+      const activityData = await pool.query('SELECT * FROM activities WHERE id = $1', [id]);
+
       const result = await pool.query(
         'DELETE FROM activities WHERE id = $1 RETURNING name',
         [id]
@@ -631,6 +691,7 @@ export function createAdminRouter(pool) {
       }
 
       console.log(`Admin ${req.user.email} deleted activity: ${result.rows[0].name}`);
+      await queueActivitySync('DELETE', id, activityData.rows[0] || { name: result.rows[0].name });
       res.json({ success: true });
     } catch (error) {
       console.error('Error deleting activity:', error);
@@ -761,6 +822,7 @@ export function createAdminRouter(pool) {
       );
 
       console.log(`Admin ${req.user.email} created era: ${name}`);
+      await queueEraSync('INSERT', result.rows[0].id, result.rows[0]);
       res.status(201).json(result.rows[0]);
     } catch (error) {
       if (error.code === '23505') {
@@ -815,6 +877,7 @@ export function createAdminRouter(pool) {
       }
 
       console.log(`Admin ${req.user.email} updated era: ${name}`);
+      await queueEraSync('UPDATE', id, result.rows[0]);
       res.json(result.rows[0]);
     } catch (error) {
       if (error.code === '23505') {
@@ -830,6 +893,9 @@ export function createAdminRouter(pool) {
     const { id } = req.params;
 
     try {
+      // Get era data before deleting for queue
+      const eraData = await pool.query('SELECT * FROM eras WHERE id = $1', [id]);
+
       const result = await pool.query(
         'DELETE FROM eras WHERE id = $1 RETURNING name',
         [id]
@@ -840,6 +906,7 @@ export function createAdminRouter(pool) {
       }
 
       console.log(`Admin ${req.user.email} deleted era: ${result.rows[0].name}`);
+      await queueEraSync('DELETE', id, eraData.rows[0] || { name: result.rows[0].name });
       res.json({ success: true });
     } catch (error) {
       console.error('Error deleting era:', error);
@@ -910,7 +977,12 @@ export function createAdminRouter(pool) {
       );
 
       console.log(`Admin ${req.user.email} created surface: ${name}`);
-      res.status(201).json(result.rows[0]);
+
+      // Queue sync to Google Sheets
+      const newSurface = result.rows[0];
+      await queueSurfaceSync('create', newSurface.id, { name: newSurface.name, description: newSurface.description, sort_order: newSurface.sort_order });
+
+      res.status(201).json(newSurface);
     } catch (error) {
       if (error.code === '23505') {
         return res.status(400).json({ error: 'Surface with this name already exists' });
@@ -938,6 +1010,10 @@ export function createAdminRouter(pool) {
       }
 
       console.log(`Admin ${req.user.email} reordered surfaces`);
+
+      // Queue sync for reorder - use 'update' operation with a special marker
+      await queueSurfaceSync('update', 0, { reorder: true, orderedIds });
+
       res.json({ success: true });
     } catch (error) {
       console.error('Error reordering surfaces:', error);
@@ -989,7 +1065,12 @@ export function createAdminRouter(pool) {
       }
 
       console.log(`Admin ${req.user.email} updated surface: ${name}`);
-      res.json(result.rows[0]);
+
+      // Queue sync to Google Sheets
+      const updatedSurface = result.rows[0];
+      await queueSurfaceSync('update', updatedSurface.id, { name: updatedSurface.name, description: updatedSurface.description, sort_order: updatedSurface.sort_order });
+
+      res.json(updatedSurface);
     } catch (error) {
       if (error.code === '23505') {
         return res.status(400).json({ error: 'Surface with this name already exists' });
@@ -1014,6 +1095,10 @@ export function createAdminRouter(pool) {
       }
 
       console.log(`Admin ${req.user.email} deleted surface: ${result.rows[0].name}`);
+
+      // Queue sync to Google Sheets
+      await queueSurfaceSync('delete', parseInt(id), { name: result.rows[0].name });
+
       res.json({ success: true });
     } catch (error) {
       console.error('Error deleting surface:', error);
@@ -1076,7 +1161,12 @@ export function createAdminRouter(pool) {
       );
 
       console.log(`Admin ${req.user.email} created icon: ${name}${driveFileId ? ' (uploaded to Drive)' : ''}`);
-      res.status(201).json(result.rows[0]);
+
+      // Queue sync to Google Sheets
+      const newIcon = result.rows[0];
+      await queueIconSync('create', newIcon.id, { name: newIcon.name, label: newIcon.label });
+
+      res.status(201).json(newIcon);
     } catch (error) {
       if (error.code === '23505') {
         return res.status(400).json({ error: 'Icon with this name already exists' });
@@ -1103,8 +1193,10 @@ export function createAdminRouter(pool) {
     }
 
     try {
+      // Create sheets client for auto-restore of API key from Integration sheet if needed
+      const sheets = req.user.oauth_credentials ? createSheetsService(req.user.oauth_credentials) : null;
       const { generateIconSvg } = await import('../services/geminiService.js');
-      const svgContent = await generateIconSvg(pool, description.trim(), color.trim());
+      const svgContent = await generateIconSvg(pool, description.trim(), color.trim(), sheets);
 
       console.log(`Admin ${req.user.email} generated icon SVG for: ${description}`);
       res.json({ svg_content: svgContent });
@@ -1135,6 +1227,10 @@ export function createAdminRouter(pool) {
       }
 
       console.log(`Admin ${req.user.email} reordered icons`);
+
+      // Queue sync for reorder
+      await queueIconSync('update', 0, { reorder: true, orderedIds });
+
       res.json({ success: true });
     } catch (error) {
       console.error('Error reordering icons:', error);
@@ -1187,7 +1283,12 @@ export function createAdminRouter(pool) {
       );
 
       console.log(`Admin ${req.user.email} updated icon: ${name}`);
-      res.json(result.rows[0]);
+
+      // Queue sync to Google Sheets
+      const updatedIcon = result.rows[0];
+      await queueIconSync('update', updatedIcon.id, { name: updatedIcon.name, label: updatedIcon.label });
+
+      res.json(updatedIcon);
     } catch (error) {
       if (error.code === '23505') {
         return res.status(400).json({ error: 'Icon with this name already exists' });
@@ -1232,6 +1333,10 @@ export function createAdminRouter(pool) {
       );
 
       console.log(`Admin ${req.user.email} deleted icon: ${result.rows[0].name}`);
+
+      // Queue sync to Google Sheets
+      await queueIconSync('delete', parseInt(id), { name: result.rows[0].name });
+
       res.json({ success: true });
     } catch (error) {
       console.error('Error deleting icon:', error);
@@ -1428,7 +1533,9 @@ export function createAdminRouter(pool) {
       try {
         const queueResult = await pool.query(`
           SELECT id, operation, table_name, record_id,
-                 data->>'name' as item_name, created_at
+                 COALESCE(data->>'name', data->>'key') as item_name,
+                 data as item_data,
+                 created_at
           FROM sync_queue
           ORDER BY created_at ASC
           LIMIT 50
@@ -1689,6 +1796,7 @@ export function createAdminRouter(pool) {
   });
 
   // Process pending sync queue (push changes to sheets)
+  // Also adds any unsynced POIs to the queue before processing
   router.post('/sync/process', isAdmin, async (req, res) => {
     try {
       // Check if user has Google OAuth credentials
@@ -1699,6 +1807,44 @@ export function createAdminRouter(pool) {
         });
       }
 
+      // First, add any unsynced POIs to the queue that aren't already queued
+      const unsyncedPOIs = await pool.query(`
+        SELECT p.* FROM pois p
+        WHERE p.synced = FALSE AND p.deleted = FALSE
+        AND NOT EXISTS (
+          SELECT 1 FROM sync_queue sq
+          WHERE sq.table_name IN ('pois', 'destinations')
+          AND sq.record_id = p.id
+        )
+      `);
+
+      let queuedCount = 0;
+      for (const poi of unsyncedPOIs.rows) {
+        await queueSyncOperation(pool, 'UPDATE', 'pois', poi.id, {
+          name: poi.name,
+          latitude: poi.latitude,
+          longitude: poi.longitude,
+          poi_type: poi.poi_type,
+          brief_description: poi.brief_description,
+          historical_description: poi.historical_description,
+          era: poi.era,
+          property_owner: poi.property_owner,
+          primary_activities: poi.primary_activities,
+          surface: poi.surface,
+          pets: poi.pets,
+          difficulty: poi.difficulty,
+          length_miles: poi.length_miles,
+          image_url: poi.image_url,
+          image_drive_file_id: poi.image_drive_file_id,
+          geometry_drive_file_id: poi.geometry_drive_file_id
+        });
+        queuedCount++;
+      }
+
+      if (queuedCount > 0) {
+        console.log(`Added ${queuedCount} unsynced POIs to sync queue`);
+      }
+
       const sheets = await createSheetsServiceWithRefresh(req.user.oauth_credentials, pool, req.user.id);
       const drive = await createDriveServiceWithRefresh(req.user.oauth_credentials, pool, req.user.id);
       const result = await processSyncQueue(sheets, pool, drive);
@@ -1706,7 +1852,7 @@ export function createAdminRouter(pool) {
       console.log(`Admin ${req.user.email} processed sync queue: ${result.processed} operations`);
       res.json({
         success: true,
-        message: `Processed ${result.processed} sync operations`,
+        message: `Processed ${result.processed} sync operations${queuedCount > 0 ? ` (including ${queuedCount} unsynced POIs)` : ''}`,
         processed: result.processed,
         errors: result.errors
       });
@@ -2186,7 +2332,7 @@ export function createAdminRouter(pool) {
       const staticPath = process.env.STATIC_PATH || path.join(__dirname, '../../frontend/public');
       const dataPath = path.join(staticPath, 'data');
 
-      const results = { trails: 0, rivers: 0, errors: [] };
+      const results = { trails: 0, rivers: 0, boundaries: 0, errors: [] };
 
       // Helper function to consolidate features by name
       function consolidateFeatures(features) {
@@ -2270,18 +2416,258 @@ export function createAdminRouter(pool) {
         }
       }
 
-      console.log(`Admin ${req.user.email} imported linear features: ${results.trails} trails, ${results.rivers} rivers`);
+      // Import boundaries
+      if (feature_type === 'boundary' || feature_type === 'all') {
+        try {
+          const boundaryFile = path.join(dataPath, 'cvnp-boundary.geojson');
+          const boundaryData = JSON.parse(await fs.readFile(boundaryFile, 'utf-8'));
+
+          for (const feature of boundaryData.features) {
+            const name = feature.properties?.name || 'Park Boundary';
+            try {
+              await pool.query(`
+                INSERT INTO pois (name, poi_type, geometry)
+                VALUES ($1, 'boundary', $2)
+                ON CONFLICT (name) DO UPDATE SET
+                  geometry = EXCLUDED.geometry,
+                  poi_type = EXCLUDED.poi_type,
+                  updated_at = CURRENT_TIMESTAMP
+              `, [name, JSON.stringify(feature.geometry)]);
+              results.boundaries++;
+            } catch (err) {
+              results.errors.push(`Boundary "${name}": ${err.message}`);
+            }
+          }
+        } catch (err) {
+          results.errors.push(`Failed to read boundary file: ${err.message}`);
+        }
+      }
+
+      console.log(`Admin ${req.user.email} imported linear features: ${results.trails} trails, ${results.rivers} rivers, ${results.boundaries} boundaries`);
       res.json({
         success: true,
         imported: {
           trails: results.trails,
-          rivers: results.rivers
+          rivers: results.rivers,
+          boundaries: results.boundaries
         },
         errors: results.errors.length > 0 ? results.errors : undefined
       });
     } catch (error) {
       console.error('Error importing linear features:', error);
       res.status(500).json({ error: 'Failed to import linear features' });
+    }
+  });
+
+  // Configure multer for spatial data file upload
+  const spatialUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 50 * 1024 * 1024 }, // 50MB limit for GeoJSON files
+    fileFilter: (req, file, cb) => {
+      // Accept .geojson and .json files
+      if (file.originalname.match(/\.(geojson|json)$/i)) {
+        cb(null, true);
+      } else {
+        cb(new Error('Only GeoJSON files (.geojson, .json) are allowed'));
+      }
+    }
+  });
+
+  // Upload and import spatial data from GeoJSON file
+  router.post('/spatial/upload', isAdmin, (req, res, next) => {
+    spatialUpload.single('file')(req, res, (err) => {
+      if (err) {
+        console.error('Multer error:', err.message);
+        return res.status(400).json({ error: err.message });
+      }
+      next();
+    });
+  }, async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: 'No file uploaded' });
+      }
+
+      const { feature_type } = req.body; // 'trail', 'river', or 'boundary'
+      if (!['trail', 'river', 'boundary'].includes(feature_type)) {
+        return res.status(400).json({ error: 'Invalid feature type. Must be trail, river, or boundary.' });
+      }
+
+      // Parse the GeoJSON file
+      let geojsonData;
+      try {
+        geojsonData = JSON.parse(req.file.buffer.toString('utf-8'));
+      } catch (parseErr) {
+        return res.status(400).json({ error: 'Invalid JSON format in uploaded file' });
+      }
+
+      // Validate GeoJSON structure
+      if (!geojsonData.type || !geojsonData.features) {
+        return res.status(400).json({ error: 'Invalid GeoJSON: missing type or features' });
+      }
+
+      if (geojsonData.type !== 'FeatureCollection') {
+        return res.status(400).json({ error: 'GeoJSON must be a FeatureCollection' });
+      }
+
+      // Helper function to consolidate features by name
+      function consolidateFeatures(features) {
+        const byName = {};
+        for (const feature of features) {
+          const name = feature.properties?.name || 'Unnamed';
+          if (!byName[name]) {
+            byName[name] = [];
+          }
+          byName[name].push(feature.geometry);
+        }
+
+        const consolidated = [];
+        for (const [name, geometries] of Object.entries(byName)) {
+          let geometry;
+          if (geometries.length === 1) {
+            geometry = geometries[0];
+          } else {
+            // Merge into MultiLineString or MultiPolygon based on type
+            const firstType = geometries[0]?.type;
+            if (firstType === 'Polygon' || firstType === 'MultiPolygon') {
+              const allCoords = geometries.map(g =>
+                g.type === 'MultiPolygon' ? g.coordinates : [g.coordinates]
+              ).flat();
+              geometry = { type: 'MultiPolygon', coordinates: allCoords };
+            } else {
+              const allCoords = geometries.map(g =>
+                g.type === 'MultiLineString' ? g.coordinates : [g.coordinates]
+              ).flat();
+              geometry = { type: 'MultiLineString', coordinates: allCoords };
+            }
+          }
+          consolidated.push({ name, geometry });
+        }
+        return consolidated;
+      }
+
+      const consolidatedFeatures = consolidateFeatures(geojsonData.features);
+      let importedCount = 0;
+      const errors = [];
+
+      for (const feature of consolidatedFeatures) {
+        try {
+          await pool.query(`
+            INSERT INTO pois (name, poi_type, geometry, deleted)
+            VALUES ($1, $2, $3, FALSE)
+            ON CONFLICT (name, poi_type) DO UPDATE SET
+              geometry = EXCLUDED.geometry,
+              deleted = FALSE,
+              updated_at = CURRENT_TIMESTAMP
+          `, [feature.name, feature_type, JSON.stringify(feature.geometry)]);
+          importedCount++;
+        } catch (err) {
+          errors.push(`"${feature.name}": ${err.message}`);
+        }
+      }
+
+      console.log(`Admin ${req.user.email} uploaded spatial data: ${importedCount} ${feature_type}(s) from ${req.file.originalname}`);
+      res.json({
+        success: true,
+        imported: importedCount,
+        filename: req.file.originalname,
+        feature_type,
+        errors: errors.length > 0 ? errors : undefined
+      });
+    } catch (error) {
+      console.error('Error uploading spatial data:', error);
+      res.status(500).json({ error: error.message || 'Failed to upload spatial data' });
+    }
+  });
+
+  // JSON-based spatial import (no file upload, avoids Chrome issues)
+  router.post('/spatial/import', isAdmin, async (req, res) => {
+    try {
+      const { feature_type, geojson, filename } = req.body;
+
+      if (!geojson) {
+        return res.status(400).json({ error: 'No GeoJSON data provided' });
+      }
+
+      if (!['trail', 'river', 'boundary'].includes(feature_type)) {
+        return res.status(400).json({ error: 'Invalid feature type. Must be trail, river, or boundary.' });
+      }
+
+      // Validate GeoJSON structure
+      if (!geojson.type || !geojson.features) {
+        return res.status(400).json({ error: 'Invalid GeoJSON: missing type or features' });
+      }
+
+      if (geojson.type !== 'FeatureCollection') {
+        return res.status(400).json({ error: 'GeoJSON must be a FeatureCollection' });
+      }
+
+      // Helper function to consolidate features by name
+      function consolidateFeatures(features) {
+        const byName = {};
+        for (const feature of features) {
+          const name = feature.properties?.name || 'Unnamed';
+          if (!byName[name]) {
+            byName[name] = [];
+          }
+          byName[name].push(feature.geometry);
+        }
+
+        const consolidated = [];
+        for (const [name, geometries] of Object.entries(byName)) {
+          let geometry;
+          if (geometries.length === 1) {
+            geometry = geometries[0];
+          } else {
+            const firstType = geometries[0]?.type;
+            if (firstType === 'Polygon' || firstType === 'MultiPolygon') {
+              const allCoords = geometries.map(g =>
+                g.type === 'MultiPolygon' ? g.coordinates : [g.coordinates]
+              ).flat();
+              geometry = { type: 'MultiPolygon', coordinates: allCoords };
+            } else {
+              const allCoords = geometries.map(g =>
+                g.type === 'MultiLineString' ? g.coordinates : [g.coordinates]
+              ).flat();
+              geometry = { type: 'MultiLineString', coordinates: allCoords };
+            }
+          }
+          consolidated.push({ name, geometry });
+        }
+        return consolidated;
+      }
+
+      const consolidatedFeatures = consolidateFeatures(geojson.features);
+      let importedCount = 0;
+      const errors = [];
+
+      for (const feature of consolidatedFeatures) {
+        try {
+          await pool.query(`
+            INSERT INTO pois (name, poi_type, geometry, deleted)
+            VALUES ($1, $2, $3, FALSE)
+            ON CONFLICT (name, poi_type) DO UPDATE SET
+              geometry = EXCLUDED.geometry,
+              deleted = FALSE,
+              updated_at = CURRENT_TIMESTAMP
+          `, [feature.name, feature_type, JSON.stringify(feature.geometry)]);
+          importedCount++;
+        } catch (err) {
+          errors.push(`"${feature.name}": ${err.message}`);
+        }
+      }
+
+      console.log(`Admin ${req.user.email} imported spatial data: ${importedCount} ${feature_type}(s) from ${filename || 'unknown'}`);
+      res.json({
+        success: true,
+        imported: importedCount,
+        filename: filename,
+        feature_type,
+        errors: errors.length > 0 ? errors : undefined
+      });
+    } catch (error) {
+      console.error('Error importing spatial data:', error);
+      res.status(500).json({ error: error.message || 'Failed to import spatial data' });
     }
   });
 

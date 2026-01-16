@@ -8,6 +8,7 @@ function SyncSettings() {
   const [message, setMessage] = useState(null);
   const [spreadsheetIdInput, setSpreadsheetIdInput] = useState('');
   const [showConnectForm, setShowConnectForm] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Fetch sync status
   const fetchStatus = useCallback(async () => {
@@ -34,13 +35,70 @@ function SyncSettings() {
 
   useEffect(() => {
     fetchStatus();
-    // Refresh status every 30 seconds
+    // Refresh status every 30 seconds (use refresh button for immediate updates)
     const interval = setInterval(fetchStatus, 30000);
-    return () => clearInterval(interval);
+
+    // Also refresh when the window/tab regains focus
+    const handleFocus = () => {
+      fetchStatus();
+    };
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
+    };
   }, [fetchStatus]);
 
+  // Manual refresh with spin animation
+  const handleManualRefresh = async () => {
+    setRefreshing(true);
+    await fetchStatus();
+    // Keep spinning for a moment so it's visible
+    setTimeout(() => setRefreshing(false), 800);
+  };
+
+  // Calculate total pending changes (queue + unsynced POIs)
+  const getPendingChanges = () => {
+    if (!syncStatus) return 0;
+    // Use the higher of the two, or sum if both represent different things
+    // Since unsynced POIs get added to queue during sync, just show the max
+    return Math.max(
+      syncStatus.pending_operations || 0,
+      syncStatus.unsynced_destinations || 0
+    );
+  };
+
+  const handleSyncChanges = async () => {
+    setSyncing(true);
+    setMessage(null);
+    setError(null);
+
+    try {
+      const response = await fetch('/api/admin/sync/process', {
+        method: 'POST',
+        credentials: 'include'
+      });
+
+      const result = await response.json();
+      if (response.ok) {
+        setMessage(result.message);
+        if (result.errors && result.errors.length > 0) {
+          setError(`${result.errors.length} operations failed`);
+        }
+        fetchStatus();
+      } else {
+        setError(result.error || 'Sync failed');
+      }
+    } catch (err) {
+      setError('Failed to sync changes');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const handlePush = async () => {
-    if (!confirm('This will replace ALL data in Google Drive (spreadsheet + files) with the current database contents. Continue?')) {
+    if (!confirm('This will replace ALL data in Google Drive with the current database contents. Continue?')) {
       return;
     }
 
@@ -69,7 +127,7 @@ function SyncSettings() {
   };
 
   const handlePull = async () => {
-    if (!confirm('This will replace ALL data in the database with Google Drive contents (spreadsheet + files). Any local changes will be lost. Continue?')) {
+    if (!confirm('This will replace ALL data in the database with Google Drive contents. Any local changes will be lost. Continue?')) {
       return;
     }
 
@@ -94,34 +152,6 @@ function SyncSettings() {
       }
     } catch (err) {
       setError('Failed to pull from Google Drive');
-    } finally {
-      setSyncing(false);
-    }
-  };
-
-  const handleProcessQueue = async () => {
-    setSyncing(true);
-    setMessage(null);
-    setError(null);
-
-    try {
-      const response = await fetch('/api/admin/sync/process', {
-        method: 'POST',
-        credentials: 'include'
-      });
-
-      const result = await response.json();
-      if (response.ok) {
-        setMessage(result.message);
-        if (result.errors && result.errors.length > 0) {
-          setError(`${result.errors.length} operations failed`);
-        }
-        fetchStatus();
-      } else {
-        setError(result.error || 'Processing failed');
-      }
-    } catch (err) {
-      setError('Failed to process sync queue');
     } finally {
       setSyncing(false);
     }
@@ -245,7 +275,6 @@ function SyncSettings() {
   };
 
   const handleWipeDatabase = async () => {
-    // Double confirmation for destructive action
     const firstConfirm = confirm(
       'WARNING: This will permanently delete ALL destinations from the local database.\n\n' +
       'This action cannot be undone!\n\n' +
@@ -256,7 +285,7 @@ function SyncSettings() {
 
     const secondConfirm = confirm(
       'FINAL WARNING: You are about to delete all local data.\n\n' +
-      'Type OK to confirm you want to wipe the database.'
+      'Click OK to confirm you want to wipe the database.'
     );
 
     if (!secondConfirm) return;
@@ -275,7 +304,6 @@ function SyncSettings() {
       if (response.ok) {
         setMessage(result.message);
         fetchStatus();
-        // Reload the page to refresh destinations
         setTimeout(() => window.location.reload(), 1500);
       } else {
         setError(result.error || 'Failed to wipe database');
@@ -293,6 +321,47 @@ function SyncSettings() {
     return date.toLocaleString();
   };
 
+  // Map database table names to Google Sheets tab names
+  const getTabName = (tableName) => {
+    const tabMap = {
+      'pois': 'Destinations',
+      'destinations': 'Destinations',
+      'activities': 'Activities',
+      'eras': 'Eras',
+      'surfaces': 'Surfaces',
+      'icons': 'Icons',
+      'settings': 'Integration'
+    };
+    return tabMap[tableName] || tableName;
+  };
+
+  // Get human-readable name for queue items
+  const getDisplayName = (item) => {
+    if (item.item_name) {
+      // For settings, convert key names to readable format
+      if (item.table_name === 'settings') {
+        const keyMap = {
+          'gemini_api_key': 'Gemini API Key',
+          'gemini_prompt_brief': 'Brief Description Prompt',
+          'gemini_prompt_historical': 'Historical Description Prompt'
+        };
+        return keyMap[item.item_name] || item.item_name;
+      }
+      return item.item_name;
+    }
+    return `Record #${item.record_id}`;
+  };
+
+  // Get operation display with direction arrow
+  const getOperationDisplay = (operation) => {
+    const opMap = {
+      'INSERT': { label: 'Add', icon: '+', className: 'insert' },
+      'UPDATE': { label: 'Update', icon: '↻', className: 'update' },
+      'DELETE': { label: 'Remove', icon: '−', className: 'delete' }
+    };
+    return opMap[operation] || { label: operation, icon: '?', className: 'unknown' };
+  };
+
   if (loading) {
     return (
       <div className="sync-settings">
@@ -302,11 +371,13 @@ function SyncSettings() {
     );
   }
 
+  const pendingChanges = getPendingChanges();
+
   return (
     <div className="sync-settings">
       <h3>Google Drive Integration</h3>
       <p className="sync-description">
-        Synchronize POI data between the local database and Google Drive.
+        Synchronize data between the local database and Google Drive.
       </p>
 
       {error && (
@@ -318,6 +389,125 @@ function SyncSettings() {
       {message && (
         <div className="sync-success">
           {message}
+        </div>
+      )}
+
+      {/* Combined Sync Status & Actions Tile - FIRST for easy access */}
+      {syncStatus?.spreadsheet?.configured && (
+        <div className="sync-unified-tile">
+          <div className="sync-tile-header">
+            <h4>Synchronization</h4>
+            <button
+              className={`refresh-btn${refreshing ? ' spinning' : ''}`}
+              onClick={handleManualRefresh}
+              disabled={loading || refreshing}
+              title="Refresh sync status"
+            >
+              ↻
+            </button>
+          </div>
+
+          <div className="sync-status-row">
+            <div className="sync-status-item">
+              <label>Last Synced</label>
+              <span>{formatDate(syncStatus.last_sync)}</span>
+            </div>
+            <div className="sync-status-item">
+              <label>Pending Changes</label>
+              <span className={pendingChanges > 0 ? 'pending-highlight' : ''}>
+                {pendingChanges}
+              </span>
+            </div>
+          </div>
+
+          {/* Sync Queue Details - show pending changes */}
+          {((syncStatus.sync_queue && syncStatus.sync_queue.length > 0) || syncStatus.unsynced_destinations > 0) && (
+            <div className="sync-queue-detailed">
+              <div className="queue-header-row">
+                <span className="queue-direction">
+                  <span className="direction-icon">📤</span>
+                  Pushing to Google Sheets
+                </span>
+              </div>
+              <div className="queue-items-list">
+                {syncStatus.sync_queue && syncStatus.sync_queue.map(item => {
+                  const op = getOperationDisplay(item.operation);
+                  return (
+                    <div key={item.id} className={`queue-item-row queue-${op.className}`}>
+                      <span className="queue-op-icon">{op.icon}</span>
+                      <span className="queue-op-label">{op.label}</span>
+                      <span className="queue-item-name">{getDisplayName(item)}</span>
+                      <span className="queue-arrow">→</span>
+                      <span className="queue-tab-name">{getTabName(item.table_name)}</span>
+                    </div>
+                  );
+                })}
+                {/* Show unsynced POIs that aren't in the queue */}
+                {syncStatus.unsynced_destinations > 0 &&
+                 (!syncStatus.sync_queue || syncStatus.sync_queue.filter(q =>
+                   q.table_name === 'pois' || q.table_name === 'destinations'
+                 ).length < syncStatus.unsynced_destinations) && (
+                  <div className="queue-item-row queue-update queue-pending">
+                    <span className="queue-op-icon">↻</span>
+                    <span className="queue-op-label">Update</span>
+                    <span className="queue-item-name">
+                      {syncStatus.unsynced_destinations} destination{syncStatus.unsynced_destinations > 1 ? 's' : ''} pending
+                    </span>
+                    <span className="queue-arrow">→</span>
+                    <span className="queue-tab-name">Destinations</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="sync-buttons-grid">
+            <div className="sync-button-card">
+              <button
+                className="sync-btn sync-now-btn"
+                onClick={handleSyncChanges}
+                disabled={syncing || pendingChanges === 0}
+              >
+                {syncing ? 'Syncing...' : `Sync Changes (${pendingChanges})`}
+              </button>
+              <p className="button-description">Push pending changes to Google Sheets</p>
+            </div>
+
+            <div className="sync-button-card">
+              <button
+                className="sync-btn push-btn"
+                onClick={handlePush}
+                disabled={syncing}
+              >
+                Push All
+              </button>
+              <p className="button-description">Replace Google Drive with all local data</p>
+            </div>
+
+            <div className="sync-button-card">
+              <button
+                className="sync-btn pull-btn"
+                onClick={handlePull}
+                disabled={syncing}
+              >
+                Pull All
+              </button>
+              <p className="button-description">Replace local data with Google Drive</p>
+            </div>
+          </div>
+
+          {pendingChanges > 0 && (
+            <div className="sync-clear-row">
+              <button
+                className="sync-btn-small clear-btn"
+                onClick={handleClearQueue}
+                disabled={syncing}
+              >
+                Clear Pending Changes
+              </button>
+              <span className="clear-hint">Discard without syncing</span>
+            </div>
+          )}
         </div>
       )}
 
@@ -419,7 +609,6 @@ function SyncSettings() {
             </div>
           </div>
 
-          {/* Trashed/Deleted Warning */}
           {(syncStatus.spreadsheet_trashed || syncStatus.spreadsheet_deleted) && (
             <div className="spreadsheet-warning">
               <strong>
@@ -437,21 +626,13 @@ function SyncSettings() {
         </div>
       )}
 
-      {/* No Spreadsheet Configured - Show Create/Connect Options */}
+      {/* No Spreadsheet Configured */}
       {syncStatus && syncStatus.spreadsheet && !syncStatus.spreadsheet.configured && (
         <div className="sync-no-spreadsheet">
           <h4>No Spreadsheet Configured</h4>
-          <p>
-            Create a new spreadsheet or connect to an existing one.
-          </p>
+          <p>Create a new spreadsheet or connect to an existing one.</p>
 
           <div className="sync-buttons">
-            <button
-              className="sync-btn connect-btn"
-              onClick={() => setShowConnectForm(!showConnectForm)}
-            >
-              {showConnectForm ? 'Cancel' : 'Connect Existing Spreadsheet'}
-            </button>
             <button
               className="sync-btn create-btn"
               onClick={handleCreateSpreadsheet}
@@ -459,13 +640,18 @@ function SyncSettings() {
             >
               {syncing ? 'Creating...' : 'Create New Spreadsheet'}
             </button>
+            <button
+              className="sync-btn connect-btn"
+              onClick={() => setShowConnectForm(!showConnectForm)}
+            >
+              {showConnectForm ? 'Cancel' : 'Connect Existing'}
+            </button>
           </div>
 
           {showConnectForm && (
             <div className="connect-form">
               <p className="connect-hint">
-                Enter the spreadsheet ID from the URL. Only works for spreadsheets created by this app
-                (due to <code>drive.file</code> scope limitations).
+                Enter the spreadsheet ID from the URL.
               </p>
               <div className="connect-input-group">
                 <input
@@ -485,109 +671,6 @@ function SyncSettings() {
               </div>
             </div>
           )}
-
-        </div>
-      )}
-
-      {syncStatus && (
-        <div className="sync-status-grid">
-          <div className="sync-status-item">
-            <label>Last Sync</label>
-            <span>{formatDate(syncStatus.last_sync)}</span>
-          </div>
-          <div className="sync-status-item">
-            <label>Last Push</label>
-            <span>{formatDate(syncStatus.last_push)}</span>
-          </div>
-          <div className="sync-status-item">
-            <label>Last Pull</label>
-            <span>{formatDate(syncStatus.last_pull)}</span>
-          </div>
-          <div className="sync-status-item">
-            <label>Pending Operations</label>
-            <span className={syncStatus.pending_operations > 0 ? 'pending-highlight' : ''}>
-              {syncStatus.pending_operations}
-            </span>
-          </div>
-          <div className="sync-status-item">
-            <label>Unsynced POIs</label>
-            <span className={syncStatus.unsynced_destinations > 0 ? 'pending-highlight' : ''}>
-              {syncStatus.unsynced_destinations}
-            </span>
-          </div>
-        </div>
-      )}
-
-      {/* Sync Queue Details */}
-      {syncStatus && syncStatus.sync_queue && syncStatus.sync_queue.length > 0 && (
-        <div className="sync-queue-details">
-          <h4>Pending Sync Queue</h4>
-          <p className="queue-description">
-            These changes are waiting to be synced to Google Drive. Click "Process Queue" to sync them.
-          </p>
-          <div className="sync-queue-list">
-            <div className="queue-item queue-header">
-              <span className="queue-operation">Operation</span>
-              <span className="queue-item-name">POI Name</span>
-              <span className="queue-table">Table</span>
-              <span className="queue-time">Queued At</span>
-            </div>
-            {syncStatus.sync_queue.map((item) => (
-              <div key={item.id} className={`queue-item queue-${item.operation.toLowerCase()}`}>
-                <span className="queue-operation">{item.operation}</span>
-                <span className="queue-item-name">{item.item_name || `ID: ${item.record_id}`}</span>
-                <span className="queue-table">{item.table_name}</span>
-                <span className="queue-time">{formatDate(item.created_at)}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Only show sync actions when a spreadsheet is configured */}
-      {syncStatus?.spreadsheet?.configured && (
-        <div className="sync-actions">
-          <div className="sync-action-group">
-            <h4>Sync Changes</h4>
-            <p className="action-hint">Push pending changes to Google Drive</p>
-            <div className="sync-buttons">
-              <button
-                className="sync-btn process-btn"
-                onClick={handleProcessQueue}
-                disabled={syncing || (syncStatus && syncStatus.pending_operations === 0)}
-              >
-                {syncing ? 'Processing...' : `Process Queue (${syncStatus?.pending_operations || 0})`}
-              </button>
-              <button
-                className="sync-btn clear-btn"
-                onClick={handleClearQueue}
-                disabled={syncing || (syncStatus && syncStatus.pending_operations === 0)}
-              >
-                Clear Queue
-              </button>
-            </div>
-          </div>
-
-          <div className="sync-action-group">
-            <h4>Full Sync</h4>
-            <p className="action-hint">Replace all data in one direction. This will synchronize the spreadsheet and all files.</p>
-            <div className="sync-buttons">
-              <button
-                className="sync-btn push-btn"
-                onClick={handlePush}
-                disabled={syncing}
-              >
-                {syncing ? 'Syncing...' : 'Push to Google Drive'}
-              </button>
-              <button
-                className="sync-btn pull-btn"
-                onClick={handlePull}
-                disabled={syncing}
-              >
-                {syncing ? 'Syncing...' : 'Pull from Google Drive'}
-              </button>
-            </div>
-          </div>
         </div>
       )}
 
@@ -595,20 +678,17 @@ function SyncSettings() {
       <div className="danger-zone">
         <h4>Danger Zone</h4>
         <p className="danger-warning">
-          These actions are destructive and cannot be undone.
+          Destructive actions that cannot be undone.
         </p>
-        <div className="sync-buttons">
-          <button
-            className="sync-btn danger-btn"
-            onClick={handleWipeDatabase}
-            disabled={syncing}
-          >
-            {syncing ? 'Wiping...' : 'Wipe Local Database'}
-          </button>
-        </div>
+        <button
+          className="sync-btn danger-btn"
+          onClick={handleWipeDatabase}
+          disabled={syncing}
+        >
+          {syncing ? 'Wiping...' : 'Wipe Local Database'}
+        </button>
         <p className="danger-hint">
-          This will delete all POIs from the local PostgreSQL database.
-          Use "Pull from Google Drive" to restore data after wiping.
+          Use "Pull All" to restore data after wiping.
         </p>
       </div>
     </div>

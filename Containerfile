@@ -1,20 +1,11 @@
-# Stage 1: Build frontend
-FROM registry.access.redhat.com/ubi10/nodejs-24:latest AS frontend-builder
-
-USER 0
-WORKDIR /app/frontend
-COPY frontend/package*.json ./
-RUN npm install
-COPY frontend/ ./
-RUN npm run build
-
-# Stage 2: Final image with Postgres + Node.js
-FROM registry.access.redhat.com/ubi10/ubi:latest
+# Stage 1: Infrastructure base (PostgreSQL + Node.js)
+FROM registry.access.redhat.com/ubi10/ubi:latest AS infrastructure
 
 LABEL maintainer="fatherlinux"
 LABEL description="Roots of The Valley - Cuyahoga Valley National Park destination explorer"
+LABEL version="1.1.0"
 
-# Install Node.js first
+# Install Node.js
 RUN dnf install -y nodejs npm && dnf clean all
 
 # Add PostgreSQL official repository and install PostgreSQL 17
@@ -37,20 +28,6 @@ ENV PGDATA=/data/pgdata
 RUN mkdir -p /data/pgdata && \
     chown -R rotv:rotv /data
 
-# Set up app directory
-WORKDIR /app
-
-# Copy backend
-COPY backend/package*.json ./
-RUN npm install --only=production
-COPY backend/ ./
-
-# Copy built frontend from stage 1
-COPY --from=frontend-builder /app/frontend/dist ./public
-
-# Set ownership of app directory
-RUN chown -R rotv:rotv /app
-
 # Environment variables
 ENV NODE_ENV=development
 ENV PORT=8080
@@ -61,9 +38,33 @@ ENV PGDATABASE=rotv
 ENV PGUSER=rotv
 ENV PGPASSWORD=rotv
 
+# Stage 2: Application layer
+FROM infrastructure AS application
+
+WORKDIR /app
+
+# Build frontend
+COPY frontend/package*.json ./frontend/
+RUN cd frontend && npm install
+COPY frontend/ ./frontend/
+RUN cd frontend && npm run build
+
+# Install backend dependencies
+COPY backend/package*.json ./
+RUN npm install --only=production
+
+# Copy backend code
+COPY backend/ ./
+
+# Move built frontend to public directory
+RUN mv frontend/dist public && rm -rf frontend
+
 # Copy startup script
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod 755 /entrypoint.sh && chown rotv:rotv /entrypoint.sh
+
+# Set ownership of app directory
+RUN chown -R rotv:rotv /app
 
 # Switch to non-root user
 USER rotv

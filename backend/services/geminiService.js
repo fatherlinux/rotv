@@ -88,14 +88,33 @@ export function getDefaultPrompt(promptKey) {
 
 /**
  * Initialize Gemini client with API key from database
+ * If not found in database, attempts to pull from Google Sheet (Integration tab)
+ * @param {Pool} pool - Database connection pool
+ * @param {Object} sheets - Optional Google Sheets API client for auto-restore
  */
-export async function createGeminiClient(pool) {
-  const result = await pool.query(
+export async function createGeminiClient(pool, sheets = null) {
+  let result = await pool.query(
     "SELECT value FROM admin_settings WHERE key = 'gemini_api_key'"
   );
 
+  // If not in database and sheets client provided, try to pull from Integration sheet
+  if ((!result.rows.length || !result.rows[0].value) && sheets) {
+    try {
+      console.log('Gemini API key not in database, attempting to restore from Google Sheet...');
+      const { pullIntegrationFromSheets } = await import('./sheetsSync.js');
+      await pullIntegrationFromSheets(sheets, pool);
+
+      // Re-check database after pull
+      result = await pool.query(
+        "SELECT value FROM admin_settings WHERE key = 'gemini_api_key'"
+      );
+    } catch (pullError) {
+      console.warn('Failed to pull API key from sheet:', pullError.message);
+    }
+  }
+
   if (!result.rows.length || !result.rows[0].value) {
-    throw new Error('Gemini API key not configured. Please add your API key in Settings.');
+    throw new Error('Gemini API key not configured. Please add your API key in Settings, or pull from Google Sheet (Integration tab).');
   }
 
   return new GoogleGenerativeAI(result.rows[0].value);
@@ -141,8 +160,8 @@ export async function getInterpolatedPrompt(pool, promptKey, destination) {
 /**
  * Generate text content using Gemini with Google Search grounding
  */
-export async function generateText(pool, promptKey, destination) {
-  const genAI = await createGeminiClient(pool);
+export async function generateText(pool, promptKey, destination, sheets = null) {
+  const genAI = await createGeminiClient(pool, sheets);
 
   // Enable Google Search grounding for better factual content
   const model = genAI.getGenerativeModel({
@@ -167,8 +186,8 @@ export async function generateText(pool, promptKey, destination) {
 /**
  * Generate text content using a custom prompt with Google Search grounding
  */
-export async function generateTextWithCustomPrompt(pool, customPrompt) {
-  const genAI = await createGeminiClient(pool);
+export async function generateTextWithCustomPrompt(pool, customPrompt, sheets = null) {
+  const genAI = await createGeminiClient(pool, sheets);
 
   // Enable Google Search grounding
   const model = genAI.getGenerativeModel({
@@ -194,9 +213,10 @@ export async function generateTextWithCustomPrompt(pool, customPrompt) {
  * @param {string[]} availableActivities - List of standardized activity names
  * @param {string[]} availableEras - List of standardized era names
  * @param {string[]} availableSurfaces - List of standardized surface names
+ * @param {object} sheets - Optional Google Sheets API client for auto-restore of API key
  */
-export async function researchLocation(pool, destination, availableActivities = [], availableEras = [], availableSurfaces = []) {
-  const genAI = await createGeminiClient(pool);
+export async function researchLocation(pool, destination, availableActivities = [], availableEras = [], availableSurfaces = [], sheets = null) {
+  const genAI = await createGeminiClient(pool, sheets);
 
   // Enable Google Search grounding for research
   const model = genAI.getGenerativeModel({
@@ -276,8 +296,8 @@ export async function researchLocation(pool, destination, availableActivities = 
 /**
  * Test API key validity with a simple request
  */
-export async function testApiKey(pool) {
-  const genAI = await createGeminiClient(pool);
+export async function testApiKey(pool, sheets = null) {
+  const genAI = await createGeminiClient(pool, sheets);
   const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
   const result = await model.generateContent('Respond with exactly: API key verified');
@@ -315,10 +335,11 @@ Example 3 - Historic Building (orange background, house shape):
  * @param {object} pool - Database pool
  * @param {string} description - Description of what the icon should depict
  * @param {string} color - Hex color for the background circle (e.g., "#0288d1")
+ * @param {object} sheets - Optional Google Sheets API client for auto-restore of API key
  * @returns {Promise<string>} - Generated SVG content
  */
-export async function generateIconSvg(pool, description, color) {
-  const genAI = await createGeminiClient(pool);
+export async function generateIconSvg(pool, description, color, sheets = null) {
+  const genAI = await createGeminiClient(pool, sheets);
 
   // Don't use Google Search for icon generation - we want creative output
   const model = genAI.getGenerativeModel({
