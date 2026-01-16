@@ -20,6 +20,9 @@ const { Pool } = pg;
 
 const app = express();
 
+// Trust reverse proxy (for secure cookies behind CloudFlare/Apache)
+app.set('trust proxy', 1);
+
 const pool = new Pool({
   host: process.env.PGHOST || 'localhost',
   port: process.env.PGPORT || 5432,
