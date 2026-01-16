@@ -437,11 +437,6 @@ async function initDatabase() {
       ALTER TABLE icons ADD COLUMN IF NOT EXISTS drive_file_id VARCHAR(255)
     `);
 
-    // Add image_drive_file_id to destinations for Drive-stored images
-    await client.query(`
-      ALTER TABLE destinations ADD COLUMN IF NOT EXISTS image_drive_file_id VARCHAR(255)
-    `);
-
     // Drive settings table for folder IDs
     await client.query(`
       CREATE TABLE IF NOT EXISTS drive_settings (
