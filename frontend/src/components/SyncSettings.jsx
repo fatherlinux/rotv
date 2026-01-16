@@ -10,6 +10,15 @@ function SyncSettings() {
   const [showConnectForm, setShowConnectForm] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
+  // Editable Drive ID states
+  const [driveIdEdits, setDriveIdEdits] = useState({
+    spreadsheet: '',
+    icons: '',
+    images: '',
+    geospatial: ''
+  });
+  const [savingDriveId, setSavingDriveId] = useState(null);
+
   // Fetch sync status
   const fetchStatus = useCallback(async () => {
     try {
@@ -49,6 +58,67 @@ function SyncSettings() {
       window.removeEventListener('focus', handleFocus);
     };
   }, [fetchStatus]);
+
+  // Initialize editable Drive IDs when syncStatus loads
+  useEffect(() => {
+    if (syncStatus) {
+      setDriveIdEdits({
+        spreadsheet: syncStatus.spreadsheet?.id || '',
+        icons: syncStatus.drive?.folders?.icons?.id || '',
+        images: syncStatus.drive?.folders?.images?.id || '',
+        geospatial: syncStatus.drive?.folders?.geospatial?.id || ''
+      });
+    }
+  }, [syncStatus]);
+
+  // Handle Drive ID change
+  const handleDriveIdChange = (key, value) => {
+    setDriveIdEdits(prev => ({ ...prev, [key]: value }));
+  };
+
+  // Save Drive ID
+  const handleSaveDriveId = async (key) => {
+    const value = driveIdEdits[key];
+    setSavingDriveId(key);
+    setMessage(null);
+    setError(null);
+
+    try {
+      let response;
+      if (key === 'spreadsheet') {
+        response = await fetch('/api/admin/sync/spreadsheet-id', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ value })
+        });
+      } else {
+        const keyMap = {
+          icons: 'icons_folder_id',
+          images: 'images_folder_id',
+          geospatial: 'geospatial_folder_id'
+        };
+        response = await fetch(`/api/admin/drive/settings/${keyMap[key]}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ value })
+        });
+      }
+
+      const result = await response.json();
+      if (response.ok) {
+        setMessage(`Updated ${key} ID`);
+        fetchStatus();
+      } else {
+        setError(result.error || `Failed to update ${key} ID`);
+      }
+    } catch (err) {
+      setError(`Failed to update ${key} ID`);
+    } finally {
+      setSavingDriveId(null);
+    }
+  };
 
   // Manual refresh with spin animation
   const handleManualRefresh = async () => {
@@ -511,116 +581,199 @@ function SyncSettings() {
         </div>
       )}
 
-      {/* Google Drive Storage Info */}
-      {syncStatus && syncStatus.drive && syncStatus.drive.configured && (
+      {/* Google Drive Storage - Consolidated with editable IDs */}
+      {syncStatus && (syncStatus.drive?.configured || syncStatus.spreadsheet?.configured) && (
         <div className="sync-drive-info">
           <h4>Google Drive Storage</h4>
-          <div className="drive-folder-structure">
-            {syncStatus.drive.folders.root && (
-              <div className="drive-folder root-folder">
-                <a
-                  href={syncStatus.drive.folders.root.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="folder-link"
-                >
-                  <span className="folder-icon">📁</span>
-                  <span className="folder-name">{syncStatus.drive.folders.root.name}</span>
-                </a>
-                <div className="subfolder-list">
-                  {syncStatus.drive.folders.icons && (
-                    <div className="drive-folder subfolder">
-                      <a
-                        href={syncStatus.drive.folders.icons.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="folder-link"
-                      >
-                        <span className="folder-icon">🎨</span>
-                        <span className="folder-name">Icons</span>
-                        <span className="file-count">({syncStatus.drive.folders.icons.file_count} files)</span>
-                      </a>
-                    </div>
-                  )}
-                  {syncStatus.drive.folders.images && (
-                    <div className="drive-folder subfolder">
-                      <a
-                        href={syncStatus.drive.folders.images.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="folder-link"
-                      >
-                        <span className="folder-icon">🖼️</span>
-                        <span className="folder-name">Images</span>
-                        <span className="file-count">({syncStatus.drive.folders.images.file_count} files)</span>
-                      </a>
-                    </div>
-                  )}
-                  {syncStatus.drive.folders.geospatial && (
-                    <div className="drive-folder subfolder">
-                      <a
-                        href={syncStatus.drive.folders.geospatial.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="folder-link"
-                      >
-                        <span className="folder-icon">🗺️</span>
-                        <span className="folder-name">Geospatial</span>
-                        <span className="file-count">({syncStatus.drive.folders.geospatial.file_count} files)</span>
-                      </a>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+          <p className="drive-info-description">
+            Edit Drive IDs to connect to existing folders or spreadsheets.
+          </p>
 
-      {/* Connected Spreadsheet Info */}
-      {syncStatus && syncStatus.spreadsheet && syncStatus.spreadsheet.configured && (
-        <div className={`sync-spreadsheet-info ${syncStatus.spreadsheet_trashed || syncStatus.spreadsheet_deleted ? 'spreadsheet-problem' : ''}`}>
-          <h4>Connected Spreadsheet</h4>
-          <div className="spreadsheet-details">
-            <div className="spreadsheet-field">
-              <label>Sheet Name</label>
-              <span>{syncStatus.spreadsheet.name}</span>
-            </div>
-            <div className="spreadsheet-field">
-              <label>Spreadsheet ID</label>
-              <code>{syncStatus.spreadsheet.id}</code>
-            </div>
-            <div className="spreadsheet-actions">
+          {/* Root folder header */}
+          {syncStatus.drive?.folders?.root && (
+            <div className="drive-root-header">
               <a
-                href={syncStatus.spreadsheet.url}
+                href={syncStatus.drive.folders.root.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="spreadsheet-link"
+                className="folder-link root-link"
               >
-                Open in Google Sheets
+                <span className="folder-icon">📁</span>
+                <span className="folder-name">{syncStatus.drive.folders.root.name}</span>
               </a>
+            </div>
+          )}
+
+          <div className="drive-id-list">
+            {/* Spreadsheet */}
+            <div className="drive-id-row">
+              <div className="drive-id-label">
+                <span className="folder-icon">📊</span>
+                <span>Spreadsheet</span>
+              </div>
+              <input
+                type="text"
+                className="drive-id-input"
+                value={driveIdEdits.spreadsheet}
+                onChange={(e) => handleDriveIdChange('spreadsheet', e.target.value)}
+                placeholder="Enter spreadsheet ID"
+              />
+              <button
+                className="drive-id-save-btn"
+                onClick={() => handleSaveDriveId('spreadsheet')}
+                disabled={savingDriveId === 'spreadsheet' || driveIdEdits.spreadsheet === (syncStatus.spreadsheet?.id || '')}
+              >
+                {savingDriveId === 'spreadsheet' ? '...' : 'Save'}
+              </button>
+              {syncStatus.spreadsheet?.url ? (
+                <a
+                  href={syncStatus.spreadsheet.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="drive-id-link"
+                  title="Open in Google Sheets"
+                >
+                  ↗
+                </a>
+              ) : <span className="drive-id-link-placeholder" />}
+            </div>
+
+            {/* Icons folder */}
+            <div className="drive-id-row">
+              <div className="drive-id-label">
+                <span className="folder-icon">🎨</span>
+                <span>Icons</span>
+                {syncStatus.drive?.folders?.icons?.file_count !== undefined && (
+                  <span className="file-count">({syncStatus.drive.folders.icons.file_count})</span>
+                )}
+              </div>
+              <input
+                type="text"
+                className="drive-id-input"
+                value={driveIdEdits.icons}
+                onChange={(e) => handleDriveIdChange('icons', e.target.value)}
+                placeholder="Enter folder ID"
+              />
+              <button
+                className="drive-id-save-btn"
+                onClick={() => handleSaveDriveId('icons')}
+                disabled={savingDriveId === 'icons' || driveIdEdits.icons === (syncStatus.drive?.folders?.icons?.id || '')}
+              >
+                {savingDriveId === 'icons' ? '...' : 'Save'}
+              </button>
+              {syncStatus.drive?.folders?.icons?.url ? (
+                <a
+                  href={syncStatus.drive.folders.icons.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="drive-id-link"
+                  title="Open folder in Drive"
+                >
+                  ↗
+                </a>
+              ) : <span className="drive-id-link-placeholder" />}
+            </div>
+
+            {/* Images folder */}
+            <div className="drive-id-row">
+              <div className="drive-id-label">
+                <span className="folder-icon">🖼️</span>
+                <span>Images</span>
+                {syncStatus.drive?.folders?.images?.file_count !== undefined && (
+                  <span className="file-count">({syncStatus.drive.folders.images.file_count})</span>
+                )}
+              </div>
+              <input
+                type="text"
+                className="drive-id-input"
+                value={driveIdEdits.images}
+                onChange={(e) => handleDriveIdChange('images', e.target.value)}
+                placeholder="Enter folder ID"
+              />
+              <button
+                className="drive-id-save-btn"
+                onClick={() => handleSaveDriveId('images')}
+                disabled={savingDriveId === 'images' || driveIdEdits.images === (syncStatus.drive?.folders?.images?.id || '')}
+              >
+                {savingDriveId === 'images' ? '...' : 'Save'}
+              </button>
+              {syncStatus.drive?.folders?.images?.url ? (
+                <a
+                  href={syncStatus.drive.folders.images.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="drive-id-link"
+                  title="Open folder in Drive"
+                >
+                  ↗
+                </a>
+              ) : <span className="drive-id-link-placeholder" />}
+            </div>
+
+            {/* Geospatial folder */}
+            <div className="drive-id-row">
+              <div className="drive-id-label">
+                <span className="folder-icon">🗺️</span>
+                <span>Geospatial</span>
+                {syncStatus.drive?.folders?.geospatial?.file_count !== undefined && (
+                  <span className="file-count">({syncStatus.drive.folders.geospatial.file_count})</span>
+                )}
+              </div>
+              <input
+                type="text"
+                className="drive-id-input"
+                value={driveIdEdits.geospatial}
+                onChange={(e) => handleDriveIdChange('geospatial', e.target.value)}
+                placeholder="Enter folder ID"
+              />
+              <button
+                className="drive-id-save-btn"
+                onClick={() => handleSaveDriveId('geospatial')}
+                disabled={savingDriveId === 'geospatial' || driveIdEdits.geospatial === (syncStatus.drive?.folders?.geospatial?.id || '')}
+              >
+                {savingDriveId === 'geospatial' ? '...' : 'Save'}
+              </button>
+              {syncStatus.drive?.folders?.geospatial?.url ? (
+                <a
+                  href={syncStatus.drive.folders.geospatial.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="drive-id-link"
+                  title="Open folder in Drive"
+                >
+                  ↗
+                </a>
+              ) : <span className="drive-id-link-placeholder" />}
+            </div>
+          </div>
+
+          {/* Spreadsheet warning if trashed/deleted */}
+          {(syncStatus.spreadsheet_trashed || syncStatus.spreadsheet_deleted) && (
+            <div className="spreadsheet-warning">
+              <strong>
+                {syncStatus.spreadsheet_trashed
+                  ? 'The spreadsheet is in your Google Drive trash.'
+                  : 'The spreadsheet has been permanently deleted.'}
+              </strong>
+              <p>
+                {syncStatus.spreadsheet_trashed
+                  ? 'You can restore it from trash or enter a new spreadsheet ID above.'
+                  : 'Enter a new spreadsheet ID above to reconnect.'}
+              </p>
+            </div>
+          )}
+
+          {/* Disconnect button */}
+          {syncStatus.spreadsheet?.configured && (
+            <div className="drive-actions">
               <button
                 className="sync-btn-small disconnect-btn"
                 onClick={handleDisconnectSpreadsheet}
                 disabled={syncing}
               >
-                Disconnect
+                Disconnect All
               </button>
-            </div>
-          </div>
-
-          {(syncStatus.spreadsheet_trashed || syncStatus.spreadsheet_deleted) && (
-            <div className="spreadsheet-warning">
-              <strong>
-                {syncStatus.spreadsheet_trashed
-                  ? 'This spreadsheet is in your Google Drive trash.'
-                  : 'This spreadsheet has been permanently deleted.'}
-              </strong>
-              <p>
-                {syncStatus.spreadsheet_trashed
-                  ? 'You can restore it from trash or disconnect to create a new one.'
-                  : 'Click Disconnect above to create a new spreadsheet.'}
-              </p>
+              <span className="action-hint">Clear all Drive IDs</span>
             </div>
           )}
         </div>

@@ -3074,11 +3074,193 @@ body {
 
 .file-count {
   color: #9c27b0;
-  font-size: 0.85rem;
+  font-size: 0.8rem;
+  white-space: nowrap;
 }
 
 .subfolder-list {
   margin-top: 0.25rem;
+}
+
+/* Drive ID Editing */
+.drive-info-description {
+  font-size: 0.85rem;
+  color: #666;
+  margin-bottom: 1rem;
+}
+
+.drive-root-header {
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #e1bee7;
+}
+
+.drive-root-header .root-link {
+  font-weight: 600;
+}
+
+.drive-id-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.drive-id-row {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  background: rgba(255, 255, 255, 0.5);
+  border-radius: 6px;
+}
+
+.drive-id-row .drive-id-label {
+  flex-shrink: 0;
+  min-width: 160px;
+}
+
+.drive-id-row .drive-id-input {
+  flex: 0 0 auto;
+  width: 320px;
+  margin-left: auto;
+}
+
+.drive-id-row .drive-id-save-btn {
+  flex-shrink: 0;
+}
+
+.drive-id-row .drive-id-link,
+.drive-id-row .drive-id-link-placeholder {
+  flex-shrink: 0;
+}
+
+.drive-id-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 500;
+  color: #6a1b9a;
+  overflow: hidden;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.drive-id-label .item-name {
+  font-weight: 400;
+  font-size: 0.85rem;
+  color: #888;
+}
+
+.drive-id-input-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+}
+
+.drive-id-input {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0.4rem 0.6rem;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 0.8rem;
+  border: 1px solid #ce93d8;
+  border-radius: 4px;
+  background: white;
+  box-sizing: border-box;
+}
+
+.drive-id-input:focus {
+  outline: none;
+  border-color: #9c27b0;
+  box-shadow: 0 0 0 2px rgba(156, 39, 176, 0.1);
+}
+
+.drive-id-save-btn {
+  padding: 0.4rem 0.8rem;
+  background: #9c27b0;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.drive-id-save-btn:hover:not(:disabled) {
+  background: #7b1fa2;
+}
+
+.drive-id-save-btn:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+}
+
+.drive-id-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: #e1bee7;
+  color: #6a1b9a;
+  border-radius: 4px;
+  text-decoration: none;
+  font-size: 0.9rem;
+  transition: background 0.2s;
+}
+
+.drive-id-link:hover {
+  background: #ce93d8;
+}
+
+.drive-id-link-placeholder {
+  width: 28px;
+  height: 28px;
+}
+
+.drive-actions {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e1bee7;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.action-hint {
+  font-size: 0.8rem;
+  color: #888;
+}
+
+/* Mobile responsive for Drive ID editing */
+@media (max-width: 768px) {
+  .drive-id-row {
+    grid-template-columns: 1fr auto auto;
+    grid-template-rows: auto auto;
+    gap: 0.5rem;
+  }
+
+  .drive-id-label {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+
+  .drive-id-input {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .drive-id-save-btn {
+    grid-row: 2;
+  }
+
+  .drive-id-link,
+  .drive-id-link-placeholder {
+    grid-row: 2;
+  }
 }
 
 /* Sync Queue Details */

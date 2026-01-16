@@ -45,7 +45,8 @@ import {
   getDriveImageUrl,
   countDriveFiles,
   getAllDriveSettings,
-  getDriveSetting
+  getDriveSetting,
+  setDriveSetting
 } from '../services/driveImageService.js';
 
 const router = express.Router();
@@ -2115,6 +2116,73 @@ export function createAdminRouter(pool) {
     } catch (error) {
       console.error('Error setting up Drive folders:', error);
       res.status(500).json({ error: 'Failed to setup Drive folders' });
+    }
+  });
+
+  // Update individual Drive setting (folder ID or spreadsheet ID)
+  router.put('/drive/settings/:key', isAdmin, async (req, res) => {
+    try {
+      const { key } = req.params;
+      const { value } = req.body;
+
+      // Validate key - only allow specific Drive-related settings
+      const allowedKeys = [
+        'root_folder_id',
+        'icons_folder_id',
+        'images_folder_id',
+        'geospatial_folder_id'
+      ];
+
+      if (!allowedKeys.includes(key)) {
+        return res.status(400).json({ error: `Invalid setting key: ${key}` });
+      }
+
+      if (value === undefined || value === null) {
+        return res.status(400).json({ error: 'Value is required' });
+      }
+
+      await setDriveSetting(pool, key, value);
+      console.log(`Admin ${req.user.email} updated Drive setting: ${key}`);
+
+      res.json({
+        success: true,
+        message: `Updated ${key}`,
+        key,
+        value
+      });
+    } catch (error) {
+      console.error('Error updating Drive setting:', error);
+      res.status(500).json({ error: 'Failed to update Drive setting' });
+    }
+  });
+
+  // Update spreadsheet ID
+  router.put('/sync/spreadsheet-id', isAdmin, async (req, res) => {
+    try {
+      const { value } = req.body;
+
+      if (!value || !value.trim()) {
+        return res.status(400).json({ error: 'Spreadsheet ID is required' });
+      }
+
+      await pool.query(`
+        INSERT INTO admin_settings (key, value, updated_at)
+        VALUES ('sync_spreadsheet_id', $1, CURRENT_TIMESTAMP)
+        ON CONFLICT (key) DO UPDATE SET
+          value = EXCLUDED.value,
+          updated_at = CURRENT_TIMESTAMP
+      `, [value.trim()]);
+
+      console.log(`Admin ${req.user.email} updated spreadsheet ID`);
+
+      res.json({
+        success: true,
+        message: 'Updated spreadsheet ID',
+        value: value.trim()
+      });
+    } catch (error) {
+      console.error('Error updating spreadsheet ID:', error);
+      res.status(500).json({ error: 'Failed to update spreadsheet ID' });
     }
   });
 
