@@ -1807,10 +1807,10 @@ export function createAdminRouter(pool) {
         });
       }
 
-      // First, add any unsynced POIs to the queue that aren't already queued
+      // First, add any unsynced or locally modified POIs to the queue that aren't already queued
       const unsyncedPOIs = await pool.query(`
         SELECT p.* FROM pois p
-        WHERE p.synced = FALSE AND p.deleted = FALSE
+        WHERE (p.synced = FALSE OR p.locally_modified = TRUE) AND (p.deleted IS NULL OR p.deleted = FALSE)
         AND NOT EXISTS (
           SELECT 1 FROM sync_queue sq
           WHERE sq.table_name IN ('pois', 'destinations')

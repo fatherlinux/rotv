@@ -1281,7 +1281,7 @@ export async function processSyncQueue(sheets, pool, drive = null) {
         await deletePOI(sheets, spreadsheetId, data.name);
       }
       await pool.query(`
-        UPDATE pois SET synced = TRUE WHERE id = $1
+        UPDATE pois SET synced = TRUE, locally_modified = FALSE WHERE id = $1
       `, [item.record_id]);
     } else if (item.table_name === 'activities' && !syncedTables.has('activities')) {
       // For small reference tables, do a full push (more reliable than row-level updates)
