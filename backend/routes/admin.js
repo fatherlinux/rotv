@@ -44,7 +44,8 @@ import {
   getDriveFolderLink,
   getDriveImageUrl,
   countDriveFiles,
-  getAllDriveSettings
+  getAllDriveSettings,
+  getDriveSetting
 } from '../services/driveImageService.js';
 
 const router = express.Router();
@@ -1485,8 +1486,6 @@ export function createAdminRouter(pool) {
 
       // Get Drive folder information
       try {
-        const { countDriveFiles, getDriveFolderLink, getDriveSetting } = await import('../services/driveImageService.js');
-
         const rootFolderId = await getDriveSetting(pool, 'root_folder_id');
         const iconsFolderId = await getDriveSetting(pool, 'icons_folder_id');
         const imagesFolderId = await getDriveSetting(pool, 'images_folder_id');
