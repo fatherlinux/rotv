@@ -93,6 +93,15 @@ body {
   flex-wrap: wrap;
 }
 
+/* Desktop: show content, hide mobile toggle */
+.filter-bar-content {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  flex: 1;
+}
+
 .filter-group {
   display: flex;
   align-items: center;
