@@ -108,6 +108,7 @@ function getOwnerType(owner) {
 
 function Legend({ showMapOverlay, onToggleMapOverlay, showVectorLayers, onToggleVectorLayers, onOpenAdmin, visibleTypes, onToggleType, onShowAll, onHideAll, activeTab, iconConfig, onFileSelect, selectedFileName, importType, onImportTypeChange, onImportFile, importingFile, importMessage, onDismissMessage }) {
   const isEditTab = activeTab === 'edit';
+  const [isExpanded, setIsExpanded] = useState(false);
 
   // Convert iconConfig to the format needed for legend display
   const iconTypes = useMemo(() => {
@@ -141,15 +142,24 @@ function Legend({ showMapOverlay, onToggleMapOverlay, showVectorLayers, onToggle
   }, [iconConfig]);
 
   return (
-    <div className="legend">
-      <div className="legend-header-row">
-        <h4>Point of Interest</h4>
-        <div className="legend-filter-btns">
-          <button onClick={onShowAll} title="Show All">All</button>
-          <button onClick={onHideAll} title="Hide All">None</button>
+    <div className={`legend ${isExpanded ? 'legend-expanded' : ''}`}>
+      {/* Mobile toggle button */}
+      <button
+        className="legend-mobile-toggle"
+        onClick={() => setIsExpanded(!isExpanded)}
+      >
+        {isExpanded ? '× Close' : 'Filters'}
+      </button>
+
+      <div className="legend-content">
+        <div className="legend-header-row">
+          <h4>Point of Interest</h4>
+          <div className="legend-filter-btns">
+            <button onClick={onShowAll} title="Show All">All</button>
+            <button onClick={onHideAll} title="Hide All">None</button>
+          </div>
         </div>
-      </div>
-      <div className="legend-icons">
+        <div className="legend-icons">
         {iconTypes.map(type => (
           <div
             key={type.id}
@@ -232,6 +242,7 @@ function Legend({ showMapOverlay, onToggleMapOverlay, showVectorLayers, onToggle
           </button>
         </>
       )}
+      </div>
     </div>
   );
 }
