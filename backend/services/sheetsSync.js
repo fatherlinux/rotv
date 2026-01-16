@@ -2525,7 +2525,7 @@ export async function pullIntegrationFromSheets(sheets, pool) {
       }
 
       // Restore Drive settings (folder IDs)
-      if (['root_folder_id', 'icons_folder_id', 'images_folder_id'].includes(key)) {
+      if (['root_folder_id', 'icons_folder_id', 'images_folder_id', 'geospatial_folder_id'].includes(key)) {
         await setDriveSetting(pool, key, value);
         restored++;
         console.log(`Restored Drive setting: ${key}`);

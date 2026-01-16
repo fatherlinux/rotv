@@ -626,8 +626,9 @@ body {
   color: #c62828;
 }
 
-/* Mobile toggle button - hidden by default on desktop */
-.legend-mobile-toggle {
+/* Mobile toggle buttons - hidden by default on desktop */
+.legend-mobile-toggle,
+.filter-bar-mobile-toggle {
   display: none;
 }
 
@@ -638,12 +639,57 @@ body {
     gap: 0.25rem;
   }
 
+  /* Mobile filter bar - collapsed by default */
   .filter-bar {
+    padding: 0;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .filter-bar-mobile-toggle {
+    display: block;
+    width: 100%;
     padding: 0.5rem 1rem;
+    background: #f5f5f5;
+    border: none;
+    border-bottom: 1px solid #e0e0e0;
+    font-size: 0.85rem;
+    cursor: pointer;
+    text-align: left;
+    color: #666;
+  }
+
+  .filter-bar-mobile-toggle:hover {
+    background: #e8e8e8;
+  }
+
+  .filter-bar-content {
+    display: none;
+    padding: 0.5rem 1rem;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+  }
+
+  .filter-bar.filter-bar-expanded .filter-bar-content {
+    display: flex;
+  }
+
+  .filter-bar.filter-bar-expanded .filter-bar-mobile-toggle {
+    background: #e0e0e0;
   }
 
   .search-input {
-    width: 150px;
+    width: 100%;
+  }
+
+  .filter-group {
+    flex: 1;
+    min-width: 100px;
+  }
+
+  .filter-group select {
+    width: 100%;
   }
 
   .sidebar {
@@ -656,9 +702,32 @@ body {
     left: 1rem;
     right: 1rem;
     width: auto;
-    max-height: 50px;
-    overflow: hidden;
-    transition: max-height 0.3s ease;
+    padding: 0;
+  }
+
+  .legend-mobile-toggle {
+    display: block;
+    width: 100%;
+    padding: 0.75rem 1rem;
+    background: #4a7c23;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    text-align: center;
+  }
+
+  .legend-mobile-toggle:active {
+    background: #2d5016;
+  }
+
+  .legend-content {
+    display: none;
+    padding: 0.75rem 1rem;
+    background: white;
+    border-radius: 0 0 6px 6px;
   }
 
   .legend.legend-expanded {
@@ -666,36 +735,13 @@ body {
     overflow-y: auto;
   }
 
-  .legend-mobile-toggle {
-    display: block;
-    width: 100%;
-    padding: 0.6rem 1rem;
-    background: #4a7c23;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    font-size: 0.9rem;
-    font-weight: 500;
-    cursor: pointer;
-    text-align: center;
-  }
-
-  .legend-mobile-toggle:hover {
-    background: #2d5016;
-  }
-
-  .legend-content {
-    display: none;
-    padding-top: 0.75rem;
+  .legend.legend-expanded .legend-mobile-toggle {
+    background: #c62828;
+    border-radius: 6px 6px 0 0;
   }
 
   .legend.legend-expanded .legend-content {
     display: block;
-  }
-
-  .legend.legend-expanded .legend-mobile-toggle {
-    background: #c62828;
-    margin-bottom: 0.5rem;
   }
 }
 
