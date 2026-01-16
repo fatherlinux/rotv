@@ -6,6 +6,7 @@ import {
   setDriveSetting,
   getAllDriveSettings,
   uploadIconToDrive,
+  uploadImageToDrive,
   downloadFileFromDrive,
   deleteFileFromDrive,
   uploadGeoJSONToDrive,
@@ -884,6 +885,34 @@ export async function pushAllToSheets(sheets, pool, drive = null) {
         console.log(`Uploaded GeoJSON for ${poi.name} to Drive: ${driveFileId}`);
       });
     }
+
+    // Upload images to Drive for POIs that have local image data but no Drive file ID
+    const poisWithLocalImages = pois.filter(poi =>
+      poi.image_data && !poi.image_drive_file_id
+    );
+
+    if (poisWithLocalImages.length > 0) {
+      console.log(`Uploading ${poisWithLocalImages.length} images to Drive...`);
+
+      await processInParallelBatches(poisWithLocalImages, async (poi) => {
+        const safeName = poi.name.replace(/[^a-zA-Z0-9-_]/g, '-').toLowerCase();
+        const ext = poi.image_mime_type === 'image/png' ? 'png' :
+                    poi.image_mime_type === 'image/gif' ? 'gif' :
+                    poi.image_mime_type === 'image/webp' ? 'webp' : 'jpg';
+        const filename = `${poi.poi_type}-${safeName}.${ext}`;
+
+        const driveFileId = await uploadImageToDrive(drive, pool, filename, poi.image_data, poi.image_mime_type);
+
+        // Update database with Drive file ID
+        await pool.query(
+          'UPDATE pois SET image_drive_file_id = $1 WHERE id = $2',
+          [driveFileId, poi.id]
+        );
+        poi.image_drive_file_id = driveFileId;
+
+        console.log(`Uploaded image for ${poi.name} to Drive: ${driveFileId}`);
+      });
+    }
   }
 
   // Clear existing data (keep header)
@@ -1256,6 +1285,45 @@ export async function processSyncQueue(sheets, pool, drive = null) {
         }
 
         console.log(`Uploaded GeoJSON for ${poi.name} to Drive: ${driveFileId}`);
+      });
+    }
+
+    // Phase 1b: Upload images for POIs that have local image data but no Drive file ID
+    const imageUploads = [];
+
+    for (const item of queue) {
+      if (item.operation === 'DELETE') continue;
+      if (item.table_name !== 'destinations' && item.table_name !== 'pois') continue;
+
+      const poiResult = await pool.query('SELECT * FROM pois WHERE id = $1', [item.record_id]);
+      if (poiResult.rows.length > 0) {
+        const poi = poiResult.rows[0];
+        if (poi.image_data && !poi.image_drive_file_id) {
+          imageUploads.push({ item, poi });
+        }
+      }
+    }
+
+    if (imageUploads.length > 0) {
+      console.log(`Uploading ${imageUploads.length} images to Drive...`);
+
+      await processInParallelBatches(imageUploads, async ({ item, poi }) => {
+        const safeName = poi.name.replace(/[^a-zA-Z0-9-_]/g, '-').toLowerCase();
+        const ext = poi.image_mime_type === 'image/png' ? 'png' :
+                    poi.image_mime_type === 'image/gif' ? 'gif' :
+                    poi.image_mime_type === 'image/webp' ? 'webp' : 'jpg';
+        const filename = `${poi.poi_type}-${safeName}.${ext}`;
+
+        const driveFileId = await uploadImageToDrive(drive, pool, filename, poi.image_data, poi.image_mime_type);
+
+        // Update database with Drive file ID
+        await pool.query(
+          'UPDATE pois SET image_drive_file_id = $1 WHERE id = $2',
+          [driveFileId, poi.id]
+        );
+        item.data.image_drive_file_id = driveFileId;
+
+        console.log(`Uploaded image for ${poi.name} to Drive: ${driveFileId}`);
       });
     }
   }
