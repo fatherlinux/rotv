@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import ImageUploader from './ImageUploader';
+import NewsEvents from './NewsEvents';
 
 function getOwnerClass(owner) {
   if (!owner) return 'owner-other';
@@ -51,7 +52,7 @@ function EditableCellSignal({ level, onChange }) {
 }
 
 // Read-only view component - works for both destinations and linear features
-function ReadOnlyView({ destination, isLinearFeature }) {
+function ReadOnlyView({ destination, isLinearFeature, isAdmin, showImage = true }) {
   // Cache-bust image URL using updated_at timestamp
   const imageEndpoint = isLinearFeature ? 'linear-features' : 'destinations';
   const imageUrl = destination.image_mime_type
@@ -65,17 +66,19 @@ function ReadOnlyView({ destination, isLinearFeature }) {
 
   return (
     <>
-      {/* Image section - URL computed from ID */}
-      <div className="sidebar-image">
-        {imageUrl ? (
-          <img src={imageUrl} alt={destination.name} />
-        ) : (
-          <div className="image-placeholder">
-            <span className="placeholder-icon">{placeholderIcon}</span>
-            <span className="placeholder-text">Image coming soon</span>
-          </div>
-        )}
-      </div>
+      {/* Image section - URL computed from ID (can be hidden if shown elsewhere) */}
+      {showImage && (
+        <div className="sidebar-image">
+          {imageUrl ? (
+            <img src={imageUrl} alt={destination.name} />
+          ) : (
+            <div className="image-placeholder">
+              <span className="placeholder-icon">{placeholderIcon}</span>
+              <span className="placeholder-text">Image coming soon</span>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="sidebar-content">
         <div className="badges-row">
@@ -152,6 +155,9 @@ function ReadOnlyView({ destination, isLinearFeature }) {
           </div>
         </div>
 
+        {/* News and Events section - read only in view mode */}
+        <NewsEvents poiId={destination.id} isAdmin={false} />
+
         {/* Location - only for point destinations, not linear features */}
         {!isLinearFeature && destination.latitude && destination.longitude && (
           <div className="section">
@@ -176,7 +182,7 @@ function ReadOnlyView({ destination, isLinearFeature }) {
 }
 
 // Edit view component - works for both destinations and linear features
-function EditView({ destination, editedData, setEditedData, onSave, onCancel, onDelete, saving, deleting, onPreviewCoordsChange, isNewPOI, onImageUpdate, isLinearFeature }) {
+function EditView({ destination, editedData, setEditedData, onSave, onCancel, onDelete, saving, deleting, onPreviewCoordsChange, isNewPOI, onImageUpdate, isLinearFeature, showImage = true }) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [aiError, setAiError] = useState(null);
   const [researchSources, setResearchSources] = useState(null);
@@ -415,34 +421,36 @@ function EditView({ destination, editedData, setEditedData, onSave, onCancel, on
   return (
     <div className="edit-view-container">
       <div className="edit-view-scroll">
-      {/* Image section at top - matches view mode layout */}
-      {!isNewPOI && destination?.id ? (
-        <ImageUploader
-          destinationId={destination.id}
-          hasImage={!!editedData.image_mime_type}
-          onImageChange={(hasImage, driveFileId) => {
-            setEditedData(prev => ({
-              ...prev,
-              image_mime_type: hasImage ? 'image/jpeg' : null,
-              image_drive_file_id: driveFileId
-            }));
-            // Also update parent state so view mode shows the new image
-            if (onImageUpdate) {
-              onImageUpdate(hasImage, driveFileId);
-            }
-          }}
-          disabled={saving}
-          isLinearFeature={isLinearFeature}
-        />
-      ) : (
-        <div className="sidebar-image">
-          <div className="image-placeholder">
-            <span className="placeholder-icon">
-              {isLinearFeature ? (destination?.feature_type === 'river' ? '🌊' : '🥾') : '🏞️'}
-            </span>
-            <span className="placeholder-text">{isNewPOI ? 'Add image after creation' : 'No image'}</span>
+      {/* Image section at top - matches view mode layout (can be hidden if shown elsewhere) */}
+      {showImage && (
+        !isNewPOI && destination?.id ? (
+          <ImageUploader
+            destinationId={destination.id}
+            hasImage={!!editedData.image_mime_type}
+            onImageChange={(hasImage, driveFileId) => {
+              setEditedData(prev => ({
+                ...prev,
+                image_mime_type: hasImage ? 'image/jpeg' : null,
+                image_drive_file_id: driveFileId
+              }));
+              // Also update parent state so view mode shows the new image
+              if (onImageUpdate) {
+                onImageUpdate(hasImage, driveFileId);
+              }
+            }}
+            disabled={saving}
+            isLinearFeature={isLinearFeature}
+          />
+        ) : (
+          <div className="sidebar-image">
+            <div className="image-placeholder">
+              <span className="placeholder-icon">
+                {isLinearFeature ? (destination?.feature_type === 'river' ? '🌊' : '🥾') : '🏞️'}
+              </span>
+              <span className="placeholder-text">{isNewPOI ? 'Add image after creation' : 'No image'}</span>
+            </div>
           </div>
-        </div>
+        )
       )}
 
       {aiError && (
@@ -688,6 +696,14 @@ function EditView({ destination, editedData, setEditedData, onSave, onCancel, on
         />
       </div>
 
+      {/* News and Events management for existing POIs */}
+      {!isNewPOI && destination?.id && (
+        <div className="edit-section news-management-section">
+          <label>News & Events</label>
+          <NewsEvents poiId={destination.id} isAdmin={true} />
+        </div>
+      )}
+
       </div>
 
       <div className="edit-buttons-footer">
@@ -794,11 +810,249 @@ function EditView({ destination, editedData, setEditedData, onSave, onCancel, on
   );
 }
 
+// POI-specific News component
+function PoiNews({ poiId, isAdmin, editMode }) {
+  const [news, setNews] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [deleting, setDeleting] = useState(null);
+  const [collecting, setCollecting] = useState(false);
+  const [collectResult, setCollectResult] = useState(null);
+
+  const fetchNews = async () => {
+    if (!poiId) return;
+    setLoading(true);
+    try {
+      const response = await fetch(`/api/pois/${poiId}/news?limit=20`);
+      if (response.ok) {
+        const data = await response.json();
+        setNews(data);
+      }
+    } catch (err) {
+      console.error('Error fetching POI news:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchNews();
+  }, [poiId]);
+
+  // Collect news for this POI and refresh
+  const handleCollectNews = async () => {
+    if (!poiId) return;
+    setCollecting(true);
+    setCollectResult(null);
+    try {
+      const response = await fetch(`/api/admin/pois/${poiId}/news/collect`, {
+        method: 'POST',
+        credentials: 'include'
+      });
+      if (response.ok) {
+        const result = await response.json();
+        setCollectResult({ type: 'success', news: result.newsFound, newsSaved: result.newsSaved });
+        // Refresh the news list
+        await fetchNews();
+      } else {
+        const error = await response.json();
+        setCollectResult({ type: 'error', message: error.error || 'Collection failed' });
+      }
+    } catch (err) {
+      setCollectResult({ type: 'error', message: err.message });
+    } finally {
+      setCollecting(false);
+    }
+  };
+
+  const handleDelete = async (newsId) => {
+    if (!confirm('Delete this news item?')) return;
+    setDeleting(newsId);
+    try {
+      const response = await fetch(`/api/admin/news/${newsId}`, {
+        method: 'DELETE',
+        credentials: 'include'
+      });
+      if (response.ok) {
+        setNews(prev => prev.filter(n => n.id !== newsId));
+      }
+    } catch (err) {
+      console.error('Error deleting news:', err);
+    } finally {
+      setDeleting(null);
+    }
+  };
+
+  const formatDate = (dateString) => {
+    if (!dateString) return '';
+    return new Date(dateString).toLocaleDateString('en-US', {
+      month: 'short', day: 'numeric', year: 'numeric'
+    });
+  };
+
+  if (loading) return <div className="sidebar-tab-loading">Loading news...</div>;
+
+  return (
+    <div className="poi-news-list">
+      {news.length === 0 ? (
+        <div className="sidebar-tab-empty">No news for this location.</div>
+      ) : news.map(item => (
+        <div key={item.id} className={`poi-news-item ${item.news_type || 'general'}`}>
+          <div className="poi-news-header">
+            <span className="poi-news-title">{item.title}</span>
+            {isAdmin && (
+              <button
+                className="news-delete-btn"
+                onClick={() => handleDelete(item.id)}
+                disabled={deleting === item.id}
+              >
+                {deleting === item.id ? '...' : '×'}
+              </button>
+            )}
+          </div>
+          {item.summary && <p className="poi-news-summary">{item.summary}</p>}
+          <div className="poi-news-meta">
+            {item.source_name && <span className="news-source">{item.source_name}</span>}
+            {item.published_at && <span className="news-date">{formatDate(item.published_at)}</span>}
+            {item.source_url && (
+              <a href={item.source_url} target="_blank" rel="noopener noreferrer" className="news-link">
+                Read more
+              </a>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// POI-specific Events component
+function PoiEvents({ poiId, isAdmin, editMode }) {
+  const [events, setEvents] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [deleting, setDeleting] = useState(null);
+  const [collecting, setCollecting] = useState(false);
+  const [collectResult, setCollectResult] = useState(null);
+
+  const fetchEvents = async () => {
+    if (!poiId) return;
+    setLoading(true);
+    try {
+      const response = await fetch(`/api/pois/${poiId}/events`);
+      if (response.ok) {
+        const data = await response.json();
+        setEvents(data);
+      }
+    } catch (err) {
+      console.error('Error fetching POI events:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchEvents();
+  }, [poiId]);
+
+  // Collect events for this POI and refresh
+  const handleCollectEvents = async () => {
+    if (!poiId) return;
+    setCollecting(true);
+    setCollectResult(null);
+    try {
+      const response = await fetch(`/api/admin/pois/${poiId}/news/collect`, {
+        method: 'POST',
+        credentials: 'include'
+      });
+      if (response.ok) {
+        const result = await response.json();
+        setCollectResult({ type: 'success', events: result.eventsFound, eventsSaved: result.eventsSaved });
+        // Refresh the events list
+        await fetchEvents();
+      } else {
+        const error = await response.json();
+        setCollectResult({ type: 'error', message: error.error || 'Collection failed' });
+      }
+    } catch (err) {
+      setCollectResult({ type: 'error', message: err.message });
+    } finally {
+      setCollecting(false);
+    }
+  };
+
+  const handleDelete = async (eventId) => {
+    if (!confirm('Delete this event?')) return;
+    setDeleting(eventId);
+    try {
+      const response = await fetch(`/api/admin/events/${eventId}`, {
+        method: 'DELETE',
+        credentials: 'include'
+      });
+      if (response.ok) {
+        setEvents(prev => prev.filter(e => e.id !== eventId));
+      }
+    } catch (err) {
+      console.error('Error deleting event:', err);
+    } finally {
+      setDeleting(null);
+    }
+  };
+
+  const formatDate = (dateString) => {
+    if (!dateString) return '';
+    return new Date(dateString).toLocaleDateString('en-US', {
+      weekday: 'short', month: 'short', day: 'numeric', year: 'numeric'
+    });
+  };
+
+  if (loading) return <div className="sidebar-tab-loading">Loading events...</div>;
+
+  return (
+    <div className="poi-events-list">
+      {events.length === 0 ? (
+        <div className="sidebar-tab-empty">No upcoming events for this location.</div>
+      ) : events.map(item => (
+        <div key={item.id} className={`poi-event-item ${item.event_type || 'program'}`}>
+          <div className="poi-event-header">
+            <span className="poi-event-title">{item.title}</span>
+            {isAdmin && (
+              <button
+                className="news-delete-btn"
+                onClick={() => handleDelete(item.id)}
+                disabled={deleting === item.id}
+              >
+                {deleting === item.id ? '...' : '×'}
+              </button>
+            )}
+          </div>
+          <div className="poi-event-date">
+            {formatDate(item.start_date)}
+            {item.end_date && item.end_date !== item.start_date && (
+              <> - {formatDate(item.end_date)}</>
+            )}
+          </div>
+          {item.description && <p className="poi-event-description">{item.description}</p>}
+          {item.location_details && (
+            <div className="poi-event-location">
+              <strong>Location:</strong> {item.location_details}
+            </div>
+          )}
+          {item.source_url && (
+            <a href={item.source_url} target="_blank" rel="noopener noreferrer" className="event-link">
+              More info
+            </a>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinationUpdate, onDestinationDelete, onSaveNewPOI, onCancelNewPOI, previewCoords, onPreviewCoordsChange, linearFeature, onLinearFeatureUpdate, onLinearFeatureDelete }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editedData, setEditedData] = useState({});
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [sidebarTab, setSidebarTab] = useState('view');
 
   // Determine what we're displaying
   const displayItem = linearFeature || destination;
@@ -964,12 +1218,22 @@ function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinat
     }
   };
 
+  // If no POI selected, don't show sidebar
   if (!displayItem) {
-    return <div className="sidebar" />;
+    return null;
   }
 
-  // Render linear feature view - use same components as destinations
+  // Render linear feature view - use same components as destinations with tabs
   if (isLinearFeature) {
+    // Compute image URL for linear feature
+    const linearImageUrl = linearFeature?.image_mime_type
+      ? `/api/linear-features/${linearFeature.id}/image?v=${new Date(linearFeature.updated_at).getTime() || Date.now()}`
+      : null;
+
+    // Determine placeholder icon based on type
+    const placeholderIcon = linearFeature.feature_type === 'river' ? '🌊' :
+                            linearFeature.feature_type === 'boundary' ? '🗺️' : '🥾';
+
     return (
       <div className={`sidebar open ${isEditing ? 'editing' : ''}`}>
         <div className="sidebar-header">
@@ -979,70 +1243,171 @@ function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinat
           </div>
         </div>
 
-        {isEditing ? (
-          <EditView
-            destination={linearFeature}
-            editedData={editedData}
-            setEditedData={setEditedData}
-            onSave={handleSaveLinearFeature}
-            onCancel={handleCancel}
-            onDelete={handleDeleteLinearFeature}
-            saving={saving}
-            deleting={deleting}
-            isNewPOI={false}
-            isLinearFeature={true}
-            onImageUpdate={(hasImage, driveFileId) => {
-              if (onLinearFeatureUpdate) {
-                onLinearFeatureUpdate({
-                  ...linearFeature,
-                  image_mime_type: hasImage ? 'image/jpeg' : null,
-                  image_drive_file_id: driveFileId
-                });
-              }
-            }}
-          />
-        ) : (
-          <ReadOnlyView destination={linearFeature} isLinearFeature={true} />
-        )}
+        {/* Image - always shown at top for all tabs */}
+        <div className="sidebar-image">
+          {linearImageUrl ? (
+            <img src={linearImageUrl} alt={linearFeature?.name} />
+          ) : (
+            <div className="image-placeholder">
+              <span className="placeholder-icon">{placeholderIcon}</span>
+              <span className="placeholder-text">Image coming soon</span>
+            </div>
+          )}
+        </div>
+
+        {/* Sidebar Tabs - same as destinations */}
+        <div className="sidebar-tabs">
+          <button
+            className={`sidebar-tab ${sidebarTab === 'view' ? 'active' : ''}`}
+            onClick={() => setSidebarTab('view')}
+          >
+            {isEditing ? 'Edit' : 'View'}
+          </button>
+          <button
+            className={`sidebar-tab ${sidebarTab === 'news' ? 'active' : ''}`}
+            onClick={() => setSidebarTab('news')}
+          >
+            News
+          </button>
+          <button
+            className={`sidebar-tab ${sidebarTab === 'events' ? 'active' : ''}`}
+            onClick={() => setSidebarTab('events')}
+          >
+            Events
+          </button>
+        </div>
+
+        {/* Tab Content */}
+        <div className="sidebar-tab-content">
+          {sidebarTab === 'view' && (
+            isEditing ? (
+              <EditView
+                destination={linearFeature}
+                editedData={editedData}
+                setEditedData={setEditedData}
+                onSave={handleSaveLinearFeature}
+                onCancel={handleCancel}
+                onDelete={handleDeleteLinearFeature}
+                saving={saving}
+                deleting={deleting}
+                isNewPOI={false}
+                isLinearFeature={true}
+                showImage={false}
+                onImageUpdate={(hasImage, driveFileId) => {
+                  if (onLinearFeatureUpdate) {
+                    onLinearFeatureUpdate({
+                      ...linearFeature,
+                      image_mime_type: hasImage ? 'image/jpeg' : null,
+                      image_drive_file_id: driveFileId
+                    });
+                  }
+                }}
+              />
+            ) : (
+              <ReadOnlyView destination={linearFeature} isLinearFeature={true} isAdmin={isAdmin} showImage={false} />
+            )
+          )}
+
+          {sidebarTab === 'news' && linearFeature && (
+            <PoiNews poiId={linearFeature.id} isAdmin={isAdmin} editMode={editMode} />
+          )}
+
+          {sidebarTab === 'events' && linearFeature && (
+            <PoiEvents poiId={linearFeature.id} isAdmin={isAdmin} editMode={editMode} />
+          )}
+        </div>
       </div>
     );
   }
 
-  // Render destination view
+  // Compute image URL for destination
+  const imageUrl = destination?.image_mime_type
+    ? `/api/destinations/${destination.id}/image?v=${new Date(destination.updated_at).getTime() || Date.now()}`
+    : null;
+
+  // Render destination view with tabs
   return (
     <div className={`sidebar ${destination ? 'open' : ''} ${isEditing ? 'editing' : ''}`}>
       <div className="sidebar-header">
-        <h2>{isEditing ? 'Edit: ' : ''}{destination.name}</h2>
+        <h2>{isEditing ? 'Edit: ' : ''}{destination?.name || 'Location Details'}</h2>
         <div className="header-buttons">
           <button className="close-btn" onClick={onClose}>&times;</button>
         </div>
       </div>
 
-      {isEditing ? (
-        <EditView
-          destination={destination}
-          editedData={editedData}
-          setEditedData={setEditedData}
-          onSave={handleSaveDestination}
-          onCancel={handleCancel}
-          onDelete={handleDeleteDestination}
-          saving={saving}
-          deleting={deleting}
-          onPreviewCoordsChange={onPreviewCoordsChange}
-          isNewPOI={isNewPOI}
-          onImageUpdate={(hasImage, driveFileId) => {
-            if (onDestinationUpdate) {
-              onDestinationUpdate({
-                ...destination,
-                image_mime_type: hasImage ? 'image/jpeg' : null,
-                image_drive_file_id: driveFileId
-              });
-            }
-          }}
-        />
-      ) : (
-        <ReadOnlyView destination={destination} />
-      )}
+      {/* Image - always shown at top for all tabs */}
+      <div className="sidebar-image">
+        {imageUrl ? (
+          <img src={imageUrl} alt={destination?.name} />
+        ) : (
+          <div className="image-placeholder">
+            <span className="placeholder-icon">🏞️</span>
+            <span className="placeholder-text">Image coming soon</span>
+          </div>
+        )}
+      </div>
+
+      {/* Sidebar Tabs - always shown */}
+      <div className="sidebar-tabs">
+        <button
+          className={`sidebar-tab ${sidebarTab === 'view' ? 'active' : ''}`}
+          onClick={() => setSidebarTab('view')}
+        >
+          {isEditing ? 'Edit' : 'View'}
+        </button>
+        <button
+          className={`sidebar-tab ${sidebarTab === 'news' ? 'active' : ''}`}
+          onClick={() => setSidebarTab('news')}
+        >
+          News
+        </button>
+        <button
+          className={`sidebar-tab ${sidebarTab === 'events' ? 'active' : ''}`}
+          onClick={() => setSidebarTab('events')}
+        >
+          Events
+        </button>
+      </div>
+
+      {/* Tab Content */}
+      <div className="sidebar-tab-content">
+        {sidebarTab === 'view' && (
+          isEditing ? (
+            <EditView
+              destination={destination}
+              editedData={editedData}
+              setEditedData={setEditedData}
+              onSave={handleSaveDestination}
+              onCancel={handleCancel}
+              onDelete={handleDeleteDestination}
+              saving={saving}
+              deleting={deleting}
+              onPreviewCoordsChange={onPreviewCoordsChange}
+              isNewPOI={isNewPOI}
+              showImage={false}
+              onImageUpdate={(hasImage, driveFileId) => {
+                if (onDestinationUpdate) {
+                  onDestinationUpdate({
+                    ...destination,
+                    image_mime_type: hasImage ? 'image/jpeg' : null,
+                    image_drive_file_id: driveFileId
+                  });
+                }
+              }}
+            />
+          ) : (
+            <ReadOnlyView destination={destination} isAdmin={isAdmin} showImage={false} />
+          )
+        )}
+
+        {sidebarTab === 'news' && destination && (
+          <PoiNews poiId={destination.id} isAdmin={isAdmin} editMode={editMode} />
+        )}
+
+        {sidebarTab === 'events' && destination && (
+          <PoiEvents poiId={destination.id} isAdmin={isAdmin} editMode={editMode} />
+        )}
+      </div>
     </div>
   );
 }

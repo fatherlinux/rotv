@@ -106,9 +106,32 @@ function getOwnerType(owner) {
   return 'other';
 }
 
-function Legend({ showMapOverlay, onToggleMapOverlay, showVectorLayers, onToggleVectorLayers, onOpenAdmin, visibleTypes, onToggleType, onShowAll, onHideAll, activeTab, iconConfig, onFileSelect, selectedFileName, importType, onImportTypeChange, onImportFile, importingFile, importMessage, onDismissMessage }) {
+function Legend({
+  // Layer toggles
+  showNpsMap, onToggleNpsMap,
+  showTrails, onToggleTrails,
+  showRivers, onToggleRivers,
+  showBoundaries, onToggleBoundaries,
+  // POI type toggles
+  visibleTypes, onToggleType, onShowAll, onHideAll,
+  // Search
+  searchQuery, onSearchChange,
+  // Popup control
+  isExpanded, onClose,
+  // Admin/Edit features
+  activeTab, iconConfig, onOpenAdmin,
+  onFileSelect, selectedFileName, importType, onImportTypeChange,
+  onImportFile, importingFile, importMessage, onDismissMessage
+}) {
   const isEditTab = activeTab === 'edit';
-  const [isExpanded, setIsExpanded] = useState(false);
+
+  // Layer icons for the unified grid - order: Trails, Rivers, Boundaries, NPS Map
+  const layerIcons = [
+    { id: 'trails', label: 'Trails', isActive: showTrails, onToggle: () => onToggleTrails(!showTrails) },
+    { id: 'rivers', label: 'Rivers', isActive: showRivers, onToggle: () => onToggleRivers(!showRivers) },
+    { id: 'boundaries', label: 'Boundaries', isActive: showBoundaries, onToggle: () => onToggleBoundaries(!showBoundaries) },
+    { id: 'nps-map', label: 'NPS Map', isActive: showNpsMap, onToggle: () => onToggleNpsMap(!showNpsMap) }
+  ];
 
   // Convert iconConfig to the format needed for legend display
   const iconTypes = useMemo(() => {
@@ -143,115 +166,117 @@ function Legend({ showMapOverlay, onToggleMapOverlay, showVectorLayers, onToggle
 
   return (
     <div className={`legend ${isExpanded ? 'legend-expanded' : ''}`}>
-      {/* Mobile toggle button */}
-      <button
-        className="legend-mobile-toggle"
-        onClick={() => setIsExpanded(!isExpanded)}
-      >
-        {isExpanded ? '× Close' : 'Filters'}
-      </button>
-
       <div className="legend-content">
+        {/* Search input */}
+        <div className="legend-search">
+          <input
+            type="text"
+            className="search-input"
+            placeholder="Search destinations..."
+            value={searchQuery || ''}
+            onChange={(e) => onSearchChange(e.target.value)}
+          />
+        </div>
+
+        <div className="legend-divider"></div>
+
         <div className="legend-header-row">
-          <h4>Point of Interest</h4>
+          <h4>Filters & Layers</h4>
           <div className="legend-filter-btns">
-            <button onClick={onShowAll} title="Show All">All</button>
-            <button onClick={onHideAll} title="Hide All">None</button>
+            <button onClick={onShowAll} title="Show All POIs">All</button>
+            <button onClick={onHideAll} title="Hide All POIs">None</button>
           </div>
         </div>
-        <div className="legend-icons">
-        {iconTypes.map(type => (
-          <div
-            key={type.id}
-            className={`legend-icon-item ${visibleTypes.has(type.id) ? 'active' : 'inactive'}`}
-            onClick={() => onToggleType(type.id)}
-          >
-            {type.svg_content ? (
-              <div className="legend-icon-svg" dangerouslySetInnerHTML={{ __html: type.svg_content }} />
-            ) : (
-              <img src={type.iconUrl || `/icons/${type.svg_filename}`} alt={type.label} />
-            )}
-            <span>{type.label}</span>
-          </div>
-        ))}
-      </div>
-      <div className="legend-divider"></div>
-      <h4>Map Layers</h4>
-      <label className="legend-toggle">
-        <input
-          type="checkbox"
-          checked={showMapOverlay}
-          onChange={(e) => onToggleMapOverlay(e.target.checked)}
-        />
-        <span>NPS Park Map</span>
-      </label>
-      <label className="legend-toggle">
-        <input
-          type="checkbox"
-          checked={showVectorLayers}
-          onChange={(e) => onToggleVectorLayers(e.target.checked)}
-        />
-        <span>Trails & Boundary</span>
-      </label>
 
-      {/* Edit tab - show admin tools */}
-      {isEditTab && (
-        <>
-          <div className="legend-divider"></div>
-          <h4>Import Spatial Data</h4>
-          <p className="edit-mode-hint">Import trails, rivers, or boundaries from GeoJSON files:</p>
-          <div className="spatial-import-form">
-            <input
-              type="file"
-              accept=".geojson,.json"
-              onChange={onFileSelect}
-              className="file-input-visible"
-            />
-            <select
-              className="import-type-select"
-              value={importType}
-              onChange={(e) => onImportTypeChange(e.target.value)}
+        {/* Unified icon grid - POI types first, then Map Layers at bottom */}
+        <div className="legend-icons">
+          {/* POI type icons */}
+          {iconTypes.map(type => (
+            <div
+              key={type.id}
+              className={`legend-icon-item ${visibleTypes.has(type.id) ? 'active' : 'inactive'}`}
+              onClick={() => onToggleType(type.id)}
             >
-              <option value="trail">Trail</option>
-              <option value="river">River</option>
-              <option value="boundary">Boundary</option>
-            </select>
-            <button
-              className="admin-btn import-btn"
-              onClick={onImportFile}
-              disabled={importingFile || !selectedFileName}
-            >
-              {importingFile ? 'Importing...' : 'Import'}
-            </button>
-          </div>
-          {importMessage && (
-            <div className={`import-message import-${importMessage.type}`}>
-              <span>{importMessage.text}</span>
-              {importMessage.type === 'warning' && (
-                <button className="admin-btn" onClick={() => window.location.reload()}>
-                  Refresh
-                </button>
+              {type.svg_content ? (
+                <div className="legend-icon-svg" dangerouslySetInnerHTML={{ __html: type.svg_content }} />
+              ) : (
+                <img src={type.iconUrl || `/icons/${type.svg_filename}`} alt={type.label} />
               )}
-              <button className="dismiss-btn" onClick={onDismissMessage}>×</button>
+              <span>{type.label}</span>
             </div>
-          )}
-          <div className="legend-divider"></div>
-          <h4>Map Alignment</h4>
-          <button className="admin-btn" onClick={onOpenAdmin}>
-            Align NPS Overlay
-          </button>
-        </>
-      )}
+          ))}
+
+          {/* Map Layer icons at bottom */}
+          {layerIcons.map(layer => (
+            <div
+              key={layer.id}
+              className={`legend-icon-item ${layer.isActive ? 'active' : 'inactive'}`}
+              onClick={layer.onToggle}
+            >
+              <img src={`/icons/layers/${layer.id}.svg`} alt={layer.label} />
+              <span>{layer.label}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Edit tab - show admin tools */}
+        {isEditTab && (
+          <>
+            <div className="legend-divider"></div>
+            <h4>Import Spatial Data</h4>
+            <p className="edit-mode-hint">Import trails, rivers, or boundaries from GeoJSON files:</p>
+            <div className="spatial-import-form">
+              <input
+                type="file"
+                accept=".geojson,.json"
+                onChange={onFileSelect}
+                className="file-input-visible"
+              />
+              <select
+                className="import-type-select"
+                value={importType}
+                onChange={(e) => onImportTypeChange(e.target.value)}
+              >
+                <option value="trail">Trail</option>
+                <option value="river">River</option>
+                <option value="boundary">Boundary</option>
+              </select>
+              <button
+                className="admin-btn import-btn"
+                onClick={onImportFile}
+                disabled={importingFile || !selectedFileName}
+              >
+                {importingFile ? 'Importing...' : 'Import'}
+              </button>
+            </div>
+            {importMessage && (
+              <div className={`import-message import-${importMessage.type}`}>
+                <span>{importMessage.text}</span>
+                {importMessage.type === 'warning' && (
+                  <button className="admin-btn" onClick={() => window.location.reload()}>
+                    Refresh
+                  </button>
+                )}
+                <button className="dismiss-btn" onClick={onDismissMessage}>×</button>
+              </div>
+            )}
+            <div className="legend-divider"></div>
+            <h4>Map Alignment</h4>
+            <button className="admin-btn" onClick={onOpenAdmin}>
+              Align NPS Overlay
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
 }
 
 // Component to handle map right-click for quick POI creation
-function MapClickHandler({ isAdmin, onRightClick }) {
+function MapClickHandler({ isAdmin, editMode, onRightClick }) {
   useMapEvents({
     contextmenu: (e) => {
-      if (isAdmin && onRightClick) {
+      if (isAdmin && editMode && onRightClick) {
         e.originalEvent.preventDefault();
         onRightClick({ lat: e.latlng.lat, lng: e.latlng.lng });
       }
@@ -272,6 +297,165 @@ function MapUpdater({ selectedDestination }) {
       });
     }
   }, [selectedDestination, map]);
+
+  return null;
+}
+
+// Component to handle map resize when container visibility changes
+function MapVisibilityHandler({ activeTab }) {
+  const map = useMap();
+  const prevTab = useRef(activeTab);
+
+  useEffect(() => {
+    // When switching back to view/edit tab, invalidate size to fix rendering
+    if ((activeTab === 'view' || activeTab === 'edit') &&
+        prevTab.current !== 'view' && prevTab.current !== 'edit') {
+      // Small delay to ensure DOM has updated
+      setTimeout(() => {
+        map.invalidateSize();
+      }, 100);
+    }
+    prevTab.current = activeTab;
+  }, [activeTab, map]);
+
+  return null;
+}
+
+// Helper to get bounding box from GeoJSON geometry
+function getGeometryBounds(geometry) {
+  if (!geometry) return null;
+
+  let minLat = Infinity, maxLat = -Infinity;
+  let minLng = Infinity, maxLng = -Infinity;
+
+  // Recursively extract all coordinates from the geometry
+  const processCoords = (coords) => {
+    if (!Array.isArray(coords)) return;
+
+    // If this is a coordinate pair [lng, lat]
+    if (coords.length >= 2 && typeof coords[0] === 'number' && typeof coords[1] === 'number') {
+      const lng = coords[0];
+      const lat = coords[1];
+      minLat = Math.min(minLat, lat);
+      maxLat = Math.max(maxLat, lat);
+      minLng = Math.min(minLng, lng);
+      maxLng = Math.max(maxLng, lng);
+    } else {
+      // Nested array - recurse
+      coords.forEach(c => processCoords(c));
+    }
+  };
+
+  if (geometry.coordinates) {
+    processCoords(geometry.coordinates);
+  }
+
+  if (minLat === Infinity) return null;
+
+  return {
+    south: minLat,
+    north: maxLat,
+    west: minLng,
+    east: maxLng
+  };
+}
+
+// Check if two bounding boxes intersect
+function boundsIntersect(mapBounds, geoBounds) {
+  if (!geoBounds) return false;
+
+  const mapSouth = mapBounds.getSouth();
+  const mapNorth = mapBounds.getNorth();
+  const mapWest = mapBounds.getWest();
+  const mapEast = mapBounds.getEast();
+
+  // Check for no overlap
+  if (geoBounds.north < mapSouth || geoBounds.south > mapNorth) return false;
+  if (geoBounds.east < mapWest || geoBounds.west > mapEast) return false;
+
+  return true;
+}
+
+// Component to track which POIs are visible in the current map viewport
+function MapBoundsTracker({ destinations, visibleTypes, getDestinationIconType, onVisiblePoisChange, onMapStateChange, linearFeatures, showTrails, showRivers, showBoundaries }) {
+  const map = useMap();
+
+  // Calculate which POIs are visible in current bounds and emit map state
+  const updateVisiblePois = useCallback(() => {
+    // Check if map has valid bounds (may not be ready yet)
+    try {
+      const bounds = map.getBounds();
+      if (!bounds || !bounds.isValid()) return;
+
+      const visibleIds = [];
+
+      // Add visible point destinations
+      if (destinations && destinations.length > 0) {
+        destinations.forEach(dest => {
+          if (!dest.latitude || !dest.longitude) return;
+
+          // Check if POI type is visible in legend
+          const iconType = getDestinationIconType(dest);
+          if (!visibleTypes.has(iconType)) return;
+
+          // Check if POI is within map bounds
+          const lat = parseFloat(dest.latitude);
+          const lng = parseFloat(dest.longitude);
+          if (bounds.contains([lat, lng])) {
+            visibleIds.push(dest.id);
+          }
+        });
+      }
+
+      // Note: Linear features (trails, rivers, boundaries) are NOT included in visible POI count
+      // They are displayed on the map but don't count as "POIs in view" since they span large areas
+      // and would always be counted, making the count less meaningful for users
+
+      // Emit visible POI IDs (point destinations only - excludes linear features)
+      if (onVisiblePoisChange) {
+        onVisiblePoisChange(visibleIds);
+      }
+
+      // Emit map state for thumbnail
+      if (onMapStateChange) {
+        const center = map.getCenter();
+        const zoom = map.getZoom();
+        const container = map.getContainer();
+        const width = container.clientWidth;
+        const height = container.clientHeight;
+        onMapStateChange({
+          center: [center.lat, center.lng],
+          zoom: zoom,
+          bounds: [[bounds.getSouth(), bounds.getWest()], [bounds.getNorth(), bounds.getEast()]],
+          aspectRatio: width / height
+        });
+      }
+    } catch (e) {
+      // Map not ready yet, will try again on next event
+    }
+  }, [map, destinations, visibleTypes, getDestinationIconType, onVisiblePoisChange, onMapStateChange, linearFeatures, showTrails, showRivers, showBoundaries]);
+
+  // Track map movements and load
+  useMapEvents({
+    moveend: updateVisiblePois,
+    zoomend: updateVisiblePois,
+    load: updateVisiblePois
+  });
+
+  // Initial calculation with a small delay to ensure map is ready
+  useEffect(() => {
+    // Immediate attempt
+    updateVisiblePois();
+
+    // Also try after a short delay in case map wasn't ready
+    const timer = setTimeout(updateVisiblePois, 100);
+    return () => clearTimeout(timer);
+  }, [updateVisiblePois]);
+
+  // Re-calculate when destinations or linear features change
+  useEffect(() => {
+    updateVisiblePois();
+  }, [destinations, linearFeatures, showTrails, showRivers, showBoundaries, updateVisiblePois]);
 
   return null;
 }
@@ -392,21 +576,114 @@ const DEFAULT_NPS_MAP_BOUNDS = [
 // Default icon type IDs for initializing the filter (before config loads)
 const DEFAULT_ICON_TYPES = new Set(['visitor-center', 'waterfall', 'trail', 'historic', 'bridge', 'train', 'nature', 'skiing', 'biking', 'picnic', 'camping', 'music', 'default']);
 
-function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, onDestinationUpdate, editMode, activeTab, onDestinationCreate, previewCoords, onPreviewCoordsChange, newPOI, onStartNewPOI, linearFeatures, selectedLinearFeature, onSelectLinearFeature }) {
-  const [showMapOverlay, setShowMapOverlay] = useState(false);
-  const [showVectorLayers, setShowVectorLayers] = useState(true);
+function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, onDestinationUpdate, editMode, activeTab, onDestinationCreate, previewCoords, onPreviewCoordsChange, newPOI, onStartNewPOI, linearFeatures, selectedLinearFeature, onSelectLinearFeature, visibleTypes, onVisibleTypesChange, onVisiblePoisChange, onMapStateChange, showNpsMap, onToggleNpsMap, showTrails, onToggleTrails, showRivers, onToggleRivers, showBoundaries, onToggleBoundaries, searchQuery, onSearchChange, onNewsRefresh }) {
   const [showAdmin, setShowAdmin] = useState(false);
+  const [isLegendExpanded, setIsLegendExpanded] = useState(false);
   const [mapBounds, setMapBounds] = useState(DEFAULT_NPS_MAP_BOUNDS);
   const [overlayOpacity, setOverlayOpacity] = useState(1.0);
-  const [visibleTypes, setVisibleTypes] = useState(new Set(DEFAULT_ICON_TYPES));
   const [selectedFileName, setSelectedFileName] = useState(null); // Just for UI display
   const [importType, setImportType] = useState('trail');
   const [importingFile, setImportingFile] = useState(false);
   const [importMessage, setImportMessage] = useState(null);
   const fileRef = useRef(null); // Store File object in ref to avoid React re-renders
+  const [visiblePoiCount, setVisiblePoiCount] = useState(0);
+  const [visiblePoiIds, setVisiblePoiIds] = useState([]);
+
+  // Admin news refresh state
+  const [refreshingNews, setRefreshingNews] = useState(false);
+  const [refreshResult, setRefreshResult] = useState(null);
 
   // Icon configuration from database
   const [iconConfig, setIconConfig] = useState([]);
+
+  // Wrapper to track visible POI count and IDs locally and pass to parent
+  const handleVisiblePoisChange = useCallback((visibleIds) => {
+    setVisiblePoiCount(visibleIds.length);
+    setVisiblePoiIds(visibleIds);
+    if (onVisiblePoisChange) {
+      onVisiblePoisChange(visibleIds);
+    }
+  }, [onVisiblePoisChange]);
+
+  // Handle admin news refresh for visible POIs
+  const handleRefreshNews = useCallback(async () => {
+    if (refreshingNews || visiblePoiIds.length === 0) return;
+
+    setRefreshingNews(true);
+    setRefreshResult(null);
+
+    try {
+      // Start the job
+      const response = await fetch('/api/admin/news/collect-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ poiIds: visiblePoiIds })
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        setRefreshResult({ type: 'error', message: error.error || 'Failed to start job' });
+        setRefreshingNews(false);
+        return;
+      }
+
+      const { jobId, totalPois } = await response.json();
+      setRefreshResult({ type: 'progress', message: `Starting... (0/${totalPois} POIs)` });
+
+      // Poll for job status
+      const pollInterval = setInterval(async () => {
+        try {
+          const statusResponse = await fetch(`/api/admin/news/job/${jobId}`, {
+            credentials: 'include'
+          });
+
+          if (statusResponse.ok) {
+            const status = await statusResponse.json();
+            const progress = status.total_pois > 0
+              ? `${status.pois_processed}/${status.total_pois} POIs`
+              : `${status.pois_processed} POIs`;
+
+            if (status.status === 'running') {
+              setRefreshResult({
+                type: 'progress',
+                message: `Processing ${progress} - Found ${status.news_found} news, ${status.events_found} events`
+              });
+            } else if (status.status === 'completed') {
+              clearInterval(pollInterval);
+              setRefreshingNews(false);
+              setRefreshResult({
+                type: 'success',
+                message: `Done! Found ${status.news_found} news, ${status.events_found} events from ${status.pois_processed} POIs`
+              });
+              setTimeout(() => setRefreshResult(null), 8000);
+              // Trigger refresh of News and Events pages
+              onNewsRefresh && onNewsRefresh();
+            } else if (status.status === 'failed') {
+              clearInterval(pollInterval);
+              setRefreshingNews(false);
+              setRefreshResult({
+                type: 'error',
+                message: status.error_message || 'Job failed'
+              });
+            }
+          }
+        } catch (pollError) {
+          console.error('Error polling job status:', pollError);
+        }
+      }, 1500); // Poll every 1.5 seconds
+
+      // Safety timeout - stop polling after 5 minutes
+      setTimeout(() => {
+        clearInterval(pollInterval);
+        setRefreshingNews(false);
+      }, 300000);
+
+    } catch (error) {
+      setRefreshResult({ type: 'error', message: error.message });
+      setRefreshingNews(false);
+    }
+  }, [refreshingNews, visiblePoiIds]);
 
   // Fetch icon configuration on mount and when switching tabs
   // This ensures icons show correctly on initial load and when new icons are created
@@ -419,17 +696,19 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
           // Update visible types to include all enabled icons
           const allTypes = new Set(data.filter(i => i.enabled !== false).map(i => i.name));
           if (!allTypes.has('default')) allTypes.add('default');
-          setVisibleTypes(prev => {
-            // Merge new icons into visible set (keep user's filter choices)
-            const merged = new Set(prev);
-            allTypes.forEach(t => {
-              if (!iconConfig.find(i => i.name === t)) {
-                // New icon - add to visible set
-                merged.add(t);
-              }
+          if (onVisibleTypesChange) {
+            onVisibleTypesChange(prev => {
+              // Merge new icons into visible set (keep user's filter choices)
+              const merged = new Set(prev);
+              allTypes.forEach(t => {
+                if (!iconConfig.find(i => i.name === t)) {
+                  // New icon - add to visible set
+                  merged.add(t);
+                }
+              });
+              return merged;
             });
-            return merged;
-          });
+          }
         })
         .catch(err => console.error('Failed to load icon config:', err));
     }
@@ -466,19 +745,36 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
 
   // Filter handlers
   const handleToggleType = (typeId) => {
-    setVisibleTypes(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(typeId)) {
-        newSet.delete(typeId);
-      } else {
-        newSet.add(typeId);
-      }
-      return newSet;
-    });
+    if (onVisibleTypesChange) {
+      onVisibleTypesChange(prev => {
+        const newSet = new Set(prev);
+        if (newSet.has(typeId)) {
+          newSet.delete(typeId);
+        } else {
+          newSet.add(typeId);
+        }
+        return newSet;
+      });
+    }
   };
 
-  const handleShowAll = () => setVisibleTypes(new Set(allIconTypes));
-  const handleHideAll = () => setVisibleTypes(new Set());
+  const handleShowAll = () => {
+    // Show all POI types
+    if (onVisibleTypesChange) onVisibleTypesChange(new Set(allIconTypes));
+    // Show all layers except NPS Map
+    onToggleTrails(true);
+    onToggleRivers(true);
+    onToggleBoundaries(true);
+  };
+
+  const handleHideAll = () => {
+    // Hide all POI types
+    if (onVisibleTypesChange) onVisibleTypesChange(new Set());
+    // Hide all layers except NPS Map
+    onToggleTrails(false);
+    onToggleRivers(false);
+    onToggleBoundaries(false);
+  };
 
   // Handle file selection - store in ref (no re-render), update name for UI
   const handleFileSelect = (e) => {
@@ -648,7 +944,7 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
   }, [selectedLinearFeature]);
 
   return (
-    <div className="map-container">
+    <div className={`map-container ${editMode ? 'edit-mode-active' : ''}`}>
       {editMode && <div className="edit-mode-banner">Edit Mode: Click marker or trail to select and edit in sidebar.</div>}
       <MapContainer
         center={PARK_CENTER}
@@ -662,7 +958,7 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
         />
 
         {/* NPS Park Map overlay - rendered first so markers appear on top */}
-        {showMapOverlay && (
+        {showNpsMap && (
           <ImageOverlay
             url="/data/cvnp-map-cropped.jpg"
             bounds={mapBounds}
@@ -671,8 +967,14 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
           />
         )}
 
-        {/* Clickable linear features (trails, rivers, and boundaries from database) */}
-        {showVectorLayers && linearFeatures && linearFeatures.map(feature => {
+        {/* Clickable linear features - split by type for independent toggle control */}
+        {linearFeatures && linearFeatures.map(feature => {
+          // Check visibility based on feature type
+          const isVisible = (feature.feature_type === 'trail' && showTrails) ||
+                           (feature.feature_type === 'river' && showRivers) ||
+                           (feature.feature_type === 'boundary' && showBoundaries);
+          if (!isVisible) return null;
+
           const isSelected = selectedLinearFeature?.id === feature.id;
           const geojsonData = {
             type: 'Feature',
@@ -717,8 +1019,21 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
         })}
 
         <MapUpdater selectedDestination={selectedDestination} />
+        <MapVisibilityHandler activeTab={activeTab} />
+        <MapBoundsTracker
+          destinations={destinations}
+          visibleTypes={visibleTypes}
+          getDestinationIconType={getDestinationIconType}
+          onVisiblePoisChange={handleVisiblePoisChange}
+          onMapStateChange={onMapStateChange}
+          linearFeatures={linearFeatures}
+          showTrails={showTrails}
+          showRivers={showRivers}
+          showBoundaries={showBoundaries}
+        />
         <MapClickHandler
           isAdmin={isAdmin}
+          editMode={editMode}
           onRightClick={onStartNewPOI}
         />
 
@@ -775,25 +1090,67 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
           );
         })}
       </MapContainer>
+
+      {/* POI count overlay - clickable to toggle filter popup */}
+      <button
+        className="map-poi-count"
+        onClick={() => setIsLegendExpanded(!isLegendExpanded)}
+      >
+        {visiblePoiCount} POI{visiblePoiCount !== 1 ? 's' : ''} in view
+      </button>
+
+      {/* Admin refresh news & events chip - only in edit mode */}
+      {isAdmin && editMode && (
+        <button
+          className={`map-refresh-news ${refreshingNews ? 'refreshing' : ''}`}
+          onClick={handleRefreshNews}
+          disabled={refreshingNews || visiblePoiCount === 0}
+          title={visiblePoiCount === 0 ? 'No POIs visible to update' : `Update news & events for ${visiblePoiCount} visible POIs`}
+        >
+          {refreshingNews ? 'Updating...' : 'Update News & Events'}
+        </button>
+      )}
+
+      {/* Refresh result message */}
+      {refreshResult && (
+        <div className={`map-refresh-result ${refreshResult.type}`}>
+          {refreshResult.message}
+          <button className="dismiss-btn" onClick={() => setRefreshResult(null)}>×</button>
+        </div>
+      )}
+
+      {/* Backdrop for popup mode */}
+      <div
+        className={`legend-backdrop ${isLegendExpanded ? 'visible' : ''}`}
+        onClick={() => setIsLegendExpanded(false)}
+      />
+
       <Legend
-        showMapOverlay={showMapOverlay}
-        onToggleMapOverlay={setShowMapOverlay}
-        showVectorLayers={showVectorLayers}
-        onToggleVectorLayers={setShowVectorLayers}
-        onOpenAdmin={() => setShowAdmin(true)}
+        showNpsMap={showNpsMap}
+        onToggleNpsMap={onToggleNpsMap}
+        showTrails={showTrails}
+        onToggleTrails={onToggleTrails}
+        showRivers={showRivers}
+        onToggleRivers={onToggleRivers}
+        showBoundaries={showBoundaries}
+        onToggleBoundaries={onToggleBoundaries}
         visibleTypes={visibleTypes}
         onToggleType={handleToggleType}
         onShowAll={handleShowAll}
         onHideAll={handleHideAll}
+        searchQuery={searchQuery}
+        onSearchChange={onSearchChange}
+        isExpanded={isLegendExpanded}
+        onClose={() => setIsLegendExpanded(false)}
         activeTab={activeTab}
         iconConfig={iconConfig}
+        onOpenAdmin={() => setShowAdmin(true)}
         onFileSelect={handleFileSelect}
         selectedFileName={selectedFileName}
         importType={importType}
         onImportTypeChange={setImportType}
         onImportFile={handleImportFile}
         importingFile={importingFile}
-        onCancelImport={handleCancelImport}
         importMessage={importMessage}
         onDismissMessage={handleDismissMessage}
       />

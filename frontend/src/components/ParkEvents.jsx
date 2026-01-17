@@ -1,0 +1,309 @@
+import React, { useState, useEffect } from 'react';
+import MapThumbnail from './MapThumbnail';
+
+function formatDate(dateString) {
+  if (!dateString) return '';
+  const date = new Date(dateString);
+  return date.toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
+  });
+}
+
+function formatDateForCalendar(dateString) {
+  if (!dateString) return '';
+  const date = new Date(dateString);
+  return date.toISOString().replace(/-|:|\.\d{3}/g, '').slice(0, 15) + 'Z';
+}
+
+function EventTypeIcon({ type }) {
+  const icons = {
+    'guided-tour': 'T',
+    'program': 'P',
+    'festival': 'F',
+    'volunteer': 'V',
+    'educational': 'E'
+  };
+  return <span className={`event-type-icon ${type || 'program'}`}>{icons[type] || 'E'}</span>;
+}
+
+function ParkEvents({ isAdmin, onSelectPoi, filteredDestinations, filteredLinearFeatures, mapState, onMapClick, refreshTrigger }) {
+  const [events, setEvents] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [deleting, setDeleting] = useState(null);
+
+  useEffect(() => {
+    fetchEvents();
+  }, [refreshTrigger]);
+
+  const fetchEvents = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch('/api/events/upcoming?days=90');
+      if (response.ok) {
+        const data = await response.json();
+        setEvents(data);
+      } else {
+        setError('Failed to load events');
+      }
+    } catch (err) {
+      setError('Failed to load events');
+      console.error('Error fetching park events:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Filter events based on visible POIs (both point destinations and linear features)
+  const filteredEvents = React.useMemo(() => {
+    const hasDestinations = Array.isArray(filteredDestinations);
+    const hasLinearFeatures = Array.isArray(filteredLinearFeatures);
+
+    // If both filters are explicitly empty arrays, show no events (all filters deselected)
+    if (hasDestinations && filteredDestinations.length === 0 &&
+        hasLinearFeatures && filteredLinearFeatures.length === 0) {
+      return [];
+    }
+
+    // If no filters applied yet, show all events
+    if (!filteredDestinations && !filteredLinearFeatures) {
+      return events;
+    }
+
+    // Combine visible IDs from both point destinations and linear features
+    const visiblePoiIds = new Set([
+      ...(filteredDestinations || []).map(d => d.id),
+      ...(filteredLinearFeatures || []).map(f => f.id)
+    ]);
+
+    return events.filter(item => visiblePoiIds.has(item.poi_id));
+  }, [events, filteredDestinations, filteredLinearFeatures]);
+
+  const handleDelete = async (eventId) => {
+    if (!confirm('Delete this event?')) return;
+
+    setDeleting(eventId);
+    try {
+      const response = await fetch(`/api/admin/events/${eventId}`, {
+        method: 'DELETE',
+        credentials: 'include'
+      });
+
+      if (response.ok) {
+        setEvents(prev => prev.filter(e => e.id !== eventId));
+      } else {
+        alert('Failed to delete event');
+      }
+    } catch (err) {
+      console.error('Error deleting event:', err);
+      alert('Failed to delete event');
+    } finally {
+      setDeleting(null);
+    }
+  };
+
+  const generateCalendarUrl = (event) => {
+    const title = encodeURIComponent(event.title);
+    const startDate = formatDateForCalendar(event.start_date);
+    const endDate = event.end_date
+      ? formatDateForCalendar(event.end_date)
+      : formatDateForCalendar(new Date(new Date(event.start_date).getTime() + 2 * 60 * 60 * 1000)); // Default 2 hours
+    const description = encodeURIComponent(
+      `${event.description || ''}\n\nLocation: ${event.poi_name}\n${event.location_details || ''}\n\nMore info: ${event.source_url || 'Cuyahoga Valley National Park'}`
+    );
+    const location = encodeURIComponent(`${event.poi_name}, Cuyahoga Valley National Park, Ohio`);
+
+    return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${startDate}/${endDate}&details=${description}&location=${location}`;
+  };
+
+  const generateIcsContent = (event) => {
+    const startDate = formatDateForCalendar(event.start_date);
+    const endDate = event.end_date
+      ? formatDateForCalendar(event.end_date)
+      : formatDateForCalendar(new Date(new Date(event.start_date).getTime() + 2 * 60 * 60 * 1000));
+
+    const icsContent = `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Roots of The Valley//EN
+BEGIN:VEVENT
+DTSTART:${startDate}
+DTEND:${endDate}
+SUMMARY:${event.title}
+DESCRIPTION:${event.description || ''} - ${event.poi_name}
+LOCATION:${event.poi_name}, Cuyahoga Valley National Park, Ohio
+URL:${event.source_url || ''}
+END:VEVENT
+END:VCALENDAR`;
+
+    return icsContent;
+  };
+
+  const downloadIcs = (event) => {
+    const icsContent = generateIcsContent(event);
+    const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${event.title.replace(/[^a-z0-9]/gi, '_')}.ics`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  if (loading) {
+    return (
+      <div className="park-events-tab">
+        <h2>Upcoming Events</h2>
+        <div className="loading-indicator">Loading events...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="park-events-tab">
+        <h2>Upcoming Events</h2>
+        <div className="error-message">{error}</div>
+      </div>
+    );
+  }
+
+  if (filteredEvents.length === 0) {
+    return (
+      <div className="park-events-tab">
+        <div className="news-events-header">
+          <h2>Upcoming Events</h2>
+          <p className="tab-subtitle">Events across Cuyahoga Valley National Park</p>
+        </div>
+        <div className="news-events-layout">
+          <div className="news-events-content">
+            <p className="no-content">
+              {events.length > 0
+                ? 'No events for the visible POIs. Adjust the map to see more.'
+                : 'No upcoming events found.'}
+            </p>
+          </div>
+          {/* Map thumbnail sidebar */}
+          {mapState && (
+            <div className="map-thumbnail-sidebar">
+              <MapThumbnail
+                bounds={mapState.bounds}
+                aspectRatio={mapState.aspectRatio || 1.5}
+                visibleDestinations={filteredDestinations}
+                onClick={onMapClick}
+                poiCount={filteredDestinations?.length || 0}
+              />
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="park-events-tab">
+      <div className="news-events-header">
+        <h2>Upcoming Events</h2>
+        <p className="tab-subtitle">Events across Cuyahoga Valley National Park</p>
+      </div>
+      <div className="news-events-layout">
+        <div className="news-events-content">
+          <div className="park-events-list">
+            {filteredEvents.map(item => (
+          <div key={item.id} className={`park-event-item ${item.event_type || 'program'}`}>
+            <div className="park-event-header">
+              <EventTypeIcon type={item.event_type} />
+              <div className="park-event-title-section">
+                <span className="park-event-title">{item.title}</span>
+                <button
+                  className="park-event-poi-link"
+                  onClick={() => onSelectPoi && onSelectPoi(item.poi_id)}
+                  title={`View ${item.poi_name}`}
+                >
+                  {item.poi_name}
+                </button>
+              </div>
+              {isAdmin && (
+                <button
+                  className="news-delete-btn"
+                  onClick={() => handleDelete(item.id)}
+                  disabled={deleting === item.id}
+                  title="Delete this event"
+                >
+                  {deleting === item.id ? '...' : '×'}
+                </button>
+              )}
+            </div>
+
+            <div className="park-event-date">
+              {formatDate(item.start_date)}
+              {item.end_date && item.end_date !== item.start_date && (
+                <> - {formatDate(item.end_date)}</>
+              )}
+            </div>
+
+            {item.description && <p className="park-event-description">{item.description}</p>}
+
+            {item.location_details && (
+              <div className="park-event-location">
+                <strong>Location:</strong> {item.location_details}
+              </div>
+            )}
+
+            <div className="park-event-actions">
+              <div className="calendar-buttons">
+                <a
+                  href={generateCalendarUrl(item)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="add-calendar-btn google"
+                  title="Add to Google Calendar"
+                >
+                  + Google Calendar
+                </a>
+                <button
+                  onClick={() => downloadIcs(item)}
+                  className="add-calendar-btn ics"
+                  title="Download .ics file for Apple/Outlook"
+                >
+                  + Download .ics
+                </button>
+              </div>
+              {item.source_url && (
+                <a
+                  href={item.source_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="event-link"
+                >
+                  More info
+                </a>
+              )}
+            </div>
+          </div>
+            ))}
+          </div>
+        </div>
+        {/* Map thumbnail sidebar */}
+        {mapState && (
+          <div className="map-thumbnail-sidebar">
+            <MapThumbnail
+              bounds={mapState.bounds}
+              aspectRatio={mapState.aspectRatio || 1.5}
+              visibleDestinations={filteredDestinations}
+              onClick={onMapClick}
+              poiCount={filteredDestinations?.length || 0}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default ParkEvents;
