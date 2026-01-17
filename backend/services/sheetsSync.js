@@ -3129,26 +3129,34 @@ export async function pullNewsFromSheets(sheets, pool) {
   const newsItems = rows.map(rowToNews).filter(n => n.title && n.poi_id);
 
   // Upsert news items - update if exists, insert if not
+  // IMPORTANT: Look up POI by name since IDs differ between environments
   let count = 0;
   for (const news of newsItems) {
-    if (!news.poi_id || !news.title) continue;
+    if (!news.title) continue;
 
-    // Check for existing record by ID or by poi_id+title
-    let existingId = null;
-    if (news.id) {
-      const byId = await pool.query('SELECT id FROM poi_news WHERE id = $1', [news.id]);
-      if (byId.rows.length > 0) {
-        existingId = byId.rows[0].id;
+    // Look up the local POI ID by name (IDs from sheet may be from different environment)
+    let localPoiId = null;
+    if (news.poi_name) {
+      const poiResult = await pool.query('SELECT id FROM pois WHERE name = $1', [news.poi_name]);
+      if (poiResult.rows.length > 0) {
+        localPoiId = poiResult.rows[0].id;
       }
     }
-    if (!existingId) {
-      const byKey = await pool.query(
-        'SELECT id FROM poi_news WHERE poi_id = $1 AND title = $2',
-        [news.poi_id, news.title]
-      );
-      if (byKey.rows.length > 0) {
-        existingId = byKey.rows[0].id;
-      }
+
+    // Skip if we can't find the POI locally
+    if (!localPoiId) {
+      console.log(`Skipping news "${news.title}" - POI "${news.poi_name}" not found locally`);
+      continue;
+    }
+
+    // Check for existing record by title and local POI ID
+    let existingId = null;
+    const byKey = await pool.query(
+      'SELECT id FROM poi_news WHERE poi_id = $1 AND title = $2',
+      [localPoiId, news.title]
+    );
+    if (byKey.rows.length > 0) {
+      existingId = byKey.rows[0].id;
     }
 
     if (existingId) {
@@ -3165,7 +3173,7 @@ export async function pullNewsFromSheets(sheets, pool) {
       await pool.query(`
         INSERT INTO poi_news (poi_id, title, summary, source_url, source_name, news_type, published_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
-      `, [news.poi_id, news.title, news.summary, news.source_url,
+      `, [localPoiId, news.title, news.summary, news.source_url,
           news.source_name, news.news_type, news.published_at]);
     }
     count++;
@@ -3348,26 +3356,34 @@ export async function pullEventsFromSheets(sheets, pool) {
   const eventItems = rows.map(rowToEvent).filter(e => e.title && e.poi_id);
 
   // Upsert events - update if exists, insert if not
+  // IMPORTANT: Look up POI by name since IDs differ between environments
   let count = 0;
   for (const event of eventItems) {
-    if (!event.poi_id || !event.title || !event.start_date) continue;
+    if (!event.title || !event.start_date) continue;
 
-    // Check for existing record by ID or by poi_id+title+start_date
-    let existingId = null;
-    if (event.id) {
-      const byId = await pool.query('SELECT id FROM poi_events WHERE id = $1', [event.id]);
-      if (byId.rows.length > 0) {
-        existingId = byId.rows[0].id;
+    // Look up the local POI ID by name (IDs from sheet may be from different environment)
+    let localPoiId = null;
+    if (event.poi_name) {
+      const poiResult = await pool.query('SELECT id FROM pois WHERE name = $1', [event.poi_name]);
+      if (poiResult.rows.length > 0) {
+        localPoiId = poiResult.rows[0].id;
       }
     }
-    if (!existingId) {
-      const byKey = await pool.query(
-        'SELECT id FROM poi_events WHERE poi_id = $1 AND title = $2 AND start_date = $3',
-        [event.poi_id, event.title, event.start_date]
-      );
-      if (byKey.rows.length > 0) {
-        existingId = byKey.rows[0].id;
-      }
+
+    // Skip if we can't find the POI locally
+    if (!localPoiId) {
+      console.log(`Skipping event "${event.title}" - POI "${event.poi_name}" not found locally`);
+      continue;
+    }
+
+    // Check for existing record by title, local POI ID, and start_date
+    let existingId = null;
+    const byKey = await pool.query(
+      'SELECT id FROM poi_events WHERE poi_id = $1 AND title = $2 AND start_date = $3',
+      [localPoiId, event.title, event.start_date]
+    );
+    if (byKey.rows.length > 0) {
+      existingId = byKey.rows[0].id;
     }
 
     if (existingId) {
@@ -3384,7 +3400,7 @@ export async function pullEventsFromSheets(sheets, pool) {
       await pool.query(`
         INSERT INTO poi_events (poi_id, title, description, start_date, end_date, event_type, location_details, source_url)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      `, [event.poi_id, event.title, event.description, event.start_date,
+      `, [localPoiId, event.title, event.description, event.start_date,
           event.end_date, event.event_type, event.location_details, event.source_url]);
     }
     count++;
