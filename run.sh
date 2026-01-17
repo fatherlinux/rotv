@@ -42,7 +42,7 @@ case "${1:-help}" in
         podman run -d \
             --name "$CONTAINER_NAME" \
             --privileged \
-            -p 8080:8080 \
+            --network host \
             -v "$DATA_DIR:/data/pgdata" \
             $ENV_ARGS \
             "$IMAGE_NAME"

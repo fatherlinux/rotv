@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 
-function SyncSettings() {
+function SyncSettings({ onDataRefresh }) {
   const [syncStatus, setSyncStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -215,8 +215,10 @@ function SyncSettings() {
       if (response.ok) {
         setMessage(result.message);
         fetchStatus();
-        // Reload the page to refresh destinations
-        setTimeout(() => window.location.reload(), 1500);
+        // Refresh data without page reload to stay on current tab
+        if (onDataRefresh) {
+          await onDataRefresh();
+        }
       } else {
         setError(result.error || 'Pull failed');
       }
@@ -374,7 +376,10 @@ function SyncSettings() {
       if (response.ok) {
         setMessage(result.message);
         fetchStatus();
-        setTimeout(() => window.location.reload(), 1500);
+        // Refresh data without page reload to stay on current tab
+        if (onDataRefresh) {
+          await onDataRefresh();
+        }
       } else {
         setError(result.error || 'Failed to wipe database');
       }

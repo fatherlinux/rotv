@@ -12,6 +12,21 @@ import { fileURLToPath } from 'url';
 import { configurePassport } from './config/passport.js';
 import authRoutes from './routes/auth.js';
 import { createAdminRouter } from './routes/admin.js';
+import {
+  initJobScheduler,
+  scheduleNewsCollection,
+  registerNewsCollectionHandler,
+  registerBatchNewsHandler,
+  submitBatchNewsJob,
+  stopJobScheduler
+} from './services/jobScheduler.js';
+import {
+  runNewsCollection,
+  processNewsCollectionJob,
+  ensureNewsJobCheckpointColumns,
+  findIncompleteJobs
+} from './services/newsService.js';
+import { createSheetsService } from './services/sheetsSync.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -39,7 +54,8 @@ app.use(cors({
 }));
 
 // Increase JSON body limit for large GeoJSON geometry in linear features
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Session configuration with PostgreSQL store
 const PgSession = connectPgSimple(session);
@@ -476,6 +492,68 @@ async function initDatabase() {
       )
     `);
 
+    // News table for POI-related news items
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS poi_news (
+        id SERIAL PRIMARY KEY,
+        poi_id INTEGER REFERENCES pois(id) ON DELETE CASCADE,
+        title VARCHAR(500) NOT NULL,
+        summary TEXT,
+        source_url TEXT,
+        source_name VARCHAR(255),
+        news_type VARCHAR(50) DEFAULT 'general',
+        published_at TIMESTAMP,
+        ai_generated BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_poi_news_poi_id ON poi_news(poi_id)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_poi_news_published_at ON poi_news(published_at)`);
+
+    // Events table for POI-related events
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS poi_events (
+        id SERIAL PRIMARY KEY,
+        poi_id INTEGER REFERENCES pois(id) ON DELETE CASCADE,
+        title VARCHAR(500) NOT NULL,
+        description TEXT,
+        start_date TIMESTAMP NOT NULL,
+        end_date TIMESTAMP,
+        event_type VARCHAR(100),
+        location_details TEXT,
+        source_url TEXT,
+        calendar_event_id VARCHAR(255),
+        ai_generated BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_poi_events_poi_id ON poi_events(poi_id)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_poi_events_start_date ON poi_events(start_date)`);
+
+    // News job status tracking
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS news_job_status (
+        id SERIAL PRIMARY KEY,
+        job_type VARCHAR(50) NOT NULL,
+        status VARCHAR(50) DEFAULT 'pending',
+        started_at TIMESTAMP,
+        completed_at TIMESTAMP,
+        total_pois INTEGER DEFAULT 0,
+        pois_processed INTEGER DEFAULT 0,
+        news_found INTEGER DEFAULT 0,
+        events_found INTEGER DEFAULT 0,
+        error_message TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Add total_pois column if it doesn't exist (migration for existing tables)
+    await client.query(`
+      ALTER TABLE news_job_status ADD COLUMN IF NOT EXISTS total_pois INTEGER DEFAULT 0
+    `);
+
     // Note: linear_features table is deprecated - data migrated to pois table above
 
     // Seed default icons if table is empty
@@ -731,6 +809,88 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Public news and events endpoints
+app.get('/api/pois/:id/news', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const limit = parseInt(req.query.limit) || 10;
+    const result = await pool.query(`
+      SELECT id, title, summary, source_url, source_name, news_type, published_at, created_at
+      FROM poi_news
+      WHERE poi_id = $1
+      ORDER BY COALESCE(published_at, created_at) DESC
+      LIMIT $2
+    `, [id, limit]);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching POI news:', error);
+    res.status(500).json({ error: 'Failed to fetch news' });
+  }
+});
+
+app.get('/api/pois/:id/events', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const upcomingOnly = req.query.upcoming !== 'false';
+    let query = `
+      SELECT id, title, description, start_date, end_date, event_type, location_details, source_url, created_at
+      FROM poi_events
+      WHERE poi_id = $1
+    `;
+    if (upcomingOnly) {
+      query += ` AND start_date >= CURRENT_DATE`;
+    }
+    query += ` ORDER BY start_date ASC`;
+
+    const result = await pool.query(query, [id]);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching POI events:', error);
+    res.status(500).json({ error: 'Failed to fetch events' });
+  }
+});
+
+// All recent news across the park (public)
+app.get('/api/news/recent', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 20;
+    const result = await pool.query(`
+      SELECT n.id, n.title, n.summary, n.source_url, n.source_name, n.news_type,
+             n.published_at, n.created_at, p.id as poi_id, p.name as poi_name, p.poi_type
+      FROM poi_news n
+      JOIN pois p ON n.poi_id = p.id
+      WHERE (p.deleted IS NULL OR p.deleted = FALSE)
+      ORDER BY COALESCE(n.published_at, n.created_at) DESC
+      LIMIT $1
+    `, [limit]);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching recent news:', error);
+    res.status(500).json({ error: 'Failed to fetch recent news' });
+  }
+});
+
+// All upcoming events across the park (public)
+app.get('/api/events/upcoming', async (req, res) => {
+  try {
+    const daysAhead = parseInt(req.query.days) || 30;
+    const result = await pool.query(`
+      SELECT e.id, e.title, e.description, e.start_date, e.end_date, e.event_type,
+             e.location_details, e.source_url, p.id as poi_id, p.name as poi_name, p.poi_type
+      FROM poi_events e
+      JOIN pois p ON e.poi_id = p.id
+      WHERE e.start_date >= CURRENT_DATE
+        AND e.start_date <= CURRENT_DATE + INTERVAL '1 day' * $1
+        AND (p.deleted IS NULL OR p.deleted = FALSE)
+      ORDER BY e.start_date ASC
+    `, [daysAhead]);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching upcoming events:', error);
+    res.status(500).json({ error: 'Failed to fetch upcoming events' });
+  }
+});
+
 // Serve generated icons from database (public endpoint)
 app.get('/api/icons/:name.svg', async (req, res) => {
   try {
@@ -770,9 +930,70 @@ const PORT = process.env.PORT || 3001;
 async function start() {
   await initDatabase();
 
+  // Ensure news job checkpoint columns exist for resumability
+  await ensureNewsJobCheckpointColumns(pool);
+
+  // Initialize job scheduler for news collection
+  const connectionString = `postgresql://${process.env.PGUSER || 'rotv'}:${process.env.PGPASSWORD || 'rotv'}@${process.env.PGHOST || 'localhost'}:${process.env.PGPORT || 5432}/${process.env.PGDATABASE || 'rotv'}`;
+
+  try {
+    await initJobScheduler(connectionString);
+
+    // Register scheduled news collection handler (daily at 6 AM)
+    await registerNewsCollectionHandler(async () => {
+      console.log('Running scheduled news collection...');
+      const result = await runNewsCollection(pool);
+      console.log(`News collection completed: ${result.newsFound} news items, ${result.eventsFound} events found`);
+    });
+
+    // Register batch news collection handler (for admin-triggered jobs via pg-boss)
+    await registerBatchNewsHandler(async (pgBossJobId, jobData) => {
+      console.log(`[pg-boss] Processing batch news job: ${pgBossJobId}`);
+      // Note: sheets client is not available in the worker context
+      // Jobs will sync to sheets on completion if they find any news/events
+      await processNewsCollectionJob(pool, null, pgBossJobId, jobData);
+    });
+
+    // Schedule daily news collection at 6 AM Eastern
+    await scheduleNewsCollection('0 6 * * *');
+
+    // Resume any incomplete jobs from before restart
+    const incompleteJobs = await findIncompleteJobs(pool);
+    if (incompleteJobs.length > 0) {
+      console.log(`[pg-boss] Found ${incompleteJobs.length} incomplete job(s) to resume`);
+      for (const job of incompleteJobs) {
+        // Parse POI IDs if needed
+        let poiIds = job.poi_ids;
+        if (typeof poiIds === 'string') {
+          poiIds = JSON.parse(poiIds);
+        }
+        if (poiIds && poiIds.length > 0) {
+          console.log(`[pg-boss] Resuming job ${job.id} with ${poiIds.length} POIs`);
+          await submitBatchNewsJob({ jobId: job.id, poiIds });
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Failed to initialize job scheduler:', error.message);
+    // Continue without scheduler - manual triggers still work via admin route
+  }
+
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Roots of The Valley API running on port ${PORT}`);
   });
 }
+
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  console.log('SIGTERM received, shutting down gracefully...');
+  await stopJobScheduler();
+  process.exit(0);
+});
+
+process.on('SIGINT', async () => {
+  console.log('SIGINT received, shutting down gracefully...');
+  await stopJobScheduler();
+  process.exit(0);
+});
 
 start().catch(console.error);

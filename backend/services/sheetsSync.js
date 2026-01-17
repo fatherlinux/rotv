@@ -25,6 +25,8 @@ const SURFACES_SHEET_NAME = 'Surfaces';
 const ICONS_SHEET_NAME = 'Icons';
 const INTEGRATION_SHEET_NAME = 'Google Integration';
 const LINEAR_FEATURES_SHEET_NAME = 'Trails & Rivers';
+const NEWS_SHEET_NAME = 'News';
+const EVENTS_SHEET_NAME = 'Events';
 
 // Concurrency limit for parallel Google API calls (Google allows ~10/sec per user)
 const PARALLEL_BATCH_SIZE = 5;
@@ -121,6 +123,39 @@ const ICONS_COLUMNS = {
 
 // Headers for the icons spreadsheet
 const ICONS_HEADERS = ['Name', 'Label', 'SVG Filename', 'Title Keywords', 'Activity Fallbacks', 'Sort Order', 'Enabled', 'Drive File ID'];
+
+// Column mapping for the news spreadsheet
+const NEWS_COLUMNS = {
+  id: 0,
+  poi_id: 1,
+  poi_name: 2,
+  title: 3,
+  summary: 4,
+  source_url: 5,
+  source_name: 6,
+  news_type: 7,
+  published_at: 8
+};
+
+// Headers for the news spreadsheet
+const NEWS_HEADERS = ['ID', 'POI ID', 'POI Name', 'Title', 'Summary', 'Source URL', 'Source Name', 'News Type', 'Published At'];
+
+// Column mapping for the events spreadsheet
+const EVENTS_COLUMNS = {
+  id: 0,
+  poi_id: 1,
+  poi_name: 2,
+  title: 3,
+  description: 4,
+  start_date: 5,
+  end_date: 6,
+  event_type: 7,
+  location_details: 8,
+  source_url: 9
+};
+
+// Headers for the events spreadsheet
+const EVENTS_HEADERS = ['ID', 'POI ID', 'POI Name', 'Title', 'Description', 'Start Date', 'End Date', 'Event Type', 'Location Details', 'Source URL'];
 
 // Column mapping for the integration settings spreadsheet
 const INTEGRATION_COLUMNS = {
@@ -757,9 +792,18 @@ async function findRowByName(sheets, spreadsheetId, sheetName, name) {
 }
 
 /**
- * Append a new POI to the spreadsheet
+ * Append a new POI to the spreadsheet (checks for duplicates first)
  */
 export async function appendPOI(sheets, spreadsheetId, poi) {
+  // Check if POI already exists to prevent duplicates
+  const existingRow = await findRowByName(sheets, spreadsheetId, APP_SHEET_NAME, poi.name);
+  if (existingRow) {
+    // POI already exists - skip INSERT since UPDATE operations handle updates
+    // (UPDATE runs before INSERT in the sync queue, so data is already current)
+    console.log(`POI "${poi.name}" already exists in sheet at row ${existingRow}, skipping INSERT`);
+    return;
+  }
+
   const row = poiToRow(poi);
   await sheets.spreadsheets.values.append({
     spreadsheetId,
@@ -946,6 +990,13 @@ export async function pushAllToSheets(sheets, pool, drive = null) {
     VALUES ('last_push', $1, CURRENT_TIMESTAMP)
     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
   `, [new Date().toISOString()]);
+
+  // Also push News and Events sheets
+  await pushNewsToSheets(sheets, pool);
+  await pushEventsToSheets(sheets, pool);
+
+  // Clear the sync queue since all data has been pushed
+  await pool.query('DELETE FROM sync_queue');
 
   return pois.length;
 }
@@ -2913,6 +2964,414 @@ async function ensureLinearFeaturesSheet(sheets, spreadsheetId) {
   }
 }
 
+// ============================================
+// NEWS SHEET SYNC FUNCTIONS
+// ============================================
+
+/**
+ * Convert a news row from the spreadsheet to an object
+ */
+function rowToNews(row) {
+  return {
+    id: row[NEWS_COLUMNS.id] ? parseInt(row[NEWS_COLUMNS.id]) : null,
+    poi_id: row[NEWS_COLUMNS.poi_id] ? parseInt(row[NEWS_COLUMNS.poi_id]) : null,
+    poi_name: row[NEWS_COLUMNS.poi_name] || '',
+    title: row[NEWS_COLUMNS.title] || '',
+    summary: row[NEWS_COLUMNS.summary] || null,
+    source_url: row[NEWS_COLUMNS.source_url] || null,
+    source_name: row[NEWS_COLUMNS.source_name] || null,
+    news_type: row[NEWS_COLUMNS.news_type] || 'general',
+    published_at: row[NEWS_COLUMNS.published_at] || null
+  };
+}
+
+/**
+ * Convert a news object to a spreadsheet row
+ */
+function newsToRow(news) {
+  return [
+    news.id || '',
+    news.poi_id || '',
+    news.poi_name || '',
+    news.title || '',
+    news.summary || '',
+    news.source_url || '',
+    news.source_name || '',
+    news.news_type || 'general',
+    news.published_at ? new Date(news.published_at).toISOString().split('T')[0] : ''
+  ];
+}
+
+/**
+ * Ensure the News sheet exists in the spreadsheet
+ */
+async function ensureNewsSheet(sheets, spreadsheetId) {
+  console.log(`Ensuring News sheet exists in spreadsheet ${spreadsheetId}`);
+  try {
+    const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId });
+    const sheetNames = spreadsheet.data.sheets.map(s => s.properties.title);
+
+    const newsSheet = spreadsheet.data.sheets.find(
+      s => s.properties.title === NEWS_SHEET_NAME
+    );
+
+    if (!newsSheet) {
+      console.log(`News sheet "${NEWS_SHEET_NAME}" not found, creating...`);
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+          requests: [{
+            addSheet: {
+              properties: {
+                title: NEWS_SHEET_NAME,
+                gridProperties: {
+                  frozenRowCount: 1
+                }
+              }
+            }
+          }]
+        }
+      });
+
+      // Add headers
+      await sheets.spreadsheets.values.update({
+        spreadsheetId,
+        range: `'${NEWS_SHEET_NAME}'!A1:I1`,
+        valueInputOption: 'RAW',
+        requestBody: {
+          values: [NEWS_HEADERS]
+        }
+      });
+      console.log('News sheet created with headers');
+    }
+  } catch (error) {
+    console.error('Error ensuring News sheet:', error.message);
+    throw error;
+  }
+}
+
+/**
+ * Push all news to the spreadsheet
+ */
+export async function pushNewsToSheets(sheets, pool) {
+  const spreadsheetId = await getSpreadsheetId(pool);
+  if (!spreadsheetId) {
+    throw new Error('No spreadsheet configured. Please create a spreadsheet first.');
+  }
+
+  await ensureNewsSheet(sheets, spreadsheetId);
+
+  const result = await pool.query(`
+    SELECT n.id, n.poi_id, p.name as poi_name, n.title, n.summary,
+           n.source_url, n.source_name, n.news_type, n.published_at
+    FROM poi_news n
+    JOIN pois p ON n.poi_id = p.id
+    ORDER BY n.published_at DESC NULLS LAST, n.created_at DESC
+  `);
+
+  const news = result.rows;
+
+  // Clear existing data (keep header)
+  try {
+    await sheets.spreadsheets.values.clear({
+      spreadsheetId,
+      range: `'${NEWS_SHEET_NAME}'!A2:I`,
+    });
+  } catch (error) {
+    // Ignore if sheet is empty
+  }
+
+  // Write all news
+  if (news.length > 0) {
+    const rows = news.map(newsToRow);
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `'${NEWS_SHEET_NAME}'!A2:I`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: {
+        values: rows
+      }
+    });
+  }
+
+  // Update sync status
+  await pool.query(`
+    INSERT INTO sync_status (key, value, updated_at)
+    VALUES ('last_news_push', $1, CURRENT_TIMESTAMP)
+    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
+  `, [new Date().toISOString()]);
+
+  return news.length;
+}
+
+/**
+ * Pull all news from the spreadsheet to database
+ */
+export async function pullNewsFromSheets(sheets, pool) {
+  const spreadsheetId = await getSpreadsheetId(pool);
+  if (!spreadsheetId) {
+    throw new Error('No spreadsheet configured. Please create a spreadsheet first.');
+  }
+
+  // Read news from sheet
+  let rows = [];
+  try {
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `'${NEWS_SHEET_NAME}'!A2:I`,
+    });
+    rows = response.data.values || [];
+  } catch (error) {
+    console.log('News sheet may not exist yet:', error.message);
+    return 0;
+  }
+
+  const newsItems = rows.map(rowToNews).filter(n => n.title && n.poi_id);
+
+  // Update existing news items (by ID) or insert new ones
+  let count = 0;
+  for (const news of newsItems) {
+    if (news.id) {
+      // Update existing
+      await pool.query(`
+        UPDATE poi_news SET
+          title = $1, summary = $2, source_url = $3, source_name = $4,
+          news_type = $5, published_at = $6
+        WHERE id = $7
+      `, [news.title, news.summary, news.source_url, news.source_name,
+          news.news_type, news.published_at, news.id]);
+    } else if (news.poi_id && news.title) {
+      // Insert new (check for duplicate first)
+      const existing = await pool.query(
+        'SELECT id FROM poi_news WHERE poi_id = $1 AND title = $2',
+        [news.poi_id, news.title]
+      );
+      if (existing.rows.length === 0) {
+        await pool.query(`
+          INSERT INTO poi_news (poi_id, title, summary, source_url, source_name, news_type, published_at)
+          VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `, [news.poi_id, news.title, news.summary, news.source_url,
+            news.source_name, news.news_type, news.published_at]);
+      }
+    }
+    count++;
+  }
+
+  // Update sync status
+  await pool.query(`
+    INSERT INTO sync_status (key, value, updated_at)
+    VALUES ('last_news_pull', $1, CURRENT_TIMESTAMP)
+    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
+  `, [new Date().toISOString()]);
+
+  return count;
+}
+
+// ============================================
+// EVENTS SHEET SYNC FUNCTIONS
+// ============================================
+
+/**
+ * Convert an event row from the spreadsheet to an object
+ */
+function rowToEvent(row) {
+  return {
+    id: row[EVENTS_COLUMNS.id] ? parseInt(row[EVENTS_COLUMNS.id]) : null,
+    poi_id: row[EVENTS_COLUMNS.poi_id] ? parseInt(row[EVENTS_COLUMNS.poi_id]) : null,
+    poi_name: row[EVENTS_COLUMNS.poi_name] || '',
+    title: row[EVENTS_COLUMNS.title] || '',
+    description: row[EVENTS_COLUMNS.description] || null,
+    start_date: row[EVENTS_COLUMNS.start_date] || null,
+    end_date: row[EVENTS_COLUMNS.end_date] || null,
+    event_type: row[EVENTS_COLUMNS.event_type] || 'program',
+    location_details: row[EVENTS_COLUMNS.location_details] || null,
+    source_url: row[EVENTS_COLUMNS.source_url] || null
+  };
+}
+
+/**
+ * Convert an event object to a spreadsheet row
+ */
+function eventToRow(event) {
+  return [
+    event.id || '',
+    event.poi_id || '',
+    event.poi_name || '',
+    event.title || '',
+    event.description || '',
+    event.start_date ? new Date(event.start_date).toISOString().split('T')[0] : '',
+    event.end_date ? new Date(event.end_date).toISOString().split('T')[0] : '',
+    event.event_type || 'program',
+    event.location_details || '',
+    event.source_url || ''
+  ];
+}
+
+/**
+ * Ensure the Events sheet exists in the spreadsheet
+ */
+async function ensureEventsSheet(sheets, spreadsheetId) {
+  console.log(`Ensuring Events sheet exists in spreadsheet ${spreadsheetId}`);
+  try {
+    const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId });
+    const sheetNames = spreadsheet.data.sheets.map(s => s.properties.title);
+
+    const eventsSheet = spreadsheet.data.sheets.find(
+      s => s.properties.title === EVENTS_SHEET_NAME
+    );
+
+    if (!eventsSheet) {
+      console.log(`Events sheet "${EVENTS_SHEET_NAME}" not found, creating...`);
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+          requests: [{
+            addSheet: {
+              properties: {
+                title: EVENTS_SHEET_NAME,
+                gridProperties: {
+                  frozenRowCount: 1
+                }
+              }
+            }
+          }]
+        }
+      });
+
+      // Add headers
+      await sheets.spreadsheets.values.update({
+        spreadsheetId,
+        range: `'${EVENTS_SHEET_NAME}'!A1:J1`,
+        valueInputOption: 'RAW',
+        requestBody: {
+          values: [EVENTS_HEADERS]
+        }
+      });
+      console.log('Events sheet created with headers');
+    }
+  } catch (error) {
+    console.error('Error ensuring Events sheet:', error.message);
+    throw error;
+  }
+}
+
+/**
+ * Push all events to the spreadsheet
+ */
+export async function pushEventsToSheets(sheets, pool) {
+  const spreadsheetId = await getSpreadsheetId(pool);
+  if (!spreadsheetId) {
+    throw new Error('No spreadsheet configured. Please create a spreadsheet first.');
+  }
+
+  await ensureEventsSheet(sheets, spreadsheetId);
+
+  const result = await pool.query(`
+    SELECT e.id, e.poi_id, p.name as poi_name, e.title, e.description,
+           e.start_date, e.end_date, e.event_type, e.location_details, e.source_url
+    FROM poi_events e
+    JOIN pois p ON e.poi_id = p.id
+    ORDER BY e.start_date ASC NULLS LAST
+  `);
+
+  const events = result.rows;
+
+  // Clear existing data (keep header)
+  try {
+    await sheets.spreadsheets.values.clear({
+      spreadsheetId,
+      range: `'${EVENTS_SHEET_NAME}'!A2:J`,
+    });
+  } catch (error) {
+    // Ignore if sheet is empty
+  }
+
+  // Write all events
+  if (events.length > 0) {
+    const rows = events.map(eventToRow);
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `'${EVENTS_SHEET_NAME}'!A2:J`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: {
+        values: rows
+      }
+    });
+  }
+
+  // Update sync status
+  await pool.query(`
+    INSERT INTO sync_status (key, value, updated_at)
+    VALUES ('last_events_push', $1, CURRENT_TIMESTAMP)
+    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
+  `, [new Date().toISOString()]);
+
+  return events.length;
+}
+
+/**
+ * Pull all events from the spreadsheet to database
+ */
+export async function pullEventsFromSheets(sheets, pool) {
+  const spreadsheetId = await getSpreadsheetId(pool);
+  if (!spreadsheetId) {
+    throw new Error('No spreadsheet configured. Please create a spreadsheet first.');
+  }
+
+  // Read events from sheet
+  let rows = [];
+  try {
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `'${EVENTS_SHEET_NAME}'!A2:J`,
+    });
+    rows = response.data.values || [];
+  } catch (error) {
+    console.log('Events sheet may not exist yet:', error.message);
+    return 0;
+  }
+
+  const eventItems = rows.map(rowToEvent).filter(e => e.title && e.poi_id);
+
+  // Update existing events (by ID) or insert new ones
+  let count = 0;
+  for (const event of eventItems) {
+    if (event.id) {
+      // Update existing
+      await pool.query(`
+        UPDATE poi_events SET
+          title = $1, description = $2, start_date = $3, end_date = $4,
+          event_type = $5, location_details = $6, source_url = $7
+        WHERE id = $8
+      `, [event.title, event.description, event.start_date, event.end_date,
+          event.event_type, event.location_details, event.source_url, event.id]);
+    } else if (event.poi_id && event.title && event.start_date) {
+      // Insert new (check for duplicate first)
+      const existing = await pool.query(
+        'SELECT id FROM poi_events WHERE poi_id = $1 AND title = $2 AND start_date = $3',
+        [event.poi_id, event.title, event.start_date]
+      );
+      if (existing.rows.length === 0) {
+        await pool.query(`
+          INSERT INTO poi_events (poi_id, title, description, start_date, end_date, event_type, location_details, source_url)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        `, [event.poi_id, event.title, event.description, event.start_date,
+            event.end_date, event.event_type, event.location_details, event.source_url]);
+      }
+    }
+    count++;
+  }
+
+  // Update sync status
+  await pool.query(`
+    INSERT INTO sync_status (key, value, updated_at)
+    VALUES ('last_events_pull', $1, CURRENT_TIMESTAMP)
+    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
+  `, [new Date().toISOString()]);
+
+  return count;
+}
+
 // Export constants for admin routes
 export const SPREADSHEET_ID = null; // No longer used - app creates its own
 export const SHEET_NAME = APP_SHEET_NAME;
@@ -2920,3 +3379,5 @@ export const ACTIVITIES_SHEET = ACTIVITIES_SHEET_NAME;
 export const ERAS_SHEET = ERAS_SHEET_NAME;
 export const SURFACES_SHEET = SURFACES_SHEET_NAME;
 export const LINEAR_FEATURES_SHEET = LINEAR_FEATURES_SHEET_NAME;
+export const NEWS_SHEET = NEWS_SHEET_NAME;
+export const EVENTS_SHEET = EVENTS_SHEET_NAME;

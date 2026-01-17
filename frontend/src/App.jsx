@@ -3,22 +3,90 @@ import { AuthProvider } from './contexts/AuthContext';
 import { useAuth } from './hooks/useAuth';
 import Map from './components/Map';
 import Sidebar from './components/Sidebar';
-import FilterBar from './components/FilterBar';
-import LoginButton from './components/LoginButton';
-import UserMenu from './components/UserMenu';
 import SyncSettings from './components/SyncSettings';
 import AISettings from './components/AISettings';
 import ActivitiesSettings from './components/ActivitiesSettings';
 import ErasSettings from './components/ErasSettings';
 import SurfacesSettings from './components/SurfacesSettings';
 import IconsSettings from './components/IconsSettings';
+import ParkNews from './components/ParkNews';
+import ParkEvents from './components/ParkEvents';
+import NewsSettings from './components/NewsSettings';
+
+// Default icon type IDs for initializing the filter
+const DEFAULT_ICON_TYPES = new Set(['visitor-center', 'waterfall', 'trail', 'historic', 'bridge', 'train', 'nature', 'skiing', 'biking', 'picnic', 'camping', 'music', 'default', 'lighthouse']);
+
+// Check if a keyword exists as a whole word in text (not as a substring)
+function matchesWholeWord(text, keyword) {
+  const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = new RegExp(`\\b${escaped}\\b`, 'i');
+  return regex.test(text);
+}
+
+// Get icon type for a destination using database configuration
+function getDestinationIconType(dest, iconConfig) {
+  if (!iconConfig || iconConfig.length === 0) return 'default';
+
+  const name = (dest.name || '').toLowerCase();
+  const activities = (dest.primary_activities || '').toLowerCase();
+
+  // Check title keywords first (in sort order - first match wins)
+  for (const icon of iconConfig) {
+    if (icon.enabled === false) continue;
+    if (!icon.title_keywords) continue;
+
+    const keywords = icon.title_keywords.split(',').map(k => k.trim().toLowerCase());
+    for (const keyword of keywords) {
+      if (keyword && matchesWholeWord(name, keyword)) {
+        return icon.name;
+      }
+    }
+  }
+
+  // Check activity fallbacks (in sort order - first match wins)
+  for (const icon of iconConfig) {
+    if (icon.enabled === false) continue;
+    if (!icon.activity_fallbacks) continue;
+
+    const fallbackActivities = icon.activity_fallbacks.split(',').map(a => a.trim().toLowerCase());
+    for (const activity of fallbackActivities) {
+      if (activity && matchesWholeWord(activities, activity)) {
+        return icon.name;
+      }
+    }
+  }
+
+  return 'default';
+}
 
 function AppContent() {
-  const { isAuthenticated, isAdmin, loading: authLoading } = useAuth();
+  const { isAuthenticated, isAdmin, loading: authLoading, loginWithGoogle, loginWithFacebook, logout, user } = useAuth();
   const [destinations, setDestinations] = useState([]);
   const [filteredDestinations, setFilteredDestinations] = useState([]);
   const [selectedDestination, setSelectedDestination] = useState(null);
   const [filters, setFilters] = useState({ owners: [], eras: [], surfaces: [] });
+
+  // POI type visibility filter (shared with Map and News/Events tabs)
+  const [visibleTypes, setVisibleTypes] = useState(new Set(DEFAULT_ICON_TYPES));
+
+  // Icon configuration for determining POI types
+  const [iconConfig, setIconConfig] = useState([]);
+
+  // POI IDs currently visible in the map viewport (for News/Events filtering)
+  const [visiblePoiIds, setVisiblePoiIds] = useState([]);
+
+  // Layer visibility states (lifted from Map component for unified control)
+  const [showNpsMap, setShowNpsMap] = useState(false);
+  const [showTrails, setShowTrails] = useState(true);
+  const [showRivers, setShowRivers] = useState(true);
+  const [showBoundaries, setShowBoundaries] = useState(true);
+
+  // Map state for thumbnail display (center, zoom, bounds)
+  const [mapState, setMapState] = useState({
+    center: [41.26, -81.55],  // Park center default
+    zoom: 11,
+    bounds: null
+  });
 
   // Linear features (trails and rivers from database)
   const [linearFeatures, setLinearFeatures] = useState([]);
@@ -38,6 +106,14 @@ function AppContent() {
 
   // Settings sub-tab state: 'activities', 'news', 'google'
   const [settingsTab, setSettingsTab] = useState('activities');
+
+  // News refresh trigger - increments when news collection completes
+  const [newsRefreshTrigger, setNewsRefreshTrigger] = useState(0);
+
+  // Login/account dropdown state
+  const [showLoginDropdown, setShowLoginDropdown] = useState(false);
+  const [showUserDropdown, setShowUserDropdown] = useState(false);
+  const [profileImageError, setProfileImageError] = useState(false);
 
   // Reset to View tab when user loses admin status (e.g., logout)
   useEffect(() => {
@@ -87,37 +163,58 @@ function AppContent() {
     }
   }, []);
 
-  // Fetch destinations and linear features on mount
-  useEffect(() => {
-    async function fetchData() {
-      try {
-        const [destResponse, filterResponse, linearResponse] = await Promise.all([
-          fetch('/api/destinations'),
-          fetch('/api/filters'),
-          fetch('/api/linear-features')
-        ]);
+  // Reusable function to fetch all data (used on mount and after sync operations)
+  const refreshAllData = React.useCallback(async () => {
+    try {
+      const [destResponse, filterResponse, linearResponse, iconResponse] = await Promise.all([
+        fetch('/api/destinations'),
+        fetch('/api/filters'),
+        fetch('/api/linear-features'),
+        fetch('/api/admin/icons')
+      ]);
 
-        if (!destResponse.ok || !filterResponse.ok) {
-          throw new Error('Failed to fetch data');
-        }
-
-        const destData = await destResponse.json();
-        const filterData = await filterResponse.json();
-        const linearData = linearResponse.ok ? await linearResponse.json() : [];
-
-        setDestinations(destData);
-        setFilteredDestinations(destData);
-        setFilters(filterData);
-        setLinearFeatures(linearData);
-        setLoading(false);
-      } catch (err) {
-        setError(err.message);
-        setLoading(false);
+      if (!destResponse.ok || !filterResponse.ok) {
+        throw new Error('Failed to fetch data');
       }
-    }
 
-    fetchData();
+      const destData = await destResponse.json();
+      const filterData = await filterResponse.json();
+      const linearData = linearResponse.ok ? await linearResponse.json() : [];
+      const iconData = iconResponse.ok ? await iconResponse.json() : [];
+
+      setDestinations(destData);
+      setFilteredDestinations(destData);
+      setFilters(filterData);
+      setLinearFeatures(linearData);
+      setIconConfig(iconData);
+      setLoading(false);
+    } catch (err) {
+      setError(err.message);
+      setLoading(false);
+    }
   }, []);
+
+  // Fetch destinations, linear features, and icon config on mount
+  useEffect(() => {
+    refreshAllData();
+  }, [refreshAllData]);
+
+  // Compute destinations filtered by map viewport visibility (for News/Events tabs)
+  // This uses the actual POI IDs visible on the map (respects zoom, pan, and legend filters)
+  const viewportFilteredDestinations = React.useMemo(() => {
+    if (!visiblePoiIds || visiblePoiIds.length === 0) return [];
+
+    const visibleIdSet = new Set(visiblePoiIds);
+    return destinations.filter(dest => visibleIdSet.has(dest.id));
+  }, [destinations, visiblePoiIds]);
+
+  // Compute linear features filtered by map viewport visibility (for News/Events tabs)
+  const viewportFilteredLinearFeatures = React.useMemo(() => {
+    if (!visiblePoiIds || visiblePoiIds.length === 0) return [];
+
+    const visibleIdSet = new Set(visiblePoiIds);
+    return linearFeatures.filter(feature => visibleIdSet.has(feature.id));
+  }, [linearFeatures, visiblePoiIds]);
 
   // Apply filters when activeFilters change
   useEffect(() => {
@@ -198,13 +295,13 @@ function AppContent() {
     setSelectedDestination(destination);
   };
 
-  // Handle linear feature update
+  // Handle linear feature update - merge instead of replace to preserve geometry
   const handleLinearFeatureUpdate = (updatedFeature) => {
     setLinearFeatures(prev =>
-      prev.map(f => f.id === updatedFeature.id ? updatedFeature : f)
+      prev.map(f => f.id === updatedFeature.id ? { ...f, ...updatedFeature } : f)
     );
     if (selectedLinearFeature?.id === updatedFeature.id) {
-      setSelectedLinearFeature(updatedFeature);
+      setSelectedLinearFeature(prev => ({ ...prev, ...updatedFeature }));
     }
   };
 
@@ -297,48 +394,161 @@ function AppContent() {
           <h1>Roots of The Valley</h1>
           <span className="subtitle">Explore Cuyahoga Valley's History</span>
         </div>
-        {isAdmin && (
-          <nav className="header-tabs">
-            <button
-              className={`tab-btn ${activeTab === 'view' ? 'active' : ''}`}
-              onClick={() => setActiveTab('view')}
-            >
-              View
-            </button>
+        <nav className="header-tabs">
+          <button
+            className={`tab-btn ${activeTab === 'view' ? 'active' : ''}`}
+            onClick={() => setActiveTab('view')}
+          >
+            View
+          </button>
+          {isAdmin && (
             <button
               className={`tab-btn ${activeTab === 'edit' ? 'active' : ''}`}
               onClick={() => setActiveTab('edit')}
             >
               Edit
             </button>
+          )}
+          <button
+            className={`tab-btn ${activeTab === 'news' ? 'active' : ''}`}
+            onClick={() => setActiveTab('news')}
+          >
+            News
+          </button>
+          <button
+            className={`tab-btn ${activeTab === 'events' ? 'active' : ''}`}
+            onClick={() => setActiveTab('events')}
+          >
+            Events
+          </button>
+          {isAdmin && (
             <button
               className={`tab-btn ${activeTab === 'settings' ? 'active' : ''}`}
               onClick={() => setActiveTab('settings')}
             >
               Settings
             </button>
-          </nav>
-        )}
-        <div className="header-right">
-          {isAuthenticated ? (
-            <UserMenu />
-          ) : (
-            <LoginButton />
           )}
-        </div>
+
+          {/* Login/Account tab */}
+          {isAuthenticated ? (
+            <div className="tab-account-container">
+              <button
+                className="tab-btn tab-account"
+                onClick={() => setShowUserDropdown(!showUserDropdown)}
+              >
+                {user?.pictureUrl && !profileImageError ? (
+                  <img
+                    src={user.pictureUrl}
+                    alt={user.name}
+                    className="tab-user-avatar"
+                    referrerPolicy="no-referrer"
+                    onError={() => setProfileImageError(true)}
+                  />
+                ) : (
+                  <div className="tab-user-avatar-placeholder">
+                    {user?.name?.[0]?.toUpperCase() || '?'}
+                  </div>
+                )}
+              </button>
+              {showUserDropdown && (
+                <>
+                  <div className="tab-dropdown-backdrop" onClick={() => setShowUserDropdown(false)} />
+                  <div className="tab-dropdown user-dropdown-inline">
+                    <div className="user-info-inline">
+                      <span className="user-name-inline">{user?.name}</span>
+                      <span className="user-email-inline">{user?.email}</span>
+                      {isAdmin && <span className="admin-badge-inline">Admin</span>}
+                    </div>
+                    <button
+                      className="dropdown-item-inline"
+                      onClick={() => {
+                        setShowUserDropdown(false);
+                        logout();
+                      }}
+                    >
+                      Sign Out
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          ) : (
+            <div className="tab-account-container">
+              <button
+                className="tab-btn"
+                onClick={() => setShowLoginDropdown(!showLoginDropdown)}
+              >
+                Login
+              </button>
+              {showLoginDropdown && (
+                <>
+                  <div className="tab-dropdown-backdrop" onClick={() => setShowLoginDropdown(false)} />
+                  <div className="tab-dropdown login-dropdown-inline">
+                    <button className="oauth-btn-inline google-btn" onClick={loginWithGoogle}>
+                      <svg viewBox="0 0 24 24" width="18" height="18">
+                        <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                        <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                      </svg>
+                      Continue with Google
+                    </button>
+                    <button className="oauth-btn-inline facebook-btn" onClick={loginWithFacebook}>
+                      <svg viewBox="0 0 24 24" width="18" height="18">
+                        <path fill="#1877F2" d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+                      </svg>
+                      Continue with Facebook
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </nav>
       </header>
 
-      {activeTab !== 'settings' && (
-        <FilterBar
-          filters={filters}
-          activeFilters={activeFilters}
-          onFilterChange={handleFilterChange}
-          onClear={clearFilters}
-          resultCount={filteredDestinations.length}
+      {/* News tab content */}
+      <main className="main-content-full" style={{ display: activeTab === 'news' ? 'flex' : 'none' }}>
+        <ParkNews
+          isAdmin={isAdmin}
+          filteredDestinations={viewportFilteredDestinations}
+          filteredLinearFeatures={viewportFilteredLinearFeatures}
+          mapState={mapState}
+          linearFeatures={linearFeatures}
+          refreshTrigger={newsRefreshTrigger}
+          onMapClick={() => setActiveTab('view')}
+          onSelectPoi={(poiId) => {
+            const poi = destinations.find(d => d.id === poiId);
+            if (poi) {
+              setSelectedDestination(poi);
+              setActiveTab('view');
+            }
+          }}
         />
-      )}
+      </main>
 
-      {activeTab === 'settings' ? (
+      {/* Events tab content */}
+      <main className="main-content-full" style={{ display: activeTab === 'events' ? 'flex' : 'none' }}>
+        <ParkEvents
+          isAdmin={isAdmin}
+          filteredDestinations={viewportFilteredDestinations}
+          filteredLinearFeatures={viewportFilteredLinearFeatures}
+          mapState={mapState}
+          linearFeatures={linearFeatures}
+          refreshTrigger={newsRefreshTrigger}
+          onMapClick={() => setActiveTab('view')}
+          onSelectPoi={(poiId) => {
+            const poi = destinations.find(d => d.id === poiId);
+            if (poi) {
+              setSelectedDestination(poi);
+              setActiveTab('view');
+            }
+          }}
+        />
+      </main>
+
+      {activeTab === 'settings' && (
         <main className="settings-content">
           <div className="settings-panel">
             <nav className="settings-tabs">
@@ -385,15 +595,10 @@ function AppContent() {
               {settingsTab === 'eras' && <ErasSettings />}
               {settingsTab === 'surfaces' && <SurfacesSettings />}
               {settingsTab === 'icons' && <IconsSettings />}
-              {settingsTab === 'news' && (
-                <div className="news-settings">
-                  <h3>News & Events</h3>
-                  <p className="coming-soon">Coming soon...</p>
-                </div>
-              )}
+              {settingsTab === 'news' && <NewsSettings />}
               {settingsTab === 'google' && (
                 <div className="google-integration-tab">
-                  <SyncSettings />
+                  <SyncSettings onDataRefresh={refreshAllData} />
                   <div className="settings-divider"></div>
                   <AISettings />
                 </div>
@@ -401,52 +606,68 @@ function AppContent() {
             </div>
           </div>
         </main>
-      ) : (
-        <main className="main-content">
-          <Map
-            destinations={filteredDestinations}
-            selectedDestination={selectedDestination}
-            onSelectDestination={handleSelectDestination}
-            isAdmin={isAdmin}
-            onDestinationUpdate={handleDestinationUpdate}
-            onDestinationCreate={handleDestinationCreate}
-            editMode={editMode}
-            activeTab={activeTab}
-            previewCoords={previewCoords}
-            onPreviewCoordsChange={setPreviewCoords}
-            newPOI={newPOI}
-            onStartNewPOI={handleStartNewPOI}
-            linearFeatures={linearFeatures}
-            selectedLinearFeature={selectedLinearFeature}
-            onSelectLinearFeature={handleSelectLinearFeature}
-          />
-
-          <Sidebar
-            destination={newPOI || selectedDestination}
-            isNewPOI={!!newPOI}
-            onClose={() => {
-              if (newPOI) {
-                handleCancelNewPOI();
-              } else if (selectedLinearFeature) {
-                setSelectedLinearFeature(null);
-              } else {
-                setSelectedDestination(null);
-              }
-            }}
-            isAdmin={isAdmin}
-            editMode={editMode}
-            onDestinationUpdate={handleDestinationUpdate}
-            onDestinationDelete={handleDestinationDelete}
-            onSaveNewPOI={handleSaveNewPOI}
-            onCancelNewPOI={handleCancelNewPOI}
-            previewCoords={previewCoords}
-            onPreviewCoordsChange={setPreviewCoords}
-            linearFeature={selectedLinearFeature}
-            onLinearFeatureUpdate={handleLinearFeatureUpdate}
-            onLinearFeatureDelete={handleLinearFeatureDelete}
-          />
-        </main>
       )}
+
+      {/* Map content - always mounted to preserve zoom/position state */}
+      <main className="main-content" style={{ display: (activeTab === 'view' || activeTab === 'edit') ? 'flex' : 'none' }}>
+        <Map
+          destinations={filteredDestinations}
+          selectedDestination={selectedDestination}
+          onSelectDestination={handleSelectDestination}
+          isAdmin={isAdmin}
+          onDestinationUpdate={handleDestinationUpdate}
+          onDestinationCreate={handleDestinationCreate}
+          editMode={editMode}
+          activeTab={activeTab}
+          previewCoords={previewCoords}
+          onPreviewCoordsChange={setPreviewCoords}
+          newPOI={newPOI}
+          onStartNewPOI={handleStartNewPOI}
+          linearFeatures={linearFeatures}
+          selectedLinearFeature={selectedLinearFeature}
+          onSelectLinearFeature={handleSelectLinearFeature}
+          visibleTypes={visibleTypes}
+          onVisibleTypesChange={setVisibleTypes}
+          onVisiblePoisChange={setVisiblePoiIds}
+          onMapStateChange={setMapState}
+          showNpsMap={showNpsMap}
+          onToggleNpsMap={setShowNpsMap}
+          showTrails={showTrails}
+          onToggleTrails={setShowTrails}
+          showRivers={showRivers}
+          onToggleRivers={setShowRivers}
+          showBoundaries={showBoundaries}
+          onToggleBoundaries={setShowBoundaries}
+          searchQuery={activeFilters.search}
+          onSearchChange={(value) => handleFilterChange('search', value)}
+          onNewsRefresh={() => setNewsRefreshTrigger(prev => prev + 1)}
+        />
+
+        <Sidebar
+          destination={newPOI || selectedDestination}
+          isNewPOI={!!newPOI}
+          onClose={() => {
+            if (newPOI) {
+              handleCancelNewPOI();
+            } else if (selectedLinearFeature) {
+              setSelectedLinearFeature(null);
+            } else {
+              setSelectedDestination(null);
+            }
+          }}
+          isAdmin={isAdmin}
+          editMode={editMode}
+          onDestinationUpdate={handleDestinationUpdate}
+          onDestinationDelete={handleDestinationDelete}
+          onSaveNewPOI={handleSaveNewPOI}
+          onCancelNewPOI={handleCancelNewPOI}
+          previewCoords={previewCoords}
+          onPreviewCoordsChange={setPreviewCoords}
+          linearFeature={selectedLinearFeature}
+          onLinearFeatureUpdate={handleLinearFeatureUpdate}
+          onLinearFeatureDelete={handleLinearFeatureDelete}
+        />
+      </main>
     </div>
   );
 }

@@ -4,8 +4,12 @@ import { useAuth } from '../hooks/useAuth';
 function UserMenu() {
   const { user, isAdmin, logout } = useAuth();
   const [showDropdown, setShowDropdown] = useState(false);
+  const [imageError, setImageError] = useState(false);
 
   if (!user) return null;
+
+  // Show avatar placeholder if no picture URL or if image failed to load
+  const showPlaceholder = !user.pictureUrl || imageError;
 
   return (
     <div className="user-menu-container">
@@ -13,8 +17,14 @@ function UserMenu() {
         className="user-menu-btn"
         onClick={() => setShowDropdown(!showDropdown)}
       >
-        {user.pictureUrl ? (
-          <img src={user.pictureUrl} alt={user.name} className="user-avatar" />
+        {!showPlaceholder ? (
+          <img
+            src={user.pictureUrl}
+            alt={user.name}
+            className="user-avatar"
+            referrerPolicy="no-referrer"
+            onError={() => setImageError(true)}
+          />
         ) : (
           <div className="user-avatar-placeholder">
             {user.name?.[0]?.toUpperCase() || '?'}

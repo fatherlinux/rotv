@@ -31,8 +31,10 @@ import {
   pullIconsFromSheets,
   pushIntegrationToSheets,
   pullIntegrationFromSheets,
-  pushLinearFeaturesToSheets,
-  pullLinearFeaturesFromSheets,
+  pushNewsToSheets,
+  pullNewsFromSheets,
+  pushEventsToSheets,
+  pullEventsFromSheets,
   SHEET_NAME
 } from '../services/sheetsSync.js';
 import {
@@ -48,6 +50,23 @@ import {
   getDriveSetting,
   setDriveSetting
 } from '../services/driveImageService.js';
+import {
+  runNewsCollection,
+  runBatchNewsCollection,
+  createNewsCollectionJob,
+  getNewsForPoi,
+  getEventsForPoi,
+  getRecentNews,
+  getUpcomingEvents,
+  getLatestJobStatus,
+  getJobStatus,
+  cleanupOldNews,
+  cleanupPastEvents,
+  collectNewsForPoi,
+  saveNewsItems,
+  saveEventItems
+} from '../services/newsService.js';
+import { submitBatchNewsJob } from '../services/jobScheduler.js';
 
 const router = express.Router();
 
@@ -1653,12 +1672,13 @@ export function createAdminRouter(pool) {
       const surfacesCount = await pushSurfacesToSheets(sheets, pool);
       const iconsCount = await pushIconsToSheets(sheets, pool);
       const integrationCount = await pushIntegrationToSheets(sheets, pool);
-      const linearFeaturesCount = await pushLinearFeaturesToSheets(sheets, pool);
+      const newsCount = await pushNewsToSheets(sheets, pool);
+      const eventsCount = await pushEventsToSheets(sheets, pool);
 
-      console.log(`Admin ${req.user.email} created spreadsheet: ${result.id} and pushed ${destCount} destinations, ${actCount} activities, ${erasCount} eras, ${surfacesCount} surfaces, ${iconsCount} icons, ${linearFeaturesCount} trails/rivers, ${integrationCount} settings`);
+      console.log(`Admin ${req.user.email} created spreadsheet: ${result.id} and pushed ${destCount} destinations, ${actCount} activities, ${erasCount} eras, ${surfacesCount} surfaces, ${iconsCount} icons, ${integrationCount} settings, ${newsCount} news, ${eventsCount} events`);
       res.json({
         success: true,
-        message: `Spreadsheet created and populated with ${destCount} destinations, ${actCount} activities, ${erasCount} eras, ${surfacesCount} surfaces, ${iconsCount} icons, ${linearFeaturesCount} trails/rivers, ${integrationCount} settings`,
+        message: `Spreadsheet created and populated with ${destCount} destinations, ${actCount} activities, ${erasCount} eras, ${surfacesCount} surfaces, ${iconsCount} icons, ${integrationCount} settings, ${newsCount} news, ${eventsCount} events`,
         spreadsheet: result,
         pushed: {
           destinations: destCount,
@@ -1666,8 +1686,9 @@ export function createAdminRouter(pool) {
           eras: erasCount,
           surfaces: surfacesCount,
           icons: iconsCount,
-          linearFeatures: linearFeaturesCount,
-          integration: integrationCount
+          integration: integrationCount,
+          news: newsCount,
+          events: eventsCount
         }
       });
     } catch (error) {
@@ -1713,20 +1734,24 @@ export function createAdminRouter(pool) {
       // Push Integration settings
       const integrationCount = await pushIntegrationToSheets(sheets, pool);
 
-      // Push Linear Features (Trails & Rivers)
-      const linearFeaturesCount = await pushLinearFeaturesToSheets(sheets, pool);
+      // Push News
+      const newsCount = await pushNewsToSheets(sheets, pool);
 
-      console.log(`Admin ${req.user.email} pushed ${destCount} destinations, ${actCount} activities, ${erasCount} eras, ${surfacesCount} surfaces, ${iconsCount} icons, ${linearFeaturesCount} trails/rivers, and ${integrationCount} integration settings to Google Sheets`);
+      // Push Events
+      const eventsCount = await pushEventsToSheets(sheets, pool);
+
+      console.log(`Admin ${req.user.email} pushed ${destCount} destinations, ${actCount} activities, ${erasCount} eras, ${surfacesCount} surfaces, ${iconsCount} icons, ${integrationCount} integration settings, ${newsCount} news, and ${eventsCount} events to Google Sheets`);
       res.json({
         success: true,
-        message: `Pushed ${destCount} destinations, ${actCount} activities, ${erasCount} eras, ${surfacesCount} surfaces, ${iconsCount} icons, and ${linearFeaturesCount} trails/rivers to Google Sheets`,
+        message: `Pushed ${destCount} destinations, ${actCount} activities, ${erasCount} eras, ${surfacesCount} surfaces, ${iconsCount} icons, ${newsCount} news, ${eventsCount} events to Google Sheets`,
         destinations: destCount,
         activities: actCount,
         eras: erasCount,
         surfaces: surfacesCount,
         icons: iconsCount,
-        linearFeatures: linearFeaturesCount,
-        integration: integrationCount
+        integration: integrationCount,
+        news: newsCount,
+        events: eventsCount
       });
     } catch (error) {
       console.error('Error pushing to sheets:', error);
@@ -1771,20 +1796,32 @@ export function createAdminRouter(pool) {
       // Pull Icons (includes downloading SVG content from Drive)
       const iconsCount = await pullIconsFromSheets(sheets, pool, drive);
 
-      // Pull Linear Features (Trails & Rivers) - only updates metadata, preserves geometry
-      const linearFeaturesCount = await pullLinearFeaturesFromSheets(sheets, pool, drive);
+      // Pull News
+      const newsCount = await pullNewsFromSheets(sheets, pool);
 
-      console.log(`Admin ${req.user.email} pulled ${destCount} destinations, ${actCount} activities, ${erasCount} eras, ${surfacesCount} surfaces, ${iconsCount} icons, ${linearFeaturesCount} trails/rivers, and ${integrationCount} settings from Google Sheets`);
+      // Pull Events
+      const eventsCount = await pullEventsFromSheets(sheets, pool);
+
+      // Clear any pending sync queue items since we just pulled fresh data from sheets
+      // These queued writes are now stale and would overwrite the fresh data
+      const queueResult = await pool.query('DELETE FROM sync_queue RETURNING id');
+      const clearedQueueCount = queueResult.rowCount;
+      if (clearedQueueCount > 0) {
+        console.log(`Cleared ${clearedQueueCount} stale items from sync queue after pull`);
+      }
+
+      console.log(`Admin ${req.user.email} pulled ${destCount} destinations, ${actCount} activities, ${erasCount} eras, ${surfacesCount} surfaces, ${iconsCount} icons, ${integrationCount} settings, ${newsCount} news, and ${eventsCount} events from Google Sheets`);
       res.json({
         success: true,
-        message: `Pulled ${destCount} destinations, ${actCount} activities, ${erasCount} eras, ${surfacesCount} surfaces, ${iconsCount} icons, ${linearFeaturesCount} trails/rivers, and ${integrationCount} settings from Google Sheets`,
+        message: `Pulled ${destCount} destinations, ${actCount} activities, ${erasCount} eras, ${surfacesCount} surfaces, ${iconsCount} icons, ${integrationCount} settings, ${newsCount} news, ${eventsCount} events from Google Sheets`,
         destinations: destCount,
         activities: actCount,
         eras: erasCount,
         surfaces: surfacesCount,
         icons: iconsCount,
-        linearFeatures: linearFeaturesCount,
-        integration: integrationCount
+        integration: integrationCount,
+        news: newsCount,
+        events: eventsCount
       });
     } catch (error) {
       console.error('Error pulling from sheets:', error);
@@ -2735,6 +2772,220 @@ export function createAdminRouter(pool) {
     } catch (error) {
       console.error('Error importing spatial data:', error);
       res.status(500).json({ error: error.message || 'Failed to import spatial data' });
+    }
+  });
+
+  // ============================================
+  // NEWS & EVENTS ENDPOINTS
+  // ============================================
+
+  // Collect news for a batch of POIs (by IDs) - starts job and returns immediately
+  router.post('/news/collect-batch', isAdmin, async (req, res) => {
+    try {
+      const { poiIds } = req.body;
+
+      if (!Array.isArray(poiIds) || poiIds.length === 0) {
+        return res.status(400).json({ error: 'poiIds array is required' });
+      }
+
+      // Limit batch size to prevent overload
+      const MAX_BATCH_SIZE = 50;
+      const idsToProcess = poiIds.slice(0, MAX_BATCH_SIZE);
+
+      console.log(`Admin ${req.user.email} triggered batch news collection for ${idsToProcess.length} POIs`);
+
+      // Create the job record first
+      const { jobId, totalPois } = await createNewsCollectionJob(pool, idsToProcess, 'batch');
+
+      // Submit to pg-boss for crash-recoverable processing
+      // The handler will be registered in server.js and has access to pool and sheets
+      await submitBatchNewsJob({ jobId, poiIds: idsToProcess });
+
+      res.json({
+        success: true,
+        message: 'News & events collection started (pg-boss)',
+        jobId,
+        totalPois,
+        truncated: poiIds.length > MAX_BATCH_SIZE
+      });
+    } catch (error) {
+      console.error('Error starting batch news collection:', error);
+      res.status(500).json({ error: 'Failed to start batch news collection' });
+    }
+  });
+
+  // Trigger news collection job manually (all POIs) - starts job and returns immediately
+  router.post('/news/collect', isAdmin, async (req, res) => {
+    try {
+      console.log(`Admin ${req.user.email} triggered full news collection`);
+
+      // Get all active POI IDs
+      const poisResult = await pool.query(`
+        SELECT id FROM pois
+        WHERE (deleted IS NULL OR deleted = FALSE)
+        ORDER BY
+          CASE poi_type
+            WHEN 'point' THEN 1
+            WHEN 'boundary' THEN 2
+            ELSE 3
+          END,
+          name
+      `);
+      const poiIds = poisResult.rows.map(p => p.id);
+
+      if (poiIds.length === 0) {
+        return res.status(400).json({ error: 'No POIs found to process' });
+      }
+
+      // Create the job record first
+      const { jobId, totalPois } = await createNewsCollectionJob(pool, poiIds, 'manual');
+
+      // Submit to pg-boss for crash-recoverable processing
+      await submitBatchNewsJob({ jobId, poiIds });
+
+      res.json({
+        success: true,
+        message: 'News & events collection started for all POIs (pg-boss)',
+        jobId,
+        totalPois
+      });
+    } catch (error) {
+      console.error('Error starting news collection:', error);
+      res.status(500).json({ error: 'Failed to start news collection' });
+    }
+  });
+
+  // Get job status by ID (for polling progress)
+  router.get('/news/job/:jobId', isAdmin, async (req, res) => {
+    try {
+      const { jobId } = req.params;
+      const status = await getJobStatus(pool, parseInt(jobId));
+
+      if (!status) {
+        return res.status(404).json({ error: 'Job not found' });
+      }
+
+      res.json(status);
+    } catch (error) {
+      console.error('Error getting job status:', error);
+      res.status(500).json({ error: 'Failed to get job status' });
+    }
+  });
+
+  // Collect news for a single POI
+  router.post('/pois/:id/news/collect', isAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      // Get POI details
+      const poiResult = await pool.query(
+        'SELECT id, name, poi_type FROM pois WHERE id = $1',
+        [id]
+      );
+
+      if (poiResult.rows.length === 0) {
+        return res.status(404).json({ error: 'POI not found' });
+      }
+
+      const poi = poiResult.rows[0];
+      console.log(`Admin ${req.user.email} triggered news collection for POI: ${poi.name}`);
+
+      // Collect news and events for this POI
+      const { news, events } = await collectNewsForPoi(pool, poi);
+
+      // Save to database
+      const savedNews = await saveNewsItems(pool, poi.id, news);
+      const savedEvents = await saveEventItems(pool, poi.id, events);
+
+      res.json({
+        success: true,
+        message: `News collection completed for ${poi.name}`,
+        newsFound: news.length,
+        newsSaved: savedNews,
+        eventsFound: events.length,
+        eventsSaved: savedEvents
+      });
+    } catch (error) {
+      console.error('Error collecting news for POI:', error);
+      res.status(500).json({ error: 'Failed to collect news for POI' });
+    }
+  });
+
+  // Get news collection job status
+  router.get('/news/status', isAdmin, async (req, res) => {
+    try {
+      const status = await getLatestJobStatus(pool);
+      res.json(status || { message: 'No jobs have run yet' });
+    } catch (error) {
+      console.error('Error getting job status:', error);
+      res.status(500).json({ error: 'Failed to get job status' });
+    }
+  });
+
+  // Get all recent news (admin view)
+  router.get('/news/recent', isAdmin, async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit) || 50;
+      const news = await getRecentNews(pool, limit);
+      res.json(news);
+    } catch (error) {
+      console.error('Error getting recent news:', error);
+      res.status(500).json({ error: 'Failed to get recent news' });
+    }
+  });
+
+  // Get all upcoming events (admin view)
+  router.get('/events/upcoming', isAdmin, async (req, res) => {
+    try {
+      const daysAhead = parseInt(req.query.days) || 30;
+      const events = await getUpcomingEvents(pool, daysAhead);
+      res.json(events);
+    } catch (error) {
+      console.error('Error getting upcoming events:', error);
+      res.status(500).json({ error: 'Failed to get upcoming events' });
+    }
+  });
+
+  // Delete a news item
+  router.delete('/news/:id', isAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      await pool.query('DELETE FROM poi_news WHERE id = $1', [id]);
+      console.log(`Admin ${req.user.email} deleted news item ${id}`);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error deleting news:', error);
+      res.status(500).json({ error: 'Failed to delete news' });
+    }
+  });
+
+  // Delete an event
+  router.delete('/events/:id', isAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      await pool.query('DELETE FROM poi_events WHERE id = $1', [id]);
+      console.log(`Admin ${req.user.email} deleted event ${id}`);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error deleting event:', error);
+      res.status(500).json({ error: 'Failed to delete event' });
+    }
+  });
+
+  // Cleanup old news and past events
+  router.post('/news/cleanup', isAdmin, async (req, res) => {
+    try {
+      const newsDeleted = await cleanupOldNews(pool, 90);
+      const eventsDeleted = await cleanupPastEvents(pool, 30);
+      console.log(`Admin ${req.user.email} cleaned up ${newsDeleted} old news items and ${eventsDeleted} past events`);
+      res.json({
+        success: true,
+        newsDeleted,
+        eventsDeleted
+      });
+    } catch (error) {
+      console.error('Error cleaning up news/events:', error);
+      res.status(500).json({ error: 'Failed to cleanup' });
     }
   });
 
