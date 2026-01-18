@@ -79,7 +79,7 @@ function AppContent() {
   const [showNpsMap, setShowNpsMap] = useState(false);
   const [showTrails, setShowTrails] = useState(true);
   const [showRivers, setShowRivers] = useState(true);
-  const [showBoundaries, setShowBoundaries] = useState(true);
+  const [visibleBoundaries, setVisibleBoundaries] = useState(new Set()); // Set of boundary IDs
 
   // Map state for thumbnail display (center, zoom, bounds)
   const [mapState, setMapState] = useState({
@@ -198,6 +198,7 @@ function AppContent() {
   useEffect(() => {
     refreshAllData();
   }, [refreshAllData]);
+
 
   // Compute destinations filtered by map viewport visibility (for News/Events tabs)
   // This uses the actual POI IDs visible on the map (respects zoom, pan, and legend filters)
@@ -636,8 +637,21 @@ function AppContent() {
           onToggleTrails={setShowTrails}
           showRivers={showRivers}
           onToggleRivers={setShowRivers}
-          showBoundaries={showBoundaries}
-          onToggleBoundaries={setShowBoundaries}
+          visibleBoundaries={visibleBoundaries}
+          onToggleBoundary={(id) => setVisibleBoundaries(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) {
+              next.delete(id);
+            } else {
+              next.add(id);
+            }
+            return next;
+          })}
+          onShowAllBoundaries={() => {
+            const boundaryIds = linearFeatures.filter(f => f.feature_type === 'boundary').map(f => f.id);
+            setVisibleBoundaries(new Set(boundaryIds));
+          }}
+          onHideAllBoundaries={() => setVisibleBoundaries(new Set())}
           searchQuery={activeFilters.search}
           onSearchChange={(value) => handleFilterChange('search', value)}
           onNewsRefresh={() => setNewsRefreshTrigger(prev => prev + 1)}

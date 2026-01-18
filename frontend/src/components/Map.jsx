@@ -111,7 +111,9 @@ function Legend({
   showNpsMap, onToggleNpsMap,
   showTrails, onToggleTrails,
   showRivers, onToggleRivers,
-  showBoundaries, onToggleBoundaries,
+  // Boundary controls - individual toggles
+  visibleBoundaries, onToggleBoundary, onShowAllBoundaries, onHideAllBoundaries,
+  boundaries, // Array of boundary objects with id, name, boundary_color
   // POI type toggles
   visibleTypes, onToggleType, onShowAll, onHideAll,
   // Search
@@ -125,12 +127,10 @@ function Legend({
 }) {
   const isEditTab = activeTab === 'edit';
 
-  // Layer icons for the unified grid - order: Trails, Rivers, Boundaries, NPS Map
+  // Layer icons for the unified grid - order: Trails, Rivers (NPS Map moved to Boundaries section)
   const layerIcons = [
     { id: 'trails', label: 'Trails', isActive: showTrails, onToggle: () => onToggleTrails(!showTrails) },
-    { id: 'rivers', label: 'Rivers', isActive: showRivers, onToggle: () => onToggleRivers(!showRivers) },
-    { id: 'boundaries', label: 'Boundaries', isActive: showBoundaries, onToggle: () => onToggleBoundaries(!showBoundaries) },
-    { id: 'nps-map', label: 'NPS Map', isActive: showNpsMap, onToggle: () => onToggleNpsMap(!showNpsMap) }
+    { id: 'rivers', label: 'Rivers', isActive: showRivers, onToggle: () => onToggleRivers(!showRivers) }
   ];
 
   // Convert iconConfig to the format needed for legend display
@@ -216,6 +216,44 @@ function Legend({
               <img src={`/icons/layers/${layer.id}.svg`} alt={layer.label} />
               <span>{layer.label}</span>
             </div>
+          ))}
+        </div>
+
+        {/* Boundaries & Overlays section */}
+        <div className="legend-divider"></div>
+        <div className="boundary-chips-header">
+          <h4>Boundaries & Overlays</h4>
+          {boundaries && boundaries.length > 0 && (
+            <div className="boundary-chips-actions">
+              <button onClick={onShowAllBoundaries} title="Show All">All</button>
+              <button onClick={onHideAllBoundaries} title="Hide All">None</button>
+            </div>
+          )}
+        </div>
+        <div className="boundary-chips">
+          {/* NPS Map overlay chip */}
+          <button
+            className={`boundary-chip nps-map-chip ${showNpsMap ? 'active' : 'inactive'}`}
+            onClick={() => onToggleNpsMap(!showNpsMap)}
+            title="NPS Park Map Overlay"
+          >
+            <span className="boundary-chip-icon">🗺️</span>
+            <span className="boundary-chip-name">NPS Map</span>
+          </button>
+          {/* Individual boundary chips */}
+          {boundaries && boundaries.map(boundary => (
+            <button
+              key={boundary.id}
+              className={`boundary-chip ${visibleBoundaries.has(boundary.id) ? 'active' : 'inactive'}`}
+              onClick={() => onToggleBoundary(boundary.id)}
+              title={boundary.name}
+            >
+              <span
+                className="boundary-chip-color"
+                style={{ backgroundColor: boundary.boundary_color || '#228B22' }}
+              />
+              <span className="boundary-chip-name">{boundary.name}</span>
+            </button>
           ))}
         </div>
 
@@ -400,7 +438,7 @@ function MapMoveTracker({ onMapMove }) {
 }
 
 // Component to track which POIs are visible in the current map viewport
-function MapBoundsTracker({ destinations, visibleTypes, getDestinationIconType, onVisiblePoisChange, onMapStateChange, linearFeatures, showTrails, showRivers, showBoundaries }) {
+function MapBoundsTracker({ destinations, visibleTypes, getDestinationIconType, onVisiblePoisChange, onMapStateChange, linearFeatures, showTrails, showRivers, visibleBoundaries }) {
   const map = useMap();
 
   // Calculate which POIs are visible in current bounds and emit map state
@@ -437,7 +475,7 @@ function MapBoundsTracker({ destinations, visibleTypes, getDestinationIconType, 
           // Check if feature type is visible
           const isVisible = (feature.feature_type === 'trail' && showTrails) ||
                            (feature.feature_type === 'river' && showRivers) ||
-                           (feature.feature_type === 'boundary' && showBoundaries);
+                           (feature.feature_type === 'boundary' && visibleBoundaries.has(feature.id));
           if (!isVisible) return;
 
           // Check if any part of the feature intersects with map bounds
@@ -490,7 +528,7 @@ function MapBoundsTracker({ destinations, visibleTypes, getDestinationIconType, 
     } catch (e) {
       // Map not ready yet, will try again on next event
     }
-  }, [map, destinations, visibleTypes, getDestinationIconType, onVisiblePoisChange, onMapStateChange, linearFeatures, showTrails, showRivers, showBoundaries]);
+  }, [map, destinations, visibleTypes, getDestinationIconType, onVisiblePoisChange, onMapStateChange, linearFeatures, showTrails, showRivers, visibleBoundaries]);
 
   // Track map movements and load
   useMapEvents({
@@ -512,7 +550,7 @@ function MapBoundsTracker({ destinations, visibleTypes, getDestinationIconType, 
   // Re-calculate when destinations or linear features change
   useEffect(() => {
     updateVisiblePois();
-  }, [destinations, linearFeatures, showTrails, showRivers, showBoundaries, updateVisiblePois]);
+  }, [destinations, linearFeatures, showTrails, showRivers, visibleBoundaries, updateVisiblePois]);
 
   return null;
 }
@@ -849,7 +887,7 @@ const DEFAULT_NPS_MAP_BOUNDS = [
 // Default icon type IDs for initializing the filter (before config loads)
 const DEFAULT_ICON_TYPES = new Set(['visitor-center', 'waterfall', 'trail', 'historic', 'bridge', 'train', 'nature', 'skiing', 'biking', 'picnic', 'camping', 'music', 'default']);
 
-function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, onDestinationUpdate, editMode, activeTab, onDestinationCreate, previewCoords, onPreviewCoordsChange, newPOI, onStartNewPOI, linearFeatures, selectedLinearFeature, onSelectLinearFeature, visibleTypes, onVisibleTypesChange, onVisiblePoisChange, onMapStateChange, showNpsMap, onToggleNpsMap, showTrails, onToggleTrails, showRivers, onToggleRivers, showBoundaries, onToggleBoundaries, searchQuery, onSearchChange, onNewsRefresh }) {
+function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, onDestinationUpdate, editMode, activeTab, onDestinationCreate, previewCoords, onPreviewCoordsChange, newPOI, onStartNewPOI, linearFeatures, selectedLinearFeature, onSelectLinearFeature, visibleTypes, onVisibleTypesChange, onVisiblePoisChange, onMapStateChange, showNpsMap, onToggleNpsMap, showTrails, onToggleTrails, showRivers, onToggleRivers, visibleBoundaries, onToggleBoundary, onShowAllBoundaries, onHideAllBoundaries, searchQuery, onSearchChange, onNewsRefresh }) {
   const [showAdmin, setShowAdmin] = useState(false);
   const [isLegendExpanded, setIsLegendExpanded] = useState(false);
   const [mapBounds, setMapBounds] = useState(DEFAULT_NPS_MAP_BOUNDS);
@@ -1040,7 +1078,7 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
     // Show all layers except NPS Map
     onToggleTrails(true);
     onToggleRivers(true);
-    onToggleBoundaries(true);
+    onShowAllBoundaries();
   };
 
   const handleHideAll = () => {
@@ -1049,7 +1087,7 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
     // Hide all layers except NPS Map
     onToggleTrails(false);
     onToggleRivers(false);
-    onToggleBoundaries(false);
+    onHideAllBoundaries();
   };
 
   // Handle file selection - store in ref (no re-render), update name for UI
@@ -1196,16 +1234,22 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
         color: isSelected ? '#0066CC' : '#1E90FF'
       };
     } else if (feature.feature_type === 'boundary') {
-      // Park boundaries - dashed green outline with fill
-      // className makes tooltip only trigger on stroke, not fill
+      // Park boundaries - use per-boundary color from database
+      // Note: invisible hit area layer handles click detection, so stroke can be thin
+      const boundaryColor = feature.boundary_color || '#228B22';
+      // Create darker version for selected state
+      const r = Math.max(0, parseInt(boundaryColor.slice(1, 3), 16) - 40);
+      const g = Math.max(0, parseInt(boundaryColor.slice(3, 5), 16) - 40);
+      const b = Math.max(0, parseInt(boundaryColor.slice(5, 7), 16) - 40);
+      const darkerColor = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+
       return {
-        color: isSelected ? '#1a3d0a' : '#2d5016',
-        weight: isSelected ? 4 : 3,
-        fillColor: '#4a7c23',
-        fillOpacity: isSelected ? 0.25 : 0.15,
+        color: isSelected ? darkerColor : boundaryColor,
+        weight: isSelected ? 3 : 2,
+        fillColor: boundaryColor,
+        fillOpacity: isSelected ? 0.30 : 0.15,
         dashArray: '5, 5',
-        opacity: 1,
-        className: 'boundary-stroke-only'
+        opacity: 1
       };
     } else {
       // trail
@@ -1251,7 +1295,7 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
           // Check visibility based on feature type
           const isVisible = (feature.feature_type === 'trail' && showTrails) ||
                            (feature.feature_type === 'river' && showRivers) ||
-                           (feature.feature_type === 'boundary' && showBoundaries);
+                           (feature.feature_type === 'boundary' && visibleBoundaries.has(feature.id));
           if (!isVisible) return null;
 
           const isSelected = selectedLinearFeature?.id === feature.id;
@@ -1261,6 +1305,72 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
             geometry: feature.geometry
           };
 
+          // For boundaries, render TWO layers: invisible hit area + visible styled line
+          if (feature.feature_type === 'boundary') {
+            return (
+              <React.Fragment key={`boundary-${feature.id}-${isSelected}-${feature.updated_at}`}>
+                {/* Invisible wide hit area for click/hover detection - stroke only */}
+                <GeoJSON
+                  key={`boundary-hit-${feature.id}-${isSelected}`}
+                  data={geojsonData}
+                  style={() => ({
+                    color: 'transparent',
+                    weight: 20,
+                    fill: false,
+                    opacity: 1
+                  })}
+                  onEachFeature={(geoFeature, layer) => {
+                    // Set pointer-events to stroke only (no fill interaction)
+                    layer.on('add', () => {
+                      const el = layer.getElement();
+                      if (el) {
+                        el.style.pointerEvents = 'stroke';
+                      }
+                    });
+
+                    layer.on('click', () => handleLinearFeatureClick(feature));
+
+                    const hasImage = feature.image_mime_type;
+                    const imageUrl = hasImage ? `/api/linear-features/${feature.id}/image?v=${new Date(feature.updated_at).getTime() || Date.now()}` : null;
+
+                    let tooltipHtml = '<div class="tooltip-content">';
+                    if (hasImage) {
+                      tooltipHtml += `<div class="tooltip-thumbnail"><img src="${imageUrl}" alt="" /></div>`;
+                    }
+                    tooltipHtml += `<strong>${feature.name}</strong>`;
+                    if (feature.brief_description) {
+                      tooltipHtml += `<p>${feature.brief_description}</p>`;
+                    }
+                    tooltipHtml += '</div>';
+
+                    layer.bindTooltip(tooltipHtml, {
+                      permanent: false,
+                      direction: 'auto',
+                      offset: [0, 0],
+                      sticky: true,
+                      className: 'destination-tooltip'
+                    });
+                  }}
+                />
+                {/* Visible styled boundary line (no pointer events) */}
+                <GeoJSON
+                  key={`boundary-visible-${feature.id}-${isSelected}`}
+                  data={geojsonData}
+                  style={() => getLinearFeatureStyle(feature, isSelected)}
+                  onEachFeature={(geoFeature, layer) => {
+                    layer.on('add', () => {
+                      const el = layer.getElement();
+                      if (el) {
+                        el.style.pointerEvents = 'none';
+                      }
+                    });
+                  }}
+                />
+              </React.Fragment>
+            );
+          }
+
+          // Non-boundary features (trails, rivers) - single layer
           return (
             <GeoJSON
               key={`linear-${feature.id}-${isSelected}-${feature.updated_at}`}
@@ -1294,16 +1404,6 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
                   sticky: true, // Follow mouse cursor along the feature
                   className: 'destination-tooltip'
                 });
-
-                // For boundaries, only respond to hover on the stroke, not the fill
-                if (feature.feature_type === 'boundary') {
-                  layer.on('add', () => {
-                    const el = layer.getElement();
-                    if (el) {
-                      el.style.pointerEvents = 'stroke';
-                    }
-                  });
-                }
               }}
             />
           );
@@ -1320,7 +1420,7 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
           linearFeatures={linearFeatures}
           showTrails={showTrails}
           showRivers={showRivers}
-          showBoundaries={showBoundaries}
+          visibleBoundaries={visibleBoundaries}
         />
         <MapMoveTracker onMapMove={() => setMapMoveCount(c => c + 1)} />
         <MapClickHandler
@@ -1429,8 +1529,11 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
         onToggleTrails={onToggleTrails}
         showRivers={showRivers}
         onToggleRivers={onToggleRivers}
-        showBoundaries={showBoundaries}
-        onToggleBoundaries={onToggleBoundaries}
+        visibleBoundaries={visibleBoundaries}
+        onToggleBoundary={onToggleBoundary}
+        onShowAllBoundaries={onShowAllBoundaries}
+        onHideAllBoundaries={onHideAllBoundaries}
+        boundaries={linearFeatures.filter(f => f.feature_type === 'boundary')}
         visibleTypes={visibleTypes}
         onToggleType={handleToggleType}
         onShowAll={handleShowAll}
