@@ -1122,15 +1122,15 @@ export async function pullAllFromSheets(sheets, pool, drive = null) {
               historical_description = $4, primary_activities = $5, surface = $6,
               pets = $7, cell_signal = $8, more_info_link = $9,
               length_miles = $10, difficulty = $11, image_drive_file_id = $12,
-              geometry_drive_file_id = $13, updated_at = CURRENT_TIMESTAMP,
+              geometry_drive_file_id = $13, boundary_color = $14, updated_at = CURRENT_TIMESTAMP,
               synced = TRUE, locally_modified = FALSE
-            WHERE id = $14
+            WHERE id = $15
           `, [
             poi.property_owner, poi.brief_description, poi.era,
             poi.historical_description, poi.primary_activities, poi.surface,
             poi.pets, poi.cell_signal, poi.more_info_link,
             poi.length_miles, poi.difficulty, poi.image_drive_file_id,
-            poi.geometry_drive_file_id, existingId
+            poi.geometry_drive_file_id, poi.boundary_color, existingId
           ]);
         }
 
@@ -1157,15 +1157,15 @@ export async function pullAllFromSheets(sheets, pool, drive = null) {
               historical_description = $4, primary_activities = $5, surface = $6,
               pets = $7, cell_signal = $8, more_info_link = $9,
               length_miles = $10, difficulty = $11, image_drive_file_id = $12,
-              geometry_drive_file_id = $13, geometry = $14, updated_at = CURRENT_TIMESTAMP,
-              synced = TRUE, locally_modified = FALSE
-            WHERE id = $15
+              geometry_drive_file_id = $13, geometry = $14, boundary_color = $15,
+              updated_at = CURRENT_TIMESTAMP, synced = TRUE, locally_modified = FALSE
+            WHERE id = $16
           `, [
             item.poi.property_owner, item.poi.brief_description, item.poi.era,
             item.poi.historical_description, item.poi.primary_activities, item.poi.surface,
             item.poi.pets, item.poi.cell_signal, item.poi.more_info_link,
             item.poi.length_miles, item.poi.difficulty, item.poi.image_drive_file_id,
-            item.poi.geometry_drive_file_id, JSON.stringify(geojson.geometry), item.id
+            item.poi.geometry_drive_file_id, JSON.stringify(geojson.geometry), item.poi.boundary_color, item.id
           ]);
           console.log(`Downloaded GeoJSON for linear feature: ${item.name}`);
         }
@@ -1184,15 +1184,16 @@ export async function pullAllFromSheets(sheets, pool, drive = null) {
               name, poi_type, geometry, geometry_drive_file_id, property_owner, brief_description,
               era, historical_description, primary_activities, surface,
               pets, cell_signal, more_info_link, length_miles, difficulty,
-              image_drive_file_id, synced, locally_modified, deleted,
+              image_drive_file_id, boundary_color, synced, locally_modified, deleted,
               created_at, updated_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, TRUE, FALSE, FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, TRUE, FALSE, FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             RETURNING id
           `, [
             poi.name, poi.poi_type, JSON.stringify(geojson.geometry), poi.geometry_drive_file_id,
             poi.property_owner, poi.brief_description, poi.era, poi.historical_description,
             poi.primary_activities, poi.surface, poi.pets, poi.cell_signal,
-            poi.more_info_link, poi.length_miles, poi.difficulty, poi.image_drive_file_id
+            poi.more_info_link, poi.length_miles, poi.difficulty, poi.image_drive_file_id,
+            poi.boundary_color
           ]);
 
           console.log(`Created linear feature from Drive: ${poi.name}`);
