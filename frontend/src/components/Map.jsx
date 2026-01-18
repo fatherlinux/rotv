@@ -646,7 +646,7 @@ function DestinationMarker({ dest, icon, isSelected, isEditMode, onSelect, onDra
       eventHandlers={eventHandlers}
     >
       <Tooltip
-        direction="top"
+        direction="auto"
         offset={[0, -14]}
         opacity={0.95}
         className="destination-tooltip"
@@ -1126,7 +1126,7 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
 
           return (
             <GeoJSON
-              key={`linear-${feature.id}-${isSelected}`}
+              key={`linear-${feature.id}-${isSelected}-${feature.updated_at}`}
               data={geojsonData}
               style={() => getLinearFeatureStyle(feature, isSelected)}
               onEachFeature={(geoFeature, layer) => {
