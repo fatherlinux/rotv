@@ -182,7 +182,8 @@ const LINEAR_FEATURES_COLUMNS = {
   more_info_link: 10,
   length_miles: 11,
   difficulty: 12,
-  image_drive_file_id: 13
+  image_drive_file_id: 13,
+  boundary_color: 14
 };
 
 // Headers for the linear features spreadsheet
@@ -190,7 +191,7 @@ const LINEAR_FEATURES_COLUMNS = {
 const LINEAR_FEATURES_HEADERS = [
   'Name', 'Type', 'Property Owner', 'Brief Description', 'Era', 'Historical Description',
   'Primary Activities', 'Surface', 'Pets', 'Cell Signal', 'More Info Link',
-  'Length (miles)', 'Difficulty', 'Image Drive File ID'
+  'Length (miles)', 'Difficulty', 'Image Drive File ID', 'Boundary Color'
 ];
 
 /**
@@ -2699,7 +2700,8 @@ function rowToLinearFeature(row) {
     more_info_link: row[LINEAR_FEATURES_COLUMNS.more_info_link] || null,
     length_miles: row[LINEAR_FEATURES_COLUMNS.length_miles] ? parseFloat(row[LINEAR_FEATURES_COLUMNS.length_miles]) : null,
     difficulty: row[LINEAR_FEATURES_COLUMNS.difficulty] || null,
-    image_drive_file_id: row[LINEAR_FEATURES_COLUMNS.image_drive_file_id] || null
+    image_drive_file_id: row[LINEAR_FEATURES_COLUMNS.image_drive_file_id] || null,
+    boundary_color: row[LINEAR_FEATURES_COLUMNS.boundary_color] || null
   };
 }
 
@@ -2721,7 +2723,8 @@ function linearFeatureToRow(feature) {
     feature.more_info_link || '',
     feature.length_miles || '',
     feature.difficulty || '',
-    feature.image_drive_file_id || ''
+    feature.image_drive_file_id || '',
+    feature.boundary_color || ''
   ];
 }
 
@@ -2732,7 +2735,7 @@ export async function readLinearFeatures(sheets, spreadsheetId) {
   try {
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: `'${LINEAR_FEATURES_SHEET_NAME}'!A2:N`,
+      range: `'${LINEAR_FEATURES_SHEET_NAME}'!A2:O`,
     });
 
     const rows = response.data.values || [];
@@ -2763,7 +2766,8 @@ export async function pushLinearFeaturesToSheets(sheets, pool) {
   const result = await pool.query(`
     SELECT name, poi_type as feature_type, property_owner, brief_description, era,
            historical_description, primary_activities, surface, pets,
-           cell_signal, more_info_link, length_miles, difficulty, image_drive_file_id
+           cell_signal, more_info_link, length_miles, difficulty, image_drive_file_id,
+           boundary_color
     FROM pois
     WHERE poi_type IN ('trail', 'river', 'boundary')
       AND (deleted IS NULL OR deleted = FALSE)
@@ -2776,7 +2780,7 @@ export async function pushLinearFeaturesToSheets(sheets, pool) {
   try {
     await sheets.spreadsheets.values.clear({
       spreadsheetId,
-      range: `'${LINEAR_FEATURES_SHEET_NAME}'!A2:N`,
+      range: `'${LINEAR_FEATURES_SHEET_NAME}'!A2:O`,
     });
   } catch (error) {
     // Ignore if sheet is empty
@@ -2787,7 +2791,7 @@ export async function pushLinearFeaturesToSheets(sheets, pool) {
     const rows = features.map(linearFeatureToRow);
     await sheets.spreadsheets.values.update({
       spreadsheetId,
-      range: `'${LINEAR_FEATURES_SHEET_NAME}'!A2:N`,
+      range: `'${LINEAR_FEATURES_SHEET_NAME}'!A2:O`,
       valueInputOption: 'USER_ENTERED',
       requestBody: {
         values: rows
@@ -2837,13 +2841,15 @@ export async function pullLinearFeaturesFromSheets(sheets, pool, drive = null) {
           historical_description = $4, primary_activities = $5, surface = $6,
           pets = $7, cell_signal = $8, more_info_link = $9,
           length_miles = $10, difficulty = $11, image_drive_file_id = $12,
+          boundary_color = $13,
           updated_at = CURRENT_TIMESTAMP, synced = TRUE, locally_modified = FALSE
-        WHERE id = $13
+        WHERE id = $14
       `, [
         feature.property_owner, feature.brief_description, feature.era,
         feature.historical_description, feature.primary_activities, feature.surface,
         feature.pets, feature.cell_signal, feature.more_info_link,
         feature.length_miles, feature.difficulty, feature.image_drive_file_id,
+        feature.boundary_color,
         featureId
       ]);
 
@@ -2910,7 +2916,7 @@ async function ensureLinearFeaturesSheet(sheets, spreadsheetId) {
       // Add headers
       await sheets.spreadsheets.values.update({
         spreadsheetId,
-        range: `'${LINEAR_FEATURES_SHEET_NAME}'!A1:N1`,
+        range: `'${LINEAR_FEATURES_SHEET_NAME}'!A1:O1`,
         valueInputOption: 'RAW',
         requestBody: {
           values: [LINEAR_FEATURES_HEADERS]
