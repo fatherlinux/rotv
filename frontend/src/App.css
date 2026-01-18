@@ -331,6 +331,26 @@ body {
   margin-right: 10px !important;
 }
 
+/* Ensure Leaflet controls stay within viewport on mobile */
+@media (max-width: 768px) {
+  .leaflet-bottom.leaflet-right {
+    /* Account for mobile safe areas (notch, home indicator) */
+    bottom: calc(20px + env(safe-area-inset-bottom, 0px)) !important;
+    right: calc(10px + env(safe-area-inset-right, 0px)) !important;
+  }
+
+  .locate-control {
+    margin-bottom: 5px !important;
+  }
+}
+
+/* Extra small screens - ensure button is well above bottom edge */
+@media (max-width: 480px) {
+  .leaflet-bottom.leaflet-right {
+    bottom: calc(30px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+}
+
 .locate-button {
   display: flex !important;
   align-items: center;
