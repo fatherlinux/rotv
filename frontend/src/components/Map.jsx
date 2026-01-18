@@ -460,6 +460,148 @@ function MapBoundsTracker({ destinations, visibleTypes, getDestinationIconType, 
   return null;
 }
 
+// GPS Locate Control - shows user's current location on the map
+function LocateControl({ onLocationFound, onLocationError }) {
+  const map = useMap();
+  const [locating, setLocating] = useState(false);
+  const [userLocation, setUserLocation] = useState(null);
+  const userMarkerRef = useRef(null);
+  const userCircleRef = useRef(null);
+
+  const handleLocate = useCallback(() => {
+    if (!navigator.geolocation) {
+      if (onLocationError) {
+        onLocationError('Geolocation is not supported by your browser');
+      }
+      return;
+    }
+
+    setLocating(true);
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude, accuracy } = position.coords;
+        const latlng = [latitude, longitude];
+
+        setUserLocation({ latlng, accuracy });
+        setLocating(false);
+
+        // Zoom to user location - zoom 16 shows a few blocks
+        map.flyTo(latlng, 16, { duration: 1 });
+
+        // Remove old markers if they exist
+        if (userMarkerRef.current) {
+          userMarkerRef.current.remove();
+        }
+        if (userCircleRef.current) {
+          userCircleRef.current.remove();
+        }
+
+        // Add accuracy circle
+        userCircleRef.current = L.circle(latlng, {
+          radius: accuracy,
+          color: '#4285f4',
+          fillColor: '#4285f4',
+          fillOpacity: 0.15,
+          weight: 2
+        }).addTo(map);
+
+        // Add user location marker (blue dot)
+        userMarkerRef.current = L.circleMarker(latlng, {
+          radius: 8,
+          color: '#ffffff',
+          fillColor: '#4285f4',
+          fillOpacity: 1,
+          weight: 3
+        }).addTo(map);
+
+        if (onLocationFound) {
+          onLocationFound({ latlng, accuracy });
+        }
+      },
+      (error) => {
+        setLocating(false);
+        let message = 'Unable to get your location';
+        switch (error.code) {
+          case error.PERMISSION_DENIED:
+            message = 'Location permission denied';
+            break;
+          case error.POSITION_UNAVAILABLE:
+            message = 'Location information unavailable';
+            break;
+          case error.TIMEOUT:
+            message = 'Location request timed out';
+            break;
+        }
+        if (onLocationError) {
+          onLocationError(message);
+        }
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 60000
+      }
+    );
+  }, [map, onLocationFound, onLocationError]);
+
+  // Add the control to the map
+  useEffect(() => {
+    const LocateControlClass = L.Control.extend({
+      onAdd: function() {
+        const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control locate-control');
+        const button = L.DomUtil.create('a', 'locate-button', container);
+        button.href = '#';
+        button.title = 'Find my location';
+        button.setAttribute('role', 'button');
+        button.setAttribute('aria-label', 'Find my location');
+
+        // GPS crosshair icon (SVG)
+        button.innerHTML = `
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+            <path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3A8.994 8.994 0 0 0 13 3.06V1h-2v2.06A8.994 8.994 0 0 0 3.06 11H1v2h2.06A8.994 8.994 0 0 0 11 20.94V23h2v-2.06A8.994 8.994 0 0 0 20.94 13H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/>
+          </svg>
+        `;
+
+        L.DomEvent.disableClickPropagation(container);
+        L.DomEvent.on(button, 'click', function(e) {
+          L.DomEvent.preventDefault(e);
+          handleLocate();
+        });
+
+        return container;
+      }
+    });
+
+    const control = new LocateControlClass({ position: 'bottomright' });
+    map.addControl(control);
+
+    return () => {
+      map.removeControl(control);
+      if (userMarkerRef.current) {
+        userMarkerRef.current.remove();
+      }
+      if (userCircleRef.current) {
+        userCircleRef.current.remove();
+      }
+    };
+  }, [map, handleLocate]);
+
+  // Update button state when locating
+  useEffect(() => {
+    const button = document.querySelector('.locate-button');
+    if (button) {
+      if (locating) {
+        button.classList.add('locating');
+      } else {
+        button.classList.remove('locating');
+      }
+    }
+  }, [locating]);
+
+  return null;
+}
+
 // Create a highlighted version of an icon for selected state
 function createSelectedIcon(iconUrl) {
   return L.divIcon({
@@ -1036,6 +1178,9 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
           editMode={editMode}
           onRightClick={onStartNewPOI}
         />
+
+        {/* GPS Locate Control */}
+        <LocateControl />
 
         {/* Temporary marker for new POI being created */}
         {newPOI && previewCoords && (
