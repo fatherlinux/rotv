@@ -310,9 +310,15 @@ function Legend({
   );
 }
 
-// Component to handle map right-click for quick POI creation
-function MapClickHandler({ isAdmin, editMode, onRightClick }) {
+// Component to handle map clicks - right-click for POI creation, left-click to deselect
+function MapClickHandler({ isAdmin, editMode, onRightClick, onMapClick }) {
   useMapEvents({
+    click: (e) => {
+      // Left click on map (not on a marker) deselects current selection
+      if (onMapClick) {
+        onMapClick();
+      }
+    },
     contextmenu: (e) => {
       if (isAdmin && editMode && onRightClick) {
         e.originalEvent.preventDefault();
@@ -324,17 +330,40 @@ function MapClickHandler({ isAdmin, editMode, onRightClick }) {
 }
 
 // Component to handle map view updates when selection changes
-function MapUpdater({ selectedDestination }) {
+function MapUpdater({ selectedDestination, selectedLinearFeature }) {
   const map = useMap();
 
   React.useEffect(() => {
     if (selectedDestination && selectedDestination.latitude && selectedDestination.longitude) {
-      // Pan to the selected destination without changing zoom level
-      map.panTo([selectedDestination.latitude, selectedDestination.longitude], {
-        animate: true
+      // Fly to the selected destination with appropriate zoom
+      const currentZoom = map.getZoom();
+      const targetZoom = Math.max(currentZoom, 15); // Zoom to at least 15, but don't zoom out
+      map.flyTo([selectedDestination.latitude, selectedDestination.longitude], targetZoom, {
+        animate: true,
+        duration: 0.5
       });
     }
   }, [selectedDestination, map]);
+
+  // Handle linear feature selection - fit bounds to the feature
+  React.useEffect(() => {
+    if (selectedLinearFeature && selectedLinearFeature.geometry) {
+      try {
+        const geoJson = L.geoJSON(selectedLinearFeature.geometry);
+        const bounds = geoJson.getBounds();
+        if (bounds.isValid()) {
+          map.flyToBounds(bounds, {
+            padding: [50, 50],
+            maxZoom: 15,
+            animate: true,
+            duration: 0.5
+          });
+        }
+      } catch (e) {
+        console.warn('Could not fit bounds for linear feature:', e);
+      }
+    }
+  }, [selectedLinearFeature, map]);
 
   return null;
 }
@@ -722,11 +751,22 @@ function ZoomLocateControl({ onLocationFound, onLocationError }) {
   return null;
 }
 
-// Create a highlighted version of an icon for selected state
-function createSelectedIcon(iconUrl) {
+// Create a highlighted version of an icon for Edit mode (green highlight)
+function createEditSelectedIcon(iconUrl) {
   return L.divIcon({
-    className: 'selected-marker-icon',
-    html: `<div class="marker-highlight"><img src="${iconUrl}" alt="" /></div>`,
+    className: 'selected-marker-icon edit-mode',
+    html: `<div class="marker-highlight edit-highlight"><img src="${iconUrl}" alt="" /></div>`,
+    iconSize: [36, 36],
+    iconAnchor: [18, 18],
+    tooltipAnchor: [0, -18]
+  });
+}
+
+// Create a highlighted version of an icon for View mode (blue highlight)
+function createViewSelectedIcon(iconUrl) {
+  return L.divIcon({
+    className: 'selected-marker-icon view-mode',
+    html: `<div class="marker-highlight view-highlight"><img src="${iconUrl}" alt="" /></div>`,
     iconSize: [36, 36],
     iconAnchor: [18, 18],
     tooltipAnchor: [0, -18]
@@ -734,12 +774,13 @@ function createSelectedIcon(iconUrl) {
 }
 
 // Simple marker component - draggable state controlled by key prop
-function DestinationMarker({ dest, icon, isSelected, isEditMode, onSelect, onDragEnd, mapMoveCount }) {
+// hasSelection indicates if ANY marker is currently selected (used to suppress hover tooltips)
+function DestinationMarker({ dest, icon, isSelected, isEditMode, onSelect, onDragEnd, mapMoveCount, hasSelection }) {
   const markerRef = useRef(null);
   const map = useMap();
 
   // Calculate best tooltip direction based on marker position relative to map bounds
-  // mapMoveCount is passed from parent to trigger recalculation when map moves
+  // For selected markers, use a stable direction to prevent flickering
   const getTooltipDirection = () => {
     if (!map) return 'top';
 
@@ -773,7 +814,9 @@ function DestinationMarker({ dest, icon, isSelected, isEditMode, onSelect, onDra
     return 'top';
   };
 
-  const tooltipDirection = getTooltipDirection();
+  // For selected markers, don't recalculate direction on every render to prevent flickering
+  // Only recalculate for non-selected markers (hover tooltips)
+  const tooltipDirection = isSelected ? 'top' : getTooltipDirection();
 
   const eventHandlers = {
     click: () => onSelect(dest),
@@ -787,11 +830,17 @@ function DestinationMarker({ dest, icon, isSelected, isEditMode, onSelect, onDra
     }
   };
 
-  // Highlight selected marker in edit mode
-  const displayIcon = (isSelected && isEditMode) ? createSelectedIcon(icon.options.iconUrl) : icon;
+  // Highlight selected marker - different colors for Edit vs View mode
+  const getDisplayIcon = () => {
+    if (!isSelected) return icon;
+    if (isEditMode) return createEditSelectedIcon(icon.options.iconUrl);
+    return createViewSelectedIcon(icon.options.iconUrl);
+  };
+  const displayIcon = getDisplayIcon();
 
-  // Key changes when edit mode changes OR tooltip direction changes - forces recreation
-  const markerKey = `${dest.id}-${isEditMode ? 'edit' : 'view'}-${tooltipDirection}`;
+  // Use stable key to prevent marker recreation on selection change
+  // Only change key when edit mode changes (which requires different draggable behavior)
+  const markerKey = `${dest.id}-${isEditMode ? 'edit' : 'view'}`;
 
   // Calculate offset based on direction
   // Note: Icon already has tooltipAnchor: [0, -14] which positions for "top"
@@ -804,6 +853,16 @@ function DestinationMarker({ dest, icon, isSelected, isEditMode, onSelect, onDra
     }
   };
 
+  // Only show tooltip if: this marker is selected, OR nothing is selected (allow hover)
+  const showTooltip = isSelected || !hasSelection;
+
+  // Update marker icon when selection changes (Leaflet doesn't always pick up icon prop changes)
+  useEffect(() => {
+    if (markerRef.current) {
+      markerRef.current.setIcon(displayIcon);
+    }
+  }, [displayIcon, isSelected]);
+
   return (
     <Marker
       key={markerKey}
@@ -814,29 +873,27 @@ function DestinationMarker({ dest, icon, isSelected, isEditMode, onSelect, onDra
       draggable={isEditMode}
       eventHandlers={eventHandlers}
     >
-      <Tooltip
-        direction={tooltipDirection}
-        offset={getOffset()}
-        opacity={0.95}
-        className="destination-tooltip"
-      >
-        <div className="tooltip-content">
-          {dest.image_mime_type && (
-            <div className="tooltip-thumbnail">
-              <img src={`/api/destinations/${dest.id}/image?v=${new Date(dest.updated_at).getTime() || Date.now()}`} alt="" />
-            </div>
-          )}
-          <strong>{dest.name}</strong>
-          {dest.brief_description && (
-            <p>{dest.brief_description}</p>
-          )}
-          {isEditMode && (
-            <p className="edit-coords">
-              {dest.latitude.toFixed(6)}, {dest.longitude.toFixed(6)}
-            </p>
-          )}
-        </div>
-      </Tooltip>
+      {showTooltip && (
+        <Tooltip
+          direction={tooltipDirection}
+          offset={getOffset()}
+          opacity={0.95}
+          className={`destination-tooltip ${isSelected ? 'selected-tooltip' : ''}`}
+          permanent={isSelected}
+        >
+          <div className="tooltip-content">
+            {dest.image_mime_type && (
+              <div className="tooltip-thumbnail">
+                <img src={`/api/destinations/${dest.id}/image?v=${new Date(dest.updated_at).getTime() || Date.now()}`} alt="" />
+              </div>
+            )}
+            <strong>{dest.name}</strong>
+            {dest.brief_description && (
+              <p>{dest.brief_description}</p>
+            )}
+          </div>
+        </Tooltip>
+      )}
     </Marker>
   );
 }
@@ -1221,6 +1278,7 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
   };
 
   // Style functions for linear features (trails and rivers)
+  // Uses editMode from closure to differentiate Edit (orange) vs View (blue) selected colors
   const getLinearFeatureStyle = useCallback((feature, isSelected) => {
     // Use thicker lines for easier clicking (weight 6 normal, 8 selected)
     const baseStyle = {
@@ -1228,25 +1286,26 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
       opacity: isSelected ? 1 : 0.8
     };
 
+    // Selected colors: Edit mode = orange (#FF8C00), View mode = blue (#0066CC)
+    const editSelectedColor = '#FF8C00';
+    const viewSelectedColor = '#0066CC';
+
     if (feature.feature_type === 'river') {
       return {
         ...baseStyle,
-        color: isSelected ? '#0066CC' : '#1E90FF'
+        color: isSelected ? (editMode ? editSelectedColor : viewSelectedColor) : '#1E90FF'
       };
     } else if (feature.feature_type === 'boundary') {
       // Park boundaries - use per-boundary color from database
       // Note: invisible hit area layer handles click detection, so stroke can be thin
       const boundaryColor = feature.boundary_color || '#228B22';
-      // Create darker version for selected state
-      const r = Math.max(0, parseInt(boundaryColor.slice(1, 3), 16) - 40);
-      const g = Math.max(0, parseInt(boundaryColor.slice(3, 5), 16) - 40);
-      const b = Math.max(0, parseInt(boundaryColor.slice(5, 7), 16) - 40);
-      const darkerColor = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+      // Selected color depends on mode: green for edit, blue for view
+      const selectedStrokeColor = editMode ? editSelectedColor : viewSelectedColor;
 
       return {
-        color: isSelected ? darkerColor : boundaryColor,
+        color: isSelected ? selectedStrokeColor : boundaryColor,
         weight: isSelected ? 3 : 2,
-        fillColor: boundaryColor,
+        fillColor: isSelected ? selectedStrokeColor : boundaryColor,
         fillOpacity: isSelected ? 0.30 : 0.15,
         dashArray: '5, 5',
         opacity: 1
@@ -1255,15 +1314,18 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
       // trail
       return {
         ...baseStyle,
-        color: isSelected ? '#5D3A00' : '#8B4513'
+        color: isSelected ? (editMode ? editSelectedColor : viewSelectedColor) : '#8B4513'
       };
     }
-  }, []);
+  }, [editMode]);
 
-  // GeoJSON key to force re-render when selection changes
+  // Track if anything is selected (used to suppress hover tooltips on other features)
+  const hasAnySelection = !!(selectedDestination || selectedLinearFeature);
+
+  // GeoJSON key to force re-render when selection or mode changes
   const linearFeaturesKey = useMemo(() => {
-    return `linear-${selectedLinearFeature?.id || 'none'}`;
-  }, [selectedLinearFeature]);
+    return `linear-${selectedLinearFeature?.id || 'none'}-${editMode ? 'edit' : 'view'}-${hasAnySelection}`;
+  }, [selectedLinearFeature, editMode, hasAnySelection]);
 
   return (
     <div className={`map-container ${editMode ? 'edit-mode-active' : ''}`}>
@@ -1308,10 +1370,10 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
           // For boundaries, render TWO layers: invisible hit area + visible styled line
           if (feature.feature_type === 'boundary') {
             return (
-              <React.Fragment key={`boundary-${feature.id}-${isSelected}-${feature.updated_at}`}>
+              <React.Fragment key={`boundary-${feature.id}-${isSelected}-${editMode}-${hasAnySelection}-${feature.updated_at}`}>
                 {/* Invisible wide hit area for click/hover detection - stroke only */}
                 <GeoJSON
-                  key={`boundary-hit-${feature.id}-${isSelected}`}
+                  key={`boundary-hit-${feature.id}-${isSelected}-${editMode}-${hasAnySelection}`}
                   data={geojsonData}
                   style={() => ({
                     color: 'transparent',
@@ -1330,31 +1392,35 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
 
                     layer.on('click', () => handleLinearFeatureClick(feature));
 
-                    const hasImage = feature.image_mime_type;
-                    const imageUrl = hasImage ? `/api/linear-features/${feature.id}/image?v=${new Date(feature.updated_at).getTime() || Date.now()}` : null;
+                    // Only show tooltip if this feature is selected OR nothing is selected
+                    const hasAnySelection = selectedDestination || selectedLinearFeature;
+                    if (isSelected || !hasAnySelection) {
+                      const hasImage = feature.image_mime_type;
+                      const imageUrl = hasImage ? `/api/linear-features/${feature.id}/image?v=${new Date(feature.updated_at).getTime() || Date.now()}` : null;
 
-                    let tooltipHtml = '<div class="tooltip-content">';
-                    if (hasImage) {
-                      tooltipHtml += `<div class="tooltip-thumbnail"><img src="${imageUrl}" alt="" /></div>`;
-                    }
-                    tooltipHtml += `<strong>${feature.name}</strong>`;
-                    if (feature.brief_description) {
-                      tooltipHtml += `<p>${feature.brief_description}</p>`;
-                    }
-                    tooltipHtml += '</div>';
+                      let tooltipHtml = '<div class="tooltip-content">';
+                      if (hasImage) {
+                        tooltipHtml += `<div class="tooltip-thumbnail"><img src="${imageUrl}" alt="" /></div>`;
+                      }
+                      tooltipHtml += `<strong>${feature.name}</strong>`;
+                      if (feature.brief_description) {
+                        tooltipHtml += `<p>${feature.brief_description}</p>`;
+                      }
+                      tooltipHtml += '</div>';
 
-                    layer.bindTooltip(tooltipHtml, {
-                      permanent: false,
-                      direction: 'auto',
-                      offset: [0, 0],
-                      sticky: true,
-                      className: 'destination-tooltip'
-                    });
+                      layer.bindTooltip(tooltipHtml, {
+                        permanent: isSelected,
+                        direction: 'auto',
+                        offset: [0, 0],
+                        sticky: !isSelected,
+                        className: `destination-tooltip ${isSelected ? 'selected-tooltip' : ''}`
+                      });
+                    }
                   }}
                 />
                 {/* Visible styled boundary line (no pointer events) */}
                 <GeoJSON
-                  key={`boundary-visible-${feature.id}-${isSelected}`}
+                  key={`boundary-visible-${feature.id}-${isSelected}-${editMode}-${hasAnySelection}`}
                   data={geojsonData}
                   style={() => getLinearFeatureStyle(feature, isSelected)}
                   onEachFeature={(geoFeature, layer) => {
@@ -1373,43 +1439,47 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
           // Non-boundary features (trails, rivers) - single layer
           return (
             <GeoJSON
-              key={`linear-${feature.id}-${isSelected}-${feature.updated_at}`}
+              key={`linear-${feature.id}-${isSelected}-${editMode}-${hasAnySelection}-${feature.updated_at}`}
               data={geojsonData}
               style={() => getLinearFeatureStyle(feature, isSelected)}
               onEachFeature={(geoFeature, layer) => {
                 // Add click handler
                 layer.on('click', () => handleLinearFeatureClick(feature));
 
-                // Build rich tooltip content (similar to destination tooltips)
-                const hasImage = feature.image_mime_type;
-                const imageUrl = hasImage ? `/api/linear-features/${feature.id}/image?v=${new Date(feature.updated_at).getTime() || Date.now()}` : null;
+                // Only show tooltip if this feature is selected OR nothing is selected
+                const hasAnySelection = selectedDestination || selectedLinearFeature;
+                if (isSelected || !hasAnySelection) {
+                  // Build rich tooltip content (similar to destination tooltips)
+                  const hasImage = feature.image_mime_type;
+                  const imageUrl = hasImage ? `/api/linear-features/${feature.id}/image?v=${new Date(feature.updated_at).getTime() || Date.now()}` : null;
 
-                let tooltipHtml = '<div class="tooltip-content">';
-                if (hasImage) {
-                  tooltipHtml += `<div class="tooltip-thumbnail"><img src="${imageUrl}" alt="" /></div>`;
-                }
-                tooltipHtml += `<strong>${feature.name}</strong>`;
-                if (feature.brief_description) {
-                  tooltipHtml += `<p>${feature.brief_description}</p>`;
-                }
-                if (feature.length_miles) {
-                  tooltipHtml += `<p class="trail-info">${feature.length_miles} miles${feature.difficulty ? ' • ' + feature.difficulty : ''}</p>`;
-                }
-                tooltipHtml += '</div>';
+                  let tooltipHtml = '<div class="tooltip-content">';
+                  if (hasImage) {
+                    tooltipHtml += `<div class="tooltip-thumbnail"><img src="${imageUrl}" alt="" /></div>`;
+                  }
+                  tooltipHtml += `<strong>${feature.name}</strong>`;
+                  if (feature.brief_description) {
+                    tooltipHtml += `<p>${feature.brief_description}</p>`;
+                  }
+                  if (feature.length_miles) {
+                    tooltipHtml += `<p class="trail-info">${feature.length_miles} miles${feature.difficulty ? ' • ' + feature.difficulty : ''}</p>`;
+                  }
+                  tooltipHtml += '</div>';
 
-                layer.bindTooltip(tooltipHtml, {
-                  permanent: false,
-                  direction: 'auto',
-                  offset: [0, 0], // No offset - arrow points directly at cursor
-                  sticky: true, // Follow mouse cursor along the feature
-                  className: 'destination-tooltip'
-                });
+                  layer.bindTooltip(tooltipHtml, {
+                    permanent: isSelected,
+                    direction: 'auto',
+                    offset: [0, 0],
+                    sticky: !isSelected,
+                    className: `destination-tooltip ${isSelected ? 'selected-tooltip' : ''}`
+                  });
+                }
               }}
             />
           );
         })}
 
-        <MapUpdater selectedDestination={selectedDestination} />
+        <MapUpdater selectedDestination={selectedDestination} selectedLinearFeature={selectedLinearFeature} />
         <MapVisibilityHandler activeTab={activeTab} />
         <MapBoundsTracker
           destinations={destinations}
@@ -1427,6 +1497,11 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
           isAdmin={isAdmin}
           editMode={editMode}
           onRightClick={onStartNewPOI}
+          onMapClick={() => {
+            // Clear selection when clicking on empty map area
+            if (onSelectDestination) onSelectDestination(null);
+            if (onSelectLinearFeature) onSelectLinearFeature(null);
+          }}
         />
 
         {/* Combined Zoom and GPS Locate Control */}
@@ -1435,7 +1510,7 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
         {/* Temporary marker for new POI being created */}
         {newPOI && previewCoords && (
           <DestinationMarker
-            key={`new-poi-marker-${mapMoveCount}`}
+            key="new-poi-marker"
             dest={{
               ...newPOI,
               latitude: previewCoords.lat,
@@ -1447,6 +1522,7 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
             onSelect={() => {}}
             mapMoveCount={mapMoveCount}
             onDragEnd={(d, lat, lng) => onPreviewCoordsChange({ lat, lng })}
+            hasSelection={true}
           />
         )}
 
@@ -1475,7 +1551,7 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
 
           return (
             <DestinationMarker
-              key={`marker-${dest.id}-${isDraggable}-${mapMoveCount}`}
+              key={`marker-${dest.id}-${isSelected}`}
               dest={{ ...dest, latitude: markerLat, longitude: markerLng }}
               icon={icon}
               isSelected={isSelected}
@@ -1483,6 +1559,7 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
               onSelect={onSelectDestination}
               onDragEnd={isDraggable ? handleDrag : handleMarkerDragEnd}
               mapMoveCount={mapMoveCount}
+              hasSelection={!!selectedDestination || !!selectedLinearFeature}
             />
           );
         })}

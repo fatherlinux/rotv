@@ -929,13 +929,131 @@ app.get('/api/icons/:name.svg', async (req, res) => {
   }
 });
 
+// Social share endpoints - serve HTML with OpenGraph meta tags for social media
+// These endpoints are scraped by social platforms to get preview info
+app.get('/share/destination/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      `SELECT id, name, brief_description, image_mime_type FROM pois WHERE id = $1`,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.redirect('/');
+    }
+
+    const poi = result.rows[0];
+    const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
+    const appUrl = `${baseUrl}/?poi=${encodeURIComponent(poi.name.toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-'))}`;
+    const imageUrl = poi.image_mime_type ? `${baseUrl}/api/destinations/${poi.id}/image` : `${baseUrl}/icons/default.svg`;
+    const description = poi.brief_description || `Explore ${poi.name} at Cuyahoga Valley National Park`;
+
+    // Generate HTML with OpenGraph meta tags
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${poi.name} | Roots of The Valley</title>
+  <meta name="description" content="${description.replace(/"/g, '&quot;')}">
+
+  <!-- OpenGraph Meta Tags -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="${poi.name} | Roots of The Valley">
+  <meta property="og:description" content="${description.replace(/"/g, '&quot;')}">
+  <meta property="og:image" content="${imageUrl}">
+  <meta property="og:url" content="${appUrl}">
+  <meta property="og:site_name" content="Roots of The Valley">
+
+  <!-- Twitter Card Meta Tags -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="${poi.name} | Roots of The Valley">
+  <meta name="twitter:description" content="${description.replace(/"/g, '&quot;')}">
+  <meta name="twitter:image" content="${imageUrl}">
+
+  <!-- Redirect to the actual app -->
+  <meta http-equiv="refresh" content="0;url=${appUrl}">
+  <script>window.location.href = "${appUrl}";</script>
+</head>
+<body>
+  <p>Redirecting to <a href="${appUrl}">${poi.name}</a>...</p>
+</body>
+</html>`;
+
+    res.setHeader('Content-Type', 'text/html');
+    res.send(html);
+  } catch (error) {
+    console.error('Error generating share page:', error);
+    res.redirect('/');
+  }
+});
+
+app.get('/share/linear-feature/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      `SELECT id, name, poi_type, brief_description, image_mime_type FROM pois WHERE id = $1`,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.redirect('/');
+    }
+
+    const feature = result.rows[0];
+    const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
+    const appUrl = `${baseUrl}/?feature=${encodeURIComponent(feature.name.toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-'))}`;
+    const imageUrl = feature.image_mime_type ? `${baseUrl}/api/linear-features/${feature.id}/image` : `${baseUrl}/icons/layers/${feature.poi_type === 'trail' ? 'trails' : 'rivers'}.svg`;
+    const description = feature.brief_description || `Explore the ${feature.name} at Cuyahoga Valley National Park`;
+
+    // Generate HTML with OpenGraph meta tags
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${feature.name} | Roots of The Valley</title>
+  <meta name="description" content="${description.replace(/"/g, '&quot;')}">
+
+  <!-- OpenGraph Meta Tags -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="${feature.name} | Roots of The Valley">
+  <meta property="og:description" content="${description.replace(/"/g, '&quot;')}">
+  <meta property="og:image" content="${imageUrl}">
+  <meta property="og:url" content="${appUrl}">
+  <meta property="og:site_name" content="Roots of The Valley">
+
+  <!-- Twitter Card Meta Tags -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="${feature.name} | Roots of The Valley">
+  <meta name="twitter:description" content="${description.replace(/"/g, '&quot;')}">
+  <meta name="twitter:image" content="${imageUrl}">
+
+  <!-- Redirect to the actual app -->
+  <meta http-equiv="refresh" content="0;url=${appUrl}">
+  <script>window.location.href = "${appUrl}";</script>
+</head>
+<body>
+  <p>Redirecting to <a href="${appUrl}">${feature.name}</a>...</p>
+</body>
+</html>`;
+
+    res.setHeader('Content-Type', 'text/html');
+    res.send(html);
+  } catch (error) {
+    console.error('Error generating share page:', error);
+    res.redirect('/');
+  }
+});
+
 // Serve static frontend files in production
 const staticPath = process.env.STATIC_PATH || path.join(__dirname, '../frontend/dist');
 app.use(express.static(staticPath));
 
 // SPA fallback - serve index.html for non-API routes
 app.get('*', (req, res) => {
-  if (!req.path.startsWith('/api') && !req.path.startsWith('/auth')) {
+  if (!req.path.startsWith('/api') && !req.path.startsWith('/auth') && !req.path.startsWith('/share')) {
     res.sendFile(path.join(staticPath, 'index.html'));
   }
 });

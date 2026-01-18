@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { AuthProvider } from './contexts/AuthContext';
 import { useAuth } from './hooks/useAuth';
 import Map from './components/Map';
@@ -15,6 +15,17 @@ import NewsSettings from './components/NewsSettings';
 
 // Default icon type IDs for initializing the filter
 const DEFAULT_ICON_TYPES = new Set(['visitor-center', 'waterfall', 'trail', 'historic', 'bridge', 'train', 'nature', 'skiing', 'biking', 'picnic', 'camping', 'music', 'default', 'lighthouse']);
+
+// Generate URL-friendly slug from POI name
+function generateSlug(name) {
+  if (!name) return '';
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '') // Remove special characters
+    .replace(/\s+/g, '-')          // Replace spaces with hyphens
+    .replace(/-+/g, '-')           // Replace multiple hyphens with single
+    .replace(/^-|-$/g, '');        // Remove leading/trailing hyphens
+}
 
 // Check if a keyword exists as a whole word in text (not as a substring)
 function matchesWholeWord(text, keyword) {
@@ -149,6 +160,9 @@ function AppContent() {
     }
   }, [activeTab]);
 
+  // Store initial POI slug for after data loads
+  const [initialPoiSlug, setInitialPoiSlug] = useState(null);
+
   // Handle tab query parameter from auth redirect
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -161,7 +175,39 @@ function AppContent() {
       const newUrl = window.location.pathname + (newSearch ? `?${newSearch}` : '');
       window.history.replaceState({}, '', newUrl);
     }
+
+    // Check for POI query parameter (for direct linking) - now uses slug
+    const poiSlug = params.get('poi');
+    if (poiSlug) {
+      setInitialPoiSlug(poiSlug);
+    }
   }, []);
+
+  // Auto-select POI from URL after data loads (matches by slug)
+  useEffect(() => {
+    if (initialPoiSlug && !loading && destinations.length > 0) {
+      // First check point destinations by slug match
+      const destination = destinations.find(d => generateSlug(d.name) === initialPoiSlug);
+      if (destination) {
+        setSelectedDestination(destination);
+        document.title = `${destination.name} | Roots of The Valley`;
+        setInitialPoiSlug(null); // Clear so it doesn't re-trigger
+        return;
+      }
+
+      // Then check linear features (trails, rivers, boundaries)
+      const linearFeature = linearFeatures.find(f => generateSlug(f.name) === initialPoiSlug);
+      if (linearFeature) {
+        setSelectedLinearFeature(linearFeature);
+        document.title = `${linearFeature.name} | Roots of The Valley`;
+        setInitialPoiSlug(null);
+        return;
+      }
+
+      // POI not found - clear the param
+      setInitialPoiSlug(null);
+    }
+  }, [initialPoiSlug, loading, destinations, linearFeatures]);
 
   // Reusable function to fetch all data (used on mount and after sync operations)
   const refreshAllData = React.useCallback(async () => {
@@ -282,19 +328,38 @@ function AppContent() {
     }
   };
 
-  // Handle linear feature selection (clears destination selection)
-  const handleSelectLinearFeature = (feature) => {
+  // Helper to update URL with POI slug (for shareable links)
+  const updateUrlWithPoi = useCallback((poiName) => {
+    const params = new URLSearchParams(window.location.search);
+    if (poiName) {
+      params.set('poi', generateSlug(poiName));
+    } else {
+      params.delete('poi');
+    }
+    const newSearch = params.toString();
+    const newUrl = window.location.pathname + (newSearch ? `?${newSearch}` : '');
+    window.history.replaceState({}, '', newUrl);
+  }, []);
+
+  // Handle linear feature selection (clears destination selection) - wrapped in useCallback for stable reference
+  const handleSelectLinearFeature = useCallback((feature) => {
     setSelectedDestination(null);
     setNewPOI(null);
     setPreviewCoords(null);
     setSelectedLinearFeature(feature);
-  };
+    updateUrlWithPoi(feature?.name);
+    // Update document title for sharing
+    document.title = feature ? `${feature.name} | Roots of The Valley` : 'Roots of The Valley';
+  }, [updateUrlWithPoi]);
 
-  // Handle destination selection (clears linear feature selection)
-  const handleSelectDestination = (destination) => {
+  // Handle destination selection (clears linear feature selection) - wrapped in useCallback for stable reference
+  const handleSelectDestination = useCallback((destination) => {
     setSelectedLinearFeature(null);
     setSelectedDestination(destination);
-  };
+    updateUrlWithPoi(destination?.name);
+    // Update document title for sharing
+    document.title = destination ? `${destination.name} | Roots of The Valley` : 'Roots of The Valley';
+  }, [updateUrlWithPoi]);
 
   // Handle linear feature update - merge instead of replace to preserve geometry
   const handleLinearFeatureUpdate = (updatedFeature) => {
@@ -668,6 +733,8 @@ function AppContent() {
             } else {
               setSelectedDestination(null);
             }
+            updateUrlWithPoi(null); // Clear POI from URL
+            document.title = 'Roots of The Valley'; // Reset title
           }}
           isAdmin={isAdmin}
           editMode={editMode}
