@@ -67,7 +67,8 @@ const COLUMNS = {
   length_miles: 13,
   difficulty: 14,
   image_drive_file_id: 15,
-  geometry_drive_file_id: 16
+  geometry_drive_file_id: 16,
+  boundary_color: 17
 };
 
 // Headers for the unified POIs spreadsheet
@@ -75,7 +76,7 @@ const HEADERS = [
   'Name', 'POI Type', 'Latitude', 'Longitude', 'Property Owner', 'Brief Description',
   'Era', 'Historical Description', 'Primary Activities', 'Surface',
   'Pets', 'Cell Signal', 'More Info Link', 'Length (miles)', 'Difficulty',
-  'Image Drive File ID', 'Geometry Drive File ID'
+  'Image Drive File ID', 'Geometry Drive File ID', 'Boundary Color'
 ];
 
 // Column mapping for the activities spreadsheet (icon removed - now in icons table)
@@ -392,7 +393,7 @@ export async function createAppSpreadsheet(sheets, pool, userId = null, drive = 
   // Add headers to the Destinations sheet (unified POI schema)
   await sheets.spreadsheets.values.update({
     spreadsheetId,
-    range: `'${APP_SHEET_NAME}'!A1:Q1`,
+    range: `'${APP_SHEET_NAME}'!A1:R1`,
     valueInputOption: 'RAW',
     requestBody: {
       values: [HEADERS]
@@ -729,7 +730,8 @@ function rowToPOI(row) {
     length_miles: row[COLUMNS.length_miles] ? parseFloat(row[COLUMNS.length_miles]) : null,
     difficulty: row[COLUMNS.difficulty] || null,
     image_drive_file_id: row[COLUMNS.image_drive_file_id] || null,
-    geometry_drive_file_id: row[COLUMNS.geometry_drive_file_id] || null
+    geometry_drive_file_id: row[COLUMNS.geometry_drive_file_id] || null,
+    boundary_color: row[COLUMNS.boundary_color] || null
   };
 }
 
@@ -755,7 +757,8 @@ function poiToRow(poi) {
     poi.length_miles || '',
     poi.difficulty || '',
     poi.image_drive_file_id || '',
-    poi.geometry_drive_file_id || ''
+    poi.geometry_drive_file_id || '',
+    poi.boundary_color || ''
   ];
 }
 
@@ -765,7 +768,7 @@ function poiToRow(poi) {
 export async function readPOIs(sheets, spreadsheetId, sheetName) {
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId,
-    range: `'${sheetName}'!A2:Q`,  // Extended range for new columns
+    range: `'${sheetName}'!A2:R`,  // Extended range for new columns
   });
 
   const rows = response.data.values || [];
@@ -808,7 +811,7 @@ export async function appendPOI(sheets, spreadsheetId, poi) {
   const row = poiToRow(poi);
   await sheets.spreadsheets.values.append({
     spreadsheetId,
-    range: `'${APP_SHEET_NAME}'!A:Q`,
+    range: `'${APP_SHEET_NAME}'!A:R`,
     valueInputOption: 'USER_ENTERED',
     insertDataOption: 'INSERT_ROWS',
     requestBody: {
@@ -830,7 +833,7 @@ export async function updatePOI(sheets, spreadsheetId, name, poi) {
   const row = poiToRow(poi);
   await sheets.spreadsheets.values.update({
     spreadsheetId,
-    range: `'${APP_SHEET_NAME}'!A${rowNum}:Q${rowNum}`,
+    range: `'${APP_SHEET_NAME}'!A${rowNum}:R${rowNum}`,
     valueInputOption: 'USER_ENTERED',
     requestBody: {
       values: [row]
@@ -963,7 +966,7 @@ export async function pushAllToSheets(sheets, pool, drive = null) {
   // Clear existing data (keep header)
   await sheets.spreadsheets.values.clear({
     spreadsheetId,
-    range: `'${APP_SHEET_NAME}'!A2:Q`,
+    range: `'${APP_SHEET_NAME}'!A2:R`,
   });
 
   // Write all POIs
@@ -971,7 +974,7 @@ export async function pushAllToSheets(sheets, pool, drive = null) {
     const rows = pois.map(poiToRow);
     await sheets.spreadsheets.values.update({
       spreadsheetId,
-      range: `'${APP_SHEET_NAME}'!A2:Q`,
+      range: `'${APP_SHEET_NAME}'!A2:R`,
       valueInputOption: 'USER_ENTERED',
       requestBody: {
         values: rows
