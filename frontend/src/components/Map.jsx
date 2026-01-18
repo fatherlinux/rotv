@@ -1228,7 +1228,7 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
                 layer.bindTooltip(tooltipHtml, {
                   permanent: false,
                   direction: 'auto',
-                  offset: [0, -20], // Add padding from cursor
+                  offset: [0, 0], // No offset - arrow points directly at cursor
                   sticky: true, // Follow mouse cursor along the feature
                   className: 'destination-tooltip'
                 });
