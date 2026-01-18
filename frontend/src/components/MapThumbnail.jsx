@@ -122,9 +122,9 @@ function MapThumbnail({
         </MapContainer>
       )}
 
-      {/* POI count chip - same style as main map */}
+      {/* Results count chip - same style as main map */}
       <div className="map-thumbnail-poi-count">
-        {poiCount} POI{poiCount !== 1 ? 's' : ''} in view
+        {poiCount} Result{poiCount !== 1 ? 's' : ''}
       </div>
     </div>
   );

@@ -430,13 +430,47 @@ function MapBoundsTracker({ destinations, visibleTypes, getDestinationIconType, 
         });
       }
 
-      // Note: Linear features (trails, rivers, boundaries) are NOT included in visible POI count
-      // They are displayed on the map but don't count as "POIs in view" since they span large areas
-      // and would always be counted, making the count less meaningful for users
+      // Count visible linear features (trails, rivers, boundaries)
+      let linearFeatureCount = 0;
+      if (linearFeatures && linearFeatures.length > 0) {
+        linearFeatures.forEach(feature => {
+          // Check if feature type is visible
+          const isVisible = (feature.feature_type === 'trail' && showTrails) ||
+                           (feature.feature_type === 'river' && showRivers) ||
+                           (feature.feature_type === 'boundary' && showBoundaries);
+          if (!isVisible) return;
 
-      // Emit visible POI IDs (point destinations only - excludes linear features)
+          // Check if any part of the feature intersects with map bounds
+          // by checking if any coordinate is within bounds
+          if (feature.geometry && feature.geometry.coordinates) {
+            let coords;
+            if (feature.geometry.type === 'Polygon') {
+              // Polygon: array of rings, use outer ring
+              coords = feature.geometry.coordinates[0];
+            } else if (feature.geometry.type === 'MultiLineString') {
+              // MultiLineString: array of LineStrings, flatten all coordinates
+              coords = feature.geometry.coordinates.flat();
+            } else {
+              // LineString: array of points
+              coords = feature.geometry.coordinates;
+            }
+
+            const intersects = coords.some(coord => {
+              // GeoJSON is [lng, lat], Leaflet is [lat, lng]
+              const [lng, lat] = coord;
+              return bounds.contains([lat, lng]);
+            });
+
+            if (intersects) {
+              linearFeatureCount++;
+            }
+          }
+        });
+      }
+
+      // Emit visible IDs and total count (destinations + linear features)
       if (onVisiblePoisChange) {
-        onVisiblePoisChange(visibleIds);
+        onVisiblePoisChange(visibleIds, linearFeatureCount);
       }
 
       // Emit map state for thumbnail
@@ -838,9 +872,9 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
   // Icon configuration from database
   const [iconConfig, setIconConfig] = useState([]);
 
-  // Wrapper to track visible POI count and IDs locally and pass to parent
-  const handleVisiblePoisChange = useCallback((visibleIds) => {
-    setVisiblePoiCount(visibleIds.length);
+  // Wrapper to track visible result count (destinations + linear features) and IDs locally and pass to parent
+  const handleVisiblePoisChange = useCallback((visibleIds, linearFeatureCount = 0) => {
+    setVisiblePoiCount(visibleIds.length + linearFeatureCount);
     setVisiblePoiIds(visibleIds);
     if (onVisiblePoisChange) {
       onVisiblePoisChange(visibleIds);
@@ -1342,12 +1376,12 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
         })}
       </MapContainer>
 
-      {/* POI count overlay - clickable to toggle filter popup */}
+      {/* Results count overlay - clickable to toggle filter popup */}
       <button
         className="map-poi-count"
         onClick={() => setIsLegendExpanded(!isLegendExpanded)}
       >
-        {visiblePoiCount} POI{visiblePoiCount !== 1 ? 's' : ''} in view
+        {visiblePoiCount} Result{visiblePoiCount !== 1 ? 's' : ''}
       </button>
 
       {/* Admin refresh news & events chip - only in edit mode */}
@@ -1355,8 +1389,8 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
         <button
           className={`map-refresh-news ${refreshingNews ? 'refreshing' : ''}`}
           onClick={handleRefreshNews}
-          disabled={refreshingNews || visiblePoiCount === 0}
-          title={visiblePoiCount === 0 ? 'No POIs visible to update' : `Update news & events for ${visiblePoiCount} visible POIs`}
+          disabled={refreshingNews || visiblePoiIds.length === 0}
+          title={visiblePoiIds.length === 0 ? 'No destinations visible to update' : `Update news & events for ${visiblePoiIds.length} visible destinations`}
         >
           {refreshingNews ? 'Updating...' : 'Update News & Events'}
         </button>

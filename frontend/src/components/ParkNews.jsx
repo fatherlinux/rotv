@@ -140,7 +140,7 @@ function ParkNews({ isAdmin, onSelectPoi, filteredDestinations, filteredLinearFe
                 aspectRatio={mapState.aspectRatio || 1.5}
                 visibleDestinations={filteredDestinations}
                 onClick={onMapClick}
-                poiCount={filteredDestinations?.length || 0}
+                poiCount={(filteredDestinations?.length || 0) + (filteredLinearFeatures?.length || 0)}
               />
             </div>
           )}

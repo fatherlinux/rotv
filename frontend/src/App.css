@@ -1426,13 +1426,14 @@ body {
   color: #333;
 }
 
-/* Push refresh chip down in edit mode */
+/* Stack chips vertically in edit mode to prevent overlap */
 .map-container.edit-mode-active .map-refresh-news {
-  top: 3rem;
+  top: 5rem;
+  right: 1rem;
 }
 
 .map-container.edit-mode-active .map-refresh-result {
-  top: 5.5rem;
+  top: 7.5rem;
 }
 
 /* Legend */
