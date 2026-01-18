@@ -85,8 +85,17 @@ function ReadOnlyView({ destination, isLinearFeature, isAdmin, showImage = true 
           {/* Linear feature type badge */}
           {isLinearFeature && (
             <span className={`feature-type-badge ${destination.feature_type}`}>
-              {destination.feature_type === 'river' ? 'River/Waterway' : 'Trail'}
+              {destination.feature_type === 'river' ? 'River/Waterway' :
+               destination.feature_type === 'boundary' ? 'Boundary' : 'Trail'}
             </span>
+          )}
+          {/* Boundary color swatch */}
+          {isLinearFeature && destination.feature_type === 'boundary' && destination.boundary_color && (
+            <span
+              className="boundary-color-swatch"
+              style={{ backgroundColor: destination.boundary_color }}
+              title={`Color: ${destination.boundary_color}`}
+            />
           )}
           {/* Difficulty badge for trails */}
           {isLinearFeature && destination.difficulty && (
@@ -622,8 +631,8 @@ function EditView({ destination, editedData, setEditedData, onSave, onCancel, on
         </div>
       </div>
 
-      {/* Linear feature specific fields */}
-      {isLinearFeature && (
+      {/* Linear feature specific fields - trails and rivers */}
+      {isLinearFeature && editedData.feature_type !== 'boundary' && (
         <>
           <div className="edit-row">
             <div className="edit-section half">
@@ -660,6 +669,45 @@ function EditView({ destination, editedData, setEditedData, onSave, onCancel, on
             />
           </div>
         </>
+      )}
+
+      {/* Boundary color picker */}
+      {isLinearFeature && editedData.feature_type === 'boundary' && (
+        <div className="edit-section">
+          <label>Boundary Color</label>
+          <div className="boundary-color-palette">
+            {[
+              '#228B22', // Forest Green
+              '#2E8B57', // Sea Green
+              '#006400', // Dark Green
+              '#8B4513', // Saddle Brown
+              '#A0522D', // Sienna
+              '#CD853F', // Peru
+              '#4169E1', // Royal Blue
+              '#1E90FF', // Dodger Blue
+              '#4682B4', // Steel Blue
+              '#8B008B', // Dark Magenta
+              '#9932CC', // Dark Orchid
+              '#DC143C', // Crimson
+              '#FF6347', // Tomato
+              '#FF8C00', // Dark Orange
+              '#FFD700', // Gold
+            ].map(color => (
+              <button
+                key={color}
+                type="button"
+                className={`color-swatch ${editedData.boundary_color === color ? 'selected' : ''}`}
+                style={{ backgroundColor: color }}
+                onClick={() => handleChange('boundary_color', color)}
+                title={color}
+              />
+            ))}
+          </div>
+          <div className="current-color-display">
+            Current: <span style={{ backgroundColor: editedData.boundary_color || '#228B22' }} className="color-preview" />
+            <span className="color-hex">{editedData.boundary_color || '#228B22'}</span>
+          </div>
+        </div>
       )}
 
       {/* Lat/long fields - only for point destinations */}

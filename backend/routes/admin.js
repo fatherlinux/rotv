@@ -216,7 +216,7 @@ export function createAdminRouter(pool) {
       'name', 'poi_type', 'latitude', 'longitude', 'geometry', 'geometry_drive_file_id',
       'property_owner', 'brief_description', 'era', 'historical_description',
       'primary_activities', 'surface', 'pets', 'cell_signal', 'more_info_link',
-      'length_miles', 'difficulty'
+      'length_miles', 'difficulty', 'boundary_type', 'boundary_color'
     ];
     const updates = {};
     const values = [];
@@ -1427,6 +1427,81 @@ export function createAdminRouter(pool) {
   });
 
   // ============================================
+  // Boundaries Management Routes
+  // ============================================
+
+  // Get all boundaries (for admin settings)
+  router.get('/boundaries', isAdmin, async (req, res) => {
+    try {
+      const result = await pool.query(`
+        SELECT id, name, boundary_type, boundary_color
+        FROM pois
+        WHERE poi_type = 'boundary' AND (deleted IS NULL OR deleted = FALSE)
+        ORDER BY name
+      `);
+      res.json(result.rows);
+    } catch (error) {
+      console.error('Error fetching boundaries:', error);
+      res.status(500).json({ error: 'Failed to fetch boundaries' });
+    }
+  });
+
+  // Update boundary color/type
+  router.put('/boundaries/:id', isAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { boundary_type, boundary_color } = req.body;
+
+    // Validate hex color format
+    if (boundary_color && !/^#[0-9A-Fa-f]{6}$/.test(boundary_color)) {
+      return res.status(400).json({ error: 'Color must be a valid hex color (e.g., #228B22)' });
+    }
+
+    const updates = [];
+    const values = [];
+    let paramIndex = 1;
+
+    if (boundary_type !== undefined) {
+      updates.push(`boundary_type = $${paramIndex}`);
+      values.push(boundary_type);
+      paramIndex++;
+    }
+
+    if (boundary_color !== undefined) {
+      updates.push(`boundary_color = $${paramIndex}`);
+      values.push(boundary_color);
+      paramIndex++;
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No valid fields to update' });
+    }
+
+    values.push(id);
+
+    try {
+      const result = await pool.query(`
+        UPDATE pois
+        SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP, locally_modified = TRUE, synced = FALSE
+        WHERE id = $${paramIndex} AND poi_type = 'boundary'
+        RETURNING id, name, boundary_type, boundary_color
+      `, values);
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Boundary not found' });
+      }
+
+      // Queue sync operation
+      await queuePOISync('UPDATE', id, { boundary_type, boundary_color });
+
+      console.log(`Admin ${req.user.email} updated boundary ${id}: type=${boundary_type}, color=${boundary_color}`);
+      res.json(result.rows[0]);
+    } catch (error) {
+      console.error('Error updating boundary:', error);
+      res.status(500).json({ error: 'Failed to update boundary' });
+    }
+  });
+
+  // ============================================
   // Google Sheets Sync Routes
   // ============================================
 
@@ -2291,7 +2366,8 @@ export function createAdminRouter(pool) {
       const allowedFields = [
         'name', 'poi_type', 'geometry', 'property_owner', 'brief_description',
         'era', 'historical_description', 'primary_activities', 'surface', 'pets',
-        'cell_signal', 'more_info_link', 'length_miles', 'difficulty'
+        'cell_signal', 'more_info_link', 'length_miles', 'difficulty',
+        'boundary_type', 'boundary_color'
       ];
 
       // Map feature_type to poi_type for backward compatibility
@@ -2328,6 +2404,7 @@ export function createAdminRouter(pool) {
                   brief_description, era, historical_description, primary_activities,
                   surface, pets, cell_signal, more_info_link, length_miles, difficulty,
                   image_mime_type, image_drive_file_id, geometry_drive_file_id,
+                  boundary_type, boundary_color,
                   locally_modified, deleted, synced, created_at, updated_at
       `, values);
 

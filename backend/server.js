@@ -554,6 +554,18 @@ async function initDatabase() {
       ALTER TABLE news_job_status ADD COLUMN IF NOT EXISTS total_pois INTEGER DEFAULT 0
     `);
 
+    // Add boundary_type and boundary_color columns for multiple boundary support
+    await client.query(`
+      ALTER TABLE pois ADD COLUMN IF NOT EXISTS boundary_type TEXT
+    `);
+    await client.query(`
+      ALTER TABLE pois ADD COLUMN IF NOT EXISTS boundary_color TEXT DEFAULT '#228B22'
+    `);
+    // Set default boundary_type for existing boundaries
+    await client.query(`
+      UPDATE pois SET boundary_type = 'cvnp' WHERE poi_type = 'boundary' AND boundary_type IS NULL
+    `);
+
     // Note: linear_features table is deprecated - data migrated to pois table above
 
     // Seed default icons if table is empty
@@ -602,6 +614,7 @@ app.get('/api/pois', async (req, res) => {
              property_owner, brief_description, era, historical_description,
              primary_activities, surface, pets, cell_signal, more_info_link,
              length_miles, difficulty, image_mime_type, image_drive_file_id,
+             boundary_type, boundary_color,
              locally_modified, deleted, synced, created_at, updated_at
       FROM pois
       WHERE (deleted IS NULL OR deleted = FALSE)
@@ -621,6 +634,7 @@ app.get('/api/pois/:id', async (req, res) => {
              property_owner, brief_description, era, historical_description,
              primary_activities, surface, pets, cell_signal, more_info_link,
              length_miles, difficulty, image_mime_type, image_drive_file_id,
+             boundary_type, boundary_color,
              locally_modified, deleted, synced, created_at, updated_at
       FROM pois WHERE id = $1`,
       [req.params.id]
@@ -749,6 +763,7 @@ app.get('/api/linear-features', async (req, res) => {
              property_owner, brief_description, era, historical_description,
              primary_activities, surface, pets, cell_signal, more_info_link,
              length_miles, difficulty, image_mime_type, image_drive_file_id,
+             boundary_type, boundary_color,
              locally_modified, deleted, synced, created_at, updated_at
       FROM pois
       WHERE poi_type IN ('trail', 'river', 'boundary')
@@ -769,6 +784,7 @@ app.get('/api/linear-features/:id', async (req, res) => {
              property_owner, brief_description, era, historical_description,
              primary_activities, surface, pets, cell_signal, more_info_link,
              length_miles, difficulty, image_mime_type, image_drive_file_id,
+             boundary_type, boundary_color,
              locally_modified, deleted, synced, created_at, updated_at
       FROM pois WHERE id = $1`,
       [req.params.id]

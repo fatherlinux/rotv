@@ -1523,6 +1523,92 @@ body {
   margin: 0.5rem 0;
 }
 
+/* Boundary chips section */
+.boundary-chips-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.boundary-chips-header h4 {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #333;
+}
+
+.boundary-chips-actions {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.boundary-chips-actions button {
+  padding: 0.15rem 0.4rem;
+  font-size: 0.7rem;
+  background: #f5f5f5;
+  border: 1px solid #ddd;
+  border-radius: 3px;
+  cursor: pointer;
+  color: #666;
+}
+
+.boundary-chips-actions button:hover {
+  background: #e8e8e8;
+}
+
+.boundary-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.boundary-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  border: 1px solid #ddd;
+  background: white;
+  transition: all 0.15s ease;
+}
+
+.boundary-chip.active {
+  background: #f0f7e6;
+  border-color: #4a7c23;
+}
+
+.boundary-chip.inactive {
+  opacity: 0.5;
+  background: #f5f5f5;
+}
+
+.boundary-chip:hover {
+  border-color: #4a7c23;
+}
+
+.boundary-chip-color {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+}
+
+.boundary-chip-icon {
+  font-size: 0.8rem;
+  line-height: 1;
+}
+
+.boundary-chip-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100px;
+}
+
 .legend-toggle {
   display: flex;
   align-items: center;
@@ -2197,6 +2283,53 @@ body {
 .legend-icon-item img {
   width: 18px;
   height: 18px;
+}
+
+/* Expandable section header (e.g., Boundaries) */
+.legend-icon-item.legend-section-header {
+  position: relative;
+}
+
+.legend-expand-icon {
+  margin-left: auto;
+  font-size: 0.6rem;
+  opacity: 0.6;
+}
+
+/* Expanded section content */
+.legend-section-content {
+  background: #f9f9f9;
+  border-radius: 4px;
+  padding: 0.5rem;
+  margin-top: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.legend-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  padding: 0.25rem 0.15rem;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.legend-checkbox-label:hover {
+  background: #e8f5e9;
+}
+
+.legend-checkbox-label input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+}
+
+.legend-color-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  flex-shrink: 0;
 }
 
 /* Auth Components */
@@ -5756,6 +5889,97 @@ body {
   color: #c62828;
 }
 
+/* Boundaries Settings */
+.boundaries-settings {
+  margin-top: 1rem;
+}
+
+.no-boundaries {
+  color: #666;
+  font-style: italic;
+  padding: 1rem;
+  text-align: center;
+  background: #f9f9f9;
+  border-radius: 4px;
+}
+
+.boundaries-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.boundary-item {
+  background: #f9f9f9;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.boundary-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.boundary-name {
+  font-weight: 600;
+  font-size: 1.1rem;
+  color: #333;
+}
+
+.boundary-preview {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  border: 2px solid rgba(0, 0, 0, 0.2);
+}
+
+.boundary-controls {
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.boundary-field {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.boundary-field span:first-child {
+  color: #666;
+  font-weight: 500;
+}
+
+.boundary-field input[type="color"] {
+  width: 40px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.boundary-field select {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 0.9rem;
+}
+
+.color-value {
+  font-family: monospace;
+  font-size: 0.85rem;
+  color: #666;
+}
+
 /* Eras Settings */
 .eras-settings {
   margin-top: 1rem;
@@ -7106,6 +7330,74 @@ body {
 .feature-type-badge.river {
   background: #1E90FF;
   color: white;
+}
+
+.feature-type-badge.boundary {
+  background: #6B8E23;
+  color: white;
+}
+
+/* Boundary color swatch - shown in view mode badges row */
+.boundary-color-swatch {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  border: 2px solid rgba(0, 0, 0, 0.2);
+  vertical-align: middle;
+  margin-left: 0.25rem;
+}
+
+/* Boundary color palette - edit mode */
+.boundary-color-palette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 0.5rem;
+}
+
+.boundary-color-palette .color-swatch {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: 2px solid rgba(0, 0, 0, 0.15);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  padding: 0;
+}
+
+.boundary-color-palette .color-swatch:hover {
+  transform: scale(1.1);
+  border-color: rgba(0, 0, 0, 0.3);
+}
+
+.boundary-color-palette .color-swatch.selected {
+  border-color: #333;
+  box-shadow: 0 0 0 2px white, 0 0 0 4px #333;
+  transform: scale(1.05);
+}
+
+.current-color-display {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+  color: #666;
+}
+
+.current-color-display .color-preview {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+}
+
+.current-color-display .color-hex {
+  font-family: monospace;
+  font-size: 0.8rem;
+  color: #888;
 }
 
 /* Difficulty badges */
