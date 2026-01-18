@@ -325,6 +325,69 @@ body {
   width: 100%;
 }
 
+/* GPS Locate Control */
+.locate-control {
+  margin-bottom: 10px !important;
+  margin-right: 10px !important;
+}
+
+.locate-button {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  width: 34px !important;
+  height: 34px !important;
+  background: white !important;
+  color: #333 !important;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.locate-button:hover {
+  background: #f4f4f4 !important;
+  color: #4285f4 !important;
+}
+
+.locate-button:active {
+  background: #e8e8e8 !important;
+}
+
+.locate-button.locating {
+  color: #4285f4 !important;
+  animation: locate-pulse 1s infinite;
+}
+
+.locate-button svg {
+  width: 20px;
+  height: 20px;
+}
+
+@keyframes locate-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* User location marker pulse effect */
+.user-location-pulse {
+  animation: user-pulse 2s infinite;
+}
+
+@keyframes user-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.5);
+    opacity: 0.5;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
 /* Custom markers by owner type */
 .marker-federal {
   background-color: #2d5016;
