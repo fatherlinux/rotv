@@ -671,6 +671,14 @@ body {
 .sidebar-tab-content {
   flex: 1;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* When sidebar is in editing mode, tab-content shouldn't scroll - let EditView handle it */
+.sidebar.editing .sidebar-tab-content {
+  overflow-y: hidden;
 }
 
 /* Sidebar tab loading/empty states */

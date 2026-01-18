@@ -376,6 +376,29 @@ function boundsIntersect(mapBounds, geoBounds) {
   return true;
 }
 
+// Component to track map moves for tooltip repositioning
+function MapMoveTracker({ onMapMove }) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!map) return;
+
+    const handleMove = () => {
+      onMapMove();
+    };
+
+    map.on('moveend', handleMove);
+    map.on('zoomend', handleMove);
+
+    return () => {
+      map.off('moveend', handleMove);
+      map.off('zoomend', handleMove);
+    };
+  }, [map, onMapMove]);
+
+  return null;
+}
+
 // Component to track which POIs are visible in the current map viewport
 function MapBoundsTracker({ destinations, visibleTypes, getDestinationIconType, onVisiblePoisChange, onMapStateChange, linearFeatures, showTrails, showRivers, showBoundaries }) {
   const map = useMap();
@@ -614,8 +637,46 @@ function createSelectedIcon(iconUrl) {
 }
 
 // Simple marker component - draggable state controlled by key prop
-function DestinationMarker({ dest, icon, isSelected, isEditMode, onSelect, onDragEnd }) {
+function DestinationMarker({ dest, icon, isSelected, isEditMode, onSelect, onDragEnd, mapMoveCount }) {
   const markerRef = useRef(null);
+  const map = useMap();
+
+  // Calculate best tooltip direction based on marker position relative to map bounds
+  // mapMoveCount is passed from parent to trigger recalculation when map moves
+  const getTooltipDirection = () => {
+    if (!map) return 'top';
+
+    const point = map.latLngToContainerPoint([dest.latitude, dest.longitude]);
+    const mapSize = map.getSize();
+
+    // Tooltip dimensions - with image it's taller
+    const tooltipWidth = 220;
+    const tooltipHeight = 220; // Account for image thumbnail (~120px) + text
+    const margin = 20;
+
+    // Check which edges the marker is near
+    const nearTop = point.y < tooltipHeight + margin;
+    const nearBottom = (mapSize.y - point.y) < tooltipHeight + margin;
+    const nearRight = (mapSize.x - point.x) < tooltipWidth + margin;
+    const nearLeft = point.x < tooltipWidth + margin;
+
+    // If near top edge, prefer bottom
+    if (nearTop && !nearBottom) {
+      return 'bottom';
+    }
+    // If near right edge (and not near top), show on left
+    if (nearRight && !nearLeft && !nearTop) {
+      return 'left';
+    }
+    // If near left edge (and not near top), show on right
+    if (nearLeft && !nearRight && !nearTop) {
+      return 'right';
+    }
+    // Default to top
+    return 'top';
+  };
+
+  const tooltipDirection = getTooltipDirection();
 
   const eventHandlers = {
     click: () => onSelect(dest),
@@ -632,8 +693,19 @@ function DestinationMarker({ dest, icon, isSelected, isEditMode, onSelect, onDra
   // Highlight selected marker in edit mode
   const displayIcon = (isSelected && isEditMode) ? createSelectedIcon(icon.options.iconUrl) : icon;
 
-  // Key changes when edit mode changes - forces marker recreation with correct draggable state
-  const markerKey = `${dest.id}-${isEditMode ? 'edit' : 'view'}`;
+  // Key changes when edit mode changes OR tooltip direction changes - forces recreation
+  const markerKey = `${dest.id}-${isEditMode ? 'edit' : 'view'}-${tooltipDirection}`;
+
+  // Calculate offset based on direction
+  // Note: Icon already has tooltipAnchor: [0, -14] which positions for "top"
+  const getOffset = () => {
+    switch (tooltipDirection) {
+      case 'bottom': return [0, 28]; // Move below the icon (icon is 28px tall)
+      case 'left': return [-14, 14]; // Move left and adjust vertical
+      case 'right': return [14, 14]; // Move right and adjust vertical
+      default: return [0, 0]; // Icon's tooltipAnchor handles "top"
+    }
+  };
 
   return (
     <Marker
@@ -646,8 +718,8 @@ function DestinationMarker({ dest, icon, isSelected, isEditMode, onSelect, onDra
       eventHandlers={eventHandlers}
     >
       <Tooltip
-        direction="auto"
-        offset={[0, -14]}
+        direction={tooltipDirection}
+        offset={getOffset()}
         opacity={0.95}
         className="destination-tooltip"
       >
@@ -734,6 +806,9 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
   // Admin news refresh state
   const [refreshingNews, setRefreshingNews] = useState(false);
   const [refreshResult, setRefreshResult] = useState(null);
+
+  // Track map moves to trigger tooltip direction recalculation
+  const [mapMoveCount, setMapMoveCount] = useState(0);
 
   // Icon configuration from database
   const [iconConfig, setIconConfig] = useState([]);
@@ -1153,6 +1228,8 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
                 layer.bindTooltip(tooltipHtml, {
                   permanent: false,
                   direction: 'auto',
+                  offset: [0, -20], // Add padding from cursor
+                  sticky: true, // Follow mouse cursor along the feature
                   className: 'destination-tooltip'
                 });
               }}
@@ -1173,6 +1250,7 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
           showRivers={showRivers}
           showBoundaries={showBoundaries}
         />
+        <MapMoveTracker onMapMove={() => setMapMoveCount(c => c + 1)} />
         <MapClickHandler
           isAdmin={isAdmin}
           editMode={editMode}
@@ -1185,7 +1263,7 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
         {/* Temporary marker for new POI being created */}
         {newPOI && previewCoords && (
           <DestinationMarker
-            key="new-poi-marker"
+            key={`new-poi-marker-${mapMoveCount}`}
             dest={{
               ...newPOI,
               latitude: previewCoords.lat,
@@ -1195,6 +1273,7 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
             isSelected={true}
             isEditMode={true}
             onSelect={() => {}}
+            mapMoveCount={mapMoveCount}
             onDragEnd={(d, lat, lng) => onPreviewCoordsChange({ lat, lng })}
           />
         )}
@@ -1224,13 +1303,14 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
 
           return (
             <DestinationMarker
-              key={`marker-${dest.id}-${isDraggable}`}
+              key={`marker-${dest.id}-${isDraggable}-${mapMoveCount}`}
               dest={{ ...dest, latitude: markerLat, longitude: markerLng }}
               icon={icon}
               isSelected={isSelected}
               isEditMode={isDraggable}
               onSelect={onSelectDestination}
               onDragEnd={isDraggable ? handleDrag : handleMarkerDragEnd}
+              mapMoveCount={mapMoveCount}
             />
           );
         })}
