@@ -1436,6 +1436,11 @@ body {
   top: 7.5rem;
 }
 
+/* Boundary polygons - only respond to hover on the stroke, not the fill */
+.boundary-stroke-only {
+  pointer-events: stroke;
+}
+
 /* Legend */
 .legend {
   position: absolute;

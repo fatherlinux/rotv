@@ -1197,13 +1197,15 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
       };
     } else if (feature.feature_type === 'boundary') {
       // Park boundaries - dashed green outline with fill
+      // className makes tooltip only trigger on stroke, not fill
       return {
         color: isSelected ? '#1a3d0a' : '#2d5016',
         weight: isSelected ? 4 : 3,
         fillColor: '#4a7c23',
         fillOpacity: isSelected ? 0.25 : 0.15,
         dashArray: '5, 5',
-        opacity: 1
+        opacity: 1,
+        className: 'boundary-stroke-only'
       };
     } else {
       // trail
@@ -1292,6 +1294,16 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
                   sticky: true, // Follow mouse cursor along the feature
                   className: 'destination-tooltip'
                 });
+
+                // For boundaries, only respond to hover on the stroke, not the fill
+                if (feature.feature_type === 'boundary') {
+                  layer.on('add', () => {
+                    const el = layer.getElement();
+                    if (el) {
+                      el.style.pointerEvents = 'stroke';
+                    }
+                  });
+                }
               }}
             />
           );
