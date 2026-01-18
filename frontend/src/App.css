@@ -333,21 +333,10 @@ body {
 
 /* Ensure Leaflet controls stay within viewport on mobile */
 @media (max-width: 768px) {
-  .leaflet-bottom.leaflet-right {
-    /* Account for mobile safe areas (notch, home indicator) */
-    bottom: calc(20px + env(safe-area-inset-bottom, 0px)) !important;
-    right: calc(10px + env(safe-area-inset-right, 0px)) !important;
-  }
-
-  .locate-control {
-    margin-bottom: 5px !important;
-  }
-}
-
-/* Extra small screens - ensure button is well above bottom edge */
-@media (max-width: 480px) {
-  .leaflet-bottom.leaflet-right {
-    bottom: calc(30px + env(safe-area-inset-bottom, 0px)) !important;
+  .leaflet-top.leaflet-left {
+    /* Ensure zoom controls aren't cut off */
+    top: 10px !important;
+    left: 10px !important;
   }
 }
 
@@ -1598,6 +1587,29 @@ body {
   .header {
     flex-direction: column;
     gap: 0.25rem;
+    padding: 0.5rem 0.75rem;
+  }
+
+  /* Header tabs - horizontally scrollable on mobile */
+  .header-tabs {
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE/Edge */
+    justify-content: flex-start;
+    padding: 0.25rem 0.5rem;
+  }
+
+  .header-tabs::-webkit-scrollbar {
+    display: none; /* Chrome/Safari */
+  }
+
+  .tab-btn {
+    flex-shrink: 0;
+    padding: 0.4rem 0.9rem;
+    font-size: 0.85rem;
   }
 
   /* Mobile filter bar - collapsed by default */

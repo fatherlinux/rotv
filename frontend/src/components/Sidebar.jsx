@@ -1244,16 +1244,34 @@ function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinat
         </div>
 
         {/* Image - always shown at top for all tabs */}
-        <div className="sidebar-image">
-          {linearImageUrl ? (
-            <img src={linearImageUrl} alt={linearFeature?.name} />
-          ) : (
-            <div className="image-placeholder">
-              <span className="placeholder-icon">{placeholderIcon}</span>
-              <span className="placeholder-text">Image coming soon</span>
-            </div>
-          )}
-        </div>
+        {isEditing && linearFeature?.id ? (
+          <ImageUploader
+            destinationId={linearFeature.id}
+            hasImage={!!linearFeature.image_mime_type}
+            onImageChange={(hasImage, driveFileId) => {
+              if (onLinearFeatureUpdate) {
+                onLinearFeatureUpdate({
+                  ...linearFeature,
+                  image_mime_type: hasImage ? 'image/jpeg' : null,
+                  image_drive_file_id: driveFileId
+                });
+              }
+            }}
+            disabled={saving}
+            isLinearFeature={true}
+          />
+        ) : (
+          <div className="sidebar-image">
+            {linearImageUrl ? (
+              <img src={linearImageUrl} alt={linearFeature?.name} />
+            ) : (
+              <div className="image-placeholder">
+                <span className="placeholder-icon">{placeholderIcon}</span>
+                <span className="placeholder-text">Image coming soon</span>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Sidebar Tabs - same as destinations */}
         <div className="sidebar-tabs">
@@ -1336,16 +1354,33 @@ function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinat
       </div>
 
       {/* Image - always shown at top for all tabs */}
-      <div className="sidebar-image">
-        {imageUrl ? (
-          <img src={imageUrl} alt={destination?.name} />
-        ) : (
-          <div className="image-placeholder">
-            <span className="placeholder-icon">🏞️</span>
-            <span className="placeholder-text">Image coming soon</span>
-          </div>
-        )}
-      </div>
+      {isEditing && destination?.id ? (
+        <ImageUploader
+          destinationId={destination.id}
+          hasImage={!!destination.image_mime_type}
+          onImageChange={(hasImage, driveFileId) => {
+            if (onDestinationUpdate) {
+              onDestinationUpdate({
+                ...destination,
+                image_mime_type: hasImage ? 'image/jpeg' : null,
+                image_drive_file_id: driveFileId
+              });
+            }
+          }}
+          disabled={saving}
+        />
+      ) : (
+        <div className="sidebar-image">
+          {imageUrl ? (
+            <img src={imageUrl} alt={destination?.name} />
+          ) : (
+            <div className="image-placeholder">
+              <span className="placeholder-icon">🏞️</span>
+              <span className="placeholder-text">Image coming soon</span>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Sidebar Tabs - always shown */}
       <div className="sidebar-tabs">
