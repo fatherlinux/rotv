@@ -325,41 +325,42 @@ body {
   width: 100%;
 }
 
-/* GPS Locate Control */
-.locate-control {
-  margin-bottom: 10px !important;
-  margin-right: 10px !important;
+/* Combined Zoom and GPS Locate Control */
+.zoom-locate-control {
+  margin-top: 10px !important;
+  margin-left: 10px !important;
 }
 
-/* Ensure Leaflet controls stay within viewport on mobile */
-@media (max-width: 768px) {
-  .leaflet-top.leaflet-left {
-    /* Ensure zoom controls aren't cut off */
-    top: 10px !important;
-    left: 10px !important;
-  }
-}
-
-.locate-button {
+.zoom-locate-btn {
   display: flex !important;
   align-items: center;
   justify-content: center;
-  width: 34px !important;
-  height: 34px !important;
+  width: 30px !important;
+  height: 30px !important;
   background: white !important;
   color: #333 !important;
-  text-decoration: none;
+  text-decoration: none !important;
   cursor: pointer;
-  transition: all 0.2s ease;
+  font-size: 18px;
+  font-weight: bold;
+  line-height: 30px;
+  border-bottom: 1px solid #ccc;
+}
+
+.zoom-locate-btn:last-child {
+  border-bottom: none;
+}
+
+.zoom-locate-btn:hover {
+  background: #f4f4f4 !important;
+}
+
+.zoom-locate-btn:active {
+  background: #e8e8e8 !important;
 }
 
 .locate-button:hover {
-  background: #f4f4f4 !important;
   color: #4285f4 !important;
-}
-
-.locate-button:active {
-  background: #e8e8e8 !important;
 }
 
 .locate-button.locating {
@@ -368,8 +369,8 @@ body {
 }
 
 .locate-button svg {
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
 }
 
 @keyframes locate-pulse {

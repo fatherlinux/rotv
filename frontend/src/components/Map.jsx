@@ -483,11 +483,10 @@ function MapBoundsTracker({ destinations, visibleTypes, getDestinationIconType, 
   return null;
 }
 
-// GPS Locate Control - shows user's current location on the map
-function LocateControl({ onLocationFound, onLocationError }) {
+// Combined Zoom and GPS Locate Control
+function ZoomLocateControl({ onLocationFound, onLocationError }) {
   const map = useMap();
   const [locating, setLocating] = useState(false);
-  const [userLocation, setUserLocation] = useState(null);
   const userMarkerRef = useRef(null);
   const userCircleRef = useRef(null);
 
@@ -506,7 +505,6 @@ function LocateControl({ onLocationFound, onLocationError }) {
         const { latitude, longitude, accuracy } = position.coords;
         const latlng = [latitude, longitude];
 
-        setUserLocation({ latlng, accuracy });
         setLocating(false);
 
         // Zoom to user location - zoom 16 shows a few blocks
@@ -568,26 +566,53 @@ function LocateControl({ onLocationFound, onLocationError }) {
     );
   }, [map, onLocationFound, onLocationError]);
 
-  // Add the control to the map
+  // Add the combined control to the map
   useEffect(() => {
-    const LocateControlClass = L.Control.extend({
-      onAdd: function() {
-        const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control locate-control');
-        const button = L.DomUtil.create('a', 'locate-button', container);
-        button.href = '#';
-        button.title = 'Find my location';
-        button.setAttribute('role', 'button');
-        button.setAttribute('aria-label', 'Find my location');
+    const ZoomLocateControlClass = L.Control.extend({
+      onAdd: function(map) {
+        const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control zoom-locate-control');
 
-        // GPS crosshair icon (SVG)
-        button.innerHTML = `
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+        // Zoom In button
+        const zoomIn = L.DomUtil.create('a', 'zoom-locate-btn zoom-in-btn', container);
+        zoomIn.href = '#';
+        zoomIn.title = 'Zoom in';
+        zoomIn.setAttribute('role', 'button');
+        zoomIn.setAttribute('aria-label', 'Zoom in');
+        zoomIn.innerHTML = '<span aria-hidden="true">+</span>';
+
+        // Zoom Out button
+        const zoomOut = L.DomUtil.create('a', 'zoom-locate-btn zoom-out-btn', container);
+        zoomOut.href = '#';
+        zoomOut.title = 'Zoom out';
+        zoomOut.setAttribute('role', 'button');
+        zoomOut.setAttribute('aria-label', 'Zoom out');
+        zoomOut.innerHTML = '<span aria-hidden="true">−</span>';
+
+        // GPS Locate button
+        const locate = L.DomUtil.create('a', 'zoom-locate-btn locate-button', container);
+        locate.href = '#';
+        locate.title = 'Find my location';
+        locate.setAttribute('role', 'button');
+        locate.setAttribute('aria-label', 'Find my location');
+        locate.innerHTML = `
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
             <path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3A8.994 8.994 0 0 0 13 3.06V1h-2v2.06A8.994 8.994 0 0 0 3.06 11H1v2h2.06A8.994 8.994 0 0 0 11 20.94V23h2v-2.06A8.994 8.994 0 0 0 20.94 13H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/>
           </svg>
         `;
 
         L.DomEvent.disableClickPropagation(container);
-        L.DomEvent.on(button, 'click', function(e) {
+
+        L.DomEvent.on(zoomIn, 'click', function(e) {
+          L.DomEvent.preventDefault(e);
+          map.zoomIn();
+        });
+
+        L.DomEvent.on(zoomOut, 'click', function(e) {
+          L.DomEvent.preventDefault(e);
+          map.zoomOut();
+        });
+
+        L.DomEvent.on(locate, 'click', function(e) {
           L.DomEvent.preventDefault(e);
           handleLocate();
         });
@@ -596,7 +621,7 @@ function LocateControl({ onLocationFound, onLocationError }) {
       }
     });
 
-    const control = new LocateControlClass({ position: 'bottomright' });
+    const control = new ZoomLocateControlClass({ position: 'topleft' });
     map.addControl(control);
 
     return () => {
@@ -1167,6 +1192,7 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
         center={PARK_CENTER}
         zoom={DEFAULT_ZOOM}
         scrollWheelZoom={true}
+        zoomControl={false}
         style={{ height: '100%', width: '100%' }}
       >
         <TileLayer
@@ -1257,8 +1283,8 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
           onRightClick={onStartNewPOI}
         />
 
-        {/* GPS Locate Control */}
-        <LocateControl />
+        {/* Combined Zoom and GPS Locate Control */}
+        <ZoomLocateControl />
 
         {/* Temporary marker for new POI being created */}
         {newPOI && previewCoords && (
