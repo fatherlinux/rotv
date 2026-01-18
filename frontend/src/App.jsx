@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { AuthProvider } from './contexts/AuthContext';
 import { useAuth } from './hooks/useAuth';
 import Map from './components/Map';
@@ -329,7 +329,7 @@ function AppContent() {
   };
 
   // Helper to update URL with POI slug (for shareable links)
-  const updateUrlWithPoi = (poiName) => {
+  const updateUrlWithPoi = useCallback((poiName) => {
     const params = new URLSearchParams(window.location.search);
     if (poiName) {
       params.set('poi', generateSlug(poiName));
@@ -339,10 +339,10 @@ function AppContent() {
     const newSearch = params.toString();
     const newUrl = window.location.pathname + (newSearch ? `?${newSearch}` : '');
     window.history.replaceState({}, '', newUrl);
-  };
+  }, []);
 
-  // Handle linear feature selection (clears destination selection)
-  const handleSelectLinearFeature = (feature) => {
+  // Handle linear feature selection (clears destination selection) - wrapped in useCallback for stable reference
+  const handleSelectLinearFeature = useCallback((feature) => {
     setSelectedDestination(null);
     setNewPOI(null);
     setPreviewCoords(null);
@@ -350,16 +350,16 @@ function AppContent() {
     updateUrlWithPoi(feature?.name);
     // Update document title for sharing
     document.title = feature ? `${feature.name} | Roots of The Valley` : 'Roots of The Valley';
-  };
+  }, [updateUrlWithPoi]);
 
-  // Handle destination selection (clears linear feature selection)
-  const handleSelectDestination = (destination) => {
+  // Handle destination selection (clears linear feature selection) - wrapped in useCallback for stable reference
+  const handleSelectDestination = useCallback((destination) => {
     setSelectedLinearFeature(null);
     setSelectedDestination(destination);
     updateUrlWithPoi(destination?.name);
     // Update document title for sharing
     document.title = destination ? `${destination.name} | Roots of The Valley` : 'Roots of The Valley';
-  };
+  }, [updateUrlWithPoi]);
 
   // Handle linear feature update - merge instead of replace to preserve geometry
   const handleLinearFeatureUpdate = (updatedFeature) => {

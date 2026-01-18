@@ -891,11 +891,6 @@ function DestinationMarker({ dest, icon, isSelected, isEditMode, onSelect, onDra
             {dest.brief_description && (
               <p>{dest.brief_description}</p>
             )}
-            {isEditMode && (
-              <p className="edit-coords">
-                {dest.latitude.toFixed(6)}, {dest.longitude.toFixed(6)}
-              </p>
-            )}
           </div>
         </Tooltip>
       )}
@@ -1515,7 +1510,7 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
         {/* Temporary marker for new POI being created */}
         {newPOI && previewCoords && (
           <DestinationMarker
-            key={`new-poi-marker-${mapMoveCount}`}
+            key="new-poi-marker"
             dest={{
               ...newPOI,
               latitude: previewCoords.lat,
@@ -1556,7 +1551,7 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
 
           return (
             <DestinationMarker
-              key={`marker-${dest.id}-${isDraggable}-${mapMoveCount}`}
+              key={`marker-${dest.id}-${isSelected}`}
               dest={{ ...dest, latitude: markerLat, longitude: markerLng }}
               icon={icon}
               isSelected={isSelected}
