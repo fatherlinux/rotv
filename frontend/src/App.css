@@ -1007,6 +1007,29 @@ body {
   padding: 1.5rem;
 }
 
+.history-tab-content {
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.history-tab-content .edit-section {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.history-tab-content textarea {
+  flex: 1;
+  min-height: 200px;
+  resize: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+
 .badges-row {
   display: flex;
   flex-wrap: wrap;
@@ -1057,11 +1080,9 @@ body {
 }
 
 .historical-description {
-  font-style: italic;
-  background: #fafafa;
-  padding: 1rem;
-  border-left: 3px solid #4a7c23;
-  border-radius: 0 4px 4px 0;
+  font-style: normal;
+  line-height: 1.6;
+  color: #333;
 }
 
 .details-grid {
@@ -2967,6 +2988,21 @@ body {
   }
 }
 
+/* View container - fills remaining space */
+.view-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* Scrollable content area for view mode */
+.view-scroll {
+  flex: 1;
+  overflow-y: auto;
+}
+
 /* Edit view container - fills remaining space */
 .edit-view-container {
   flex: 1;
@@ -3039,6 +3075,34 @@ body {
 
 .edit-buttons-footer .delete-btn:hover {
   background: #ffebee;
+}
+
+/* Fixed footer for View mode - More Info button */
+.view-buttons-footer {
+  display: flex;
+  padding: 1rem 1.25rem;
+  background: white;
+  border-top: 1px solid #ddd;
+  box-shadow: 0 -2px 8px rgba(0,0,0,0.1);
+  flex-shrink: 0;
+}
+
+.view-buttons-footer .more-info-btn {
+  flex: 1;
+  display: block;
+  text-align: center;
+  padding: 0.65rem 1rem;
+  background: #3d6a1e;
+  color: white;
+  text-decoration: none;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: background 0.2s;
+}
+
+.view-buttons-footer .more-info-btn:hover {
+  background: #2d5016;
 }
 
 .edit-buttons-right {
