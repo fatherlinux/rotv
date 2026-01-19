@@ -950,6 +950,7 @@ app.get('/share/destination/:id', async (req, res) => {
     const description = poi.brief_description || `Explore ${poi.name} at Cuyahoga Valley National Park`;
 
     // Generate HTML with OpenGraph meta tags
+    // Note: No instant redirect - let crawlers read the tags, users click to continue
     const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -963,6 +964,8 @@ app.get('/share/destination/:id', async (req, res) => {
   <meta property="og:title" content="${poi.name} | Roots of The Valley">
   <meta property="og:description" content="${description.replace(/"/g, '&quot;')}">
   <meta property="og:image" content="${imageUrl}">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
   <meta property="og:url" content="${appUrl}">
   <meta property="og:site_name" content="Roots of The Valley">
 
@@ -972,12 +975,16 @@ app.get('/share/destination/:id', async (req, res) => {
   <meta name="twitter:description" content="${description.replace(/"/g, '&quot;')}">
   <meta name="twitter:image" content="${imageUrl}">
 
-  <!-- Redirect to the actual app -->
-  <meta http-equiv="refresh" content="0;url=${appUrl}">
-  <script>window.location.href = "${appUrl}";</script>
+  <!-- Delayed redirect for human users (crawlers don't execute JS or follow meta refresh quickly) -->
+  <meta http-equiv="refresh" content="3;url=${appUrl}">
 </head>
-<body>
-  <p>Redirecting to <a href="${appUrl}">${poi.name}</a>...</p>
+<body style="font-family: system-ui, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background: #f5f5f5;">
+  <div style="text-align: center; padding: 2rem;">
+    <h1 style="color: #2d5016; margin-bottom: 1rem;">${poi.name}</h1>
+    <p style="color: #666; margin-bottom: 1.5rem;">${description.replace(/"/g, '&quot;')}</p>
+    <p>Redirecting to <a href="${appUrl}" style="color: #4a7c23;">Roots of The Valley</a>...</p>
+    <p style="font-size: 0.9rem; color: #999;">Click the link if you're not redirected automatically.</p>
+  </div>
 </body>
 </html>`;
 
@@ -1008,6 +1015,7 @@ app.get('/share/linear-feature/:id', async (req, res) => {
     const description = feature.brief_description || `Explore the ${feature.name} at Cuyahoga Valley National Park`;
 
     // Generate HTML with OpenGraph meta tags
+    // Note: No instant redirect - let crawlers read the tags, users click to continue
     const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1021,6 +1029,8 @@ app.get('/share/linear-feature/:id', async (req, res) => {
   <meta property="og:title" content="${feature.name} | Roots of The Valley">
   <meta property="og:description" content="${description.replace(/"/g, '&quot;')}">
   <meta property="og:image" content="${imageUrl}">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
   <meta property="og:url" content="${appUrl}">
   <meta property="og:site_name" content="Roots of The Valley">
 
@@ -1030,12 +1040,16 @@ app.get('/share/linear-feature/:id', async (req, res) => {
   <meta name="twitter:description" content="${description.replace(/"/g, '&quot;')}">
   <meta name="twitter:image" content="${imageUrl}">
 
-  <!-- Redirect to the actual app -->
-  <meta http-equiv="refresh" content="0;url=${appUrl}">
-  <script>window.location.href = "${appUrl}";</script>
+  <!-- Delayed redirect for human users (crawlers don't execute JS or follow meta refresh quickly) -->
+  <meta http-equiv="refresh" content="3;url=${appUrl}">
 </head>
-<body>
-  <p>Redirecting to <a href="${appUrl}">${feature.name}</a>...</p>
+<body style="font-family: system-ui, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background: #f5f5f5;">
+  <div style="text-align: center; padding: 2rem;">
+    <h1 style="color: #2d5016; margin-bottom: 1rem;">${feature.name}</h1>
+    <p style="color: #666; margin-bottom: 1.5rem;">${description.replace(/"/g, '&quot;')}</p>
+    <p>Redirecting to <a href="${appUrl}" style="color: #4a7c23;">Roots of The Valley</a>...</p>
+    <p style="font-size: 0.9rem; color: #999;">Click the link if you're not redirected automatically.</p>
+  </div>
 </body>
 </html>`;
 

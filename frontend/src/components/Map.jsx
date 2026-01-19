@@ -330,11 +330,15 @@ function MapClickHandler({ isAdmin, editMode, onRightClick, onMapClick }) {
 }
 
 // Component to handle map view updates when selection changes
+// Sets a flag on the map to indicate programmatic movement (vs user interaction)
 function MapUpdater({ selectedDestination, selectedLinearFeature }) {
   const map = useMap();
 
   React.useEffect(() => {
     if (selectedDestination && selectedDestination.latitude && selectedDestination.longitude) {
+      // Mark this as a programmatic move so MapBoundsTracker doesn't update News/Events filter
+      map._isProgrammaticMove = true;
+
       // Fly to the selected destination with appropriate zoom
       const currentZoom = map.getZoom();
       const targetZoom = Math.max(currentZoom, 15); // Zoom to at least 15, but don't zoom out
@@ -342,6 +346,11 @@ function MapUpdater({ selectedDestination, selectedLinearFeature }) {
         animate: true,
         duration: 0.5
       });
+
+      // Clear the flag after animation completes
+      setTimeout(() => {
+        map._isProgrammaticMove = false;
+      }, 600);
     }
   }, [selectedDestination, map]);
 
@@ -349,6 +358,9 @@ function MapUpdater({ selectedDestination, selectedLinearFeature }) {
   React.useEffect(() => {
     if (selectedLinearFeature && selectedLinearFeature.geometry) {
       try {
+        // Mark this as a programmatic move
+        map._isProgrammaticMove = true;
+
         const geoJson = L.geoJSON(selectedLinearFeature.geometry);
         const bounds = geoJson.getBounds();
         if (bounds.isValid()) {
@@ -359,6 +371,11 @@ function MapUpdater({ selectedDestination, selectedLinearFeature }) {
             duration: 0.5
           });
         }
+
+        // Clear the flag after animation completes
+        setTimeout(() => {
+          map._isProgrammaticMove = false;
+        }, 600);
       } catch (e) {
         console.warn('Could not fit bounds for linear feature:', e);
       }
@@ -536,7 +553,8 @@ function MapBoundsTracker({ destinations, visibleTypes, getDestinationIconType, 
       }
 
       // Emit visible IDs and total count (destinations + linear features)
-      if (onVisiblePoisChange) {
+      // Skip if this is a programmatic move (e.g., selection zoom) to preserve News/Events scope
+      if (onVisiblePoisChange && !map._isProgrammaticMove) {
         onVisiblePoisChange(visibleIds, linearFeatureCount);
       }
 
