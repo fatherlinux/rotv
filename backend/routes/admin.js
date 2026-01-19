@@ -35,6 +35,8 @@ import {
   pullNewsFromSheets,
   pushEventsToSheets,
   pullEventsFromSheets,
+  pushAssociationsToSheets,
+  pullAssociationsFromSheets,
   SHEET_NAME
 } from '../services/sheetsSync.js';
 import {
@@ -378,6 +380,82 @@ export function createAdminRouter(pool) {
     } catch (error) {
       console.error('Error creating destination:', error);
       res.status(500).json({ error: 'Failed to create destination' });
+    }
+  });
+
+  // Create POI (supports all types including virtual)
+  router.post('/pois', isAdmin, async (req, res) => {
+    const { name, poi_type, latitude, longitude } = req.body;
+
+    // Validate required fields
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'Name is required' });
+    }
+
+    if (!poi_type || !['point', 'trail', 'river', 'boundary', 'virtual'].includes(poi_type)) {
+      return res.status(400).json({ error: 'Invalid poi_type. Must be: point, trail, river, boundary, or virtual' });
+    }
+
+    // Virtual POIs don't need coordinates
+    if (poi_type !== 'virtual') {
+      if (latitude === undefined || longitude === undefined) {
+        return res.status(400).json({ error: 'Latitude and longitude are required for non-virtual POIs' });
+      }
+
+      const lat = parseFloat(latitude);
+      const lng = parseFloat(longitude);
+
+      if (isNaN(lat) || isNaN(lng)) {
+        return res.status(400).json({ error: 'Invalid coordinate values' });
+      }
+
+      if (lat < 40.5 || lat > 42.0 || lng < -82.5 || lng > -80.5) {
+        return res.status(400).json({ error: 'Coordinates outside valid range for Cuyahoga Valley area' });
+      }
+    }
+
+    const allowedFields = [
+      'poi_type', 'property_owner', 'brief_description', 'era', 'historical_description',
+      'primary_activities', 'surface', 'pets', 'cell_signal', 'more_info_link', 'image_drive_file_id'
+    ];
+
+    const fields = ['name'];
+    const values = [name.trim()];
+    let paramIndex = 2;
+
+    // Add latitude/longitude for non-virtual POIs
+    if (poi_type !== 'virtual') {
+      fields.push('latitude', 'longitude');
+      values.push(parseFloat(latitude), parseFloat(longitude));
+      paramIndex += 2;
+    }
+
+    for (const field of allowedFields) {
+      if (req.body[field] !== undefined && req.body[field] !== null && req.body[field] !== '') {
+        fields.push(field);
+        values.push(req.body[field]);
+        paramIndex++;
+      }
+    }
+
+    const placeholders = values.map((_, i) => `$${i + 1}`).join(', ');
+
+    try {
+      const result = await pool.query(
+        `INSERT INTO pois (${fields.join(', ')}, created_at, updated_at, locally_modified, synced)
+         VALUES (${placeholders}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, TRUE, FALSE)
+         RETURNING *`,
+        values
+      );
+
+      // Queue sync operation
+      await queuePOISync('INSERT', result.rows[0].id, result.rows[0]);
+
+      console.log(`Admin ${req.user.email} created new POI (${poi_type}): ${name}`);
+      res.status(201).json(result.rows[0]);
+    } catch (error) {
+      console.error('Error creating POI:', error);
+      res.status(500).json({ error: 'Failed to create POI' });
     }
   });
 
@@ -3069,6 +3147,112 @@ export function createAdminRouter(pool) {
     } catch (error) {
       console.error('Error cleaning up news/events:', error);
       res.status(500).json({ error: 'Failed to cleanup' });
+    }
+  });
+
+  // POI Associations CRUD endpoints (admin only)
+  router.post('/poi-associations', isAdmin, async (req, res) => {
+    try {
+      const { virtual_poi_id, physical_poi_id, association_type } = req.body;
+
+      if (!virtual_poi_id || !physical_poi_id) {
+        return res.status(400).json({ error: 'virtual_poi_id and physical_poi_id are required' });
+      }
+
+      // Validate that virtual_poi_id is actually a virtual POI
+      const virtualPoi = await pool.query(
+        'SELECT poi_type FROM pois WHERE id = $1',
+        [virtual_poi_id]
+      );
+
+      if (virtualPoi.rows.length === 0) {
+        return res.status(400).json({ error: 'Virtual POI not found' });
+      }
+
+      if (virtualPoi.rows[0].poi_type !== 'virtual') {
+        return res.status(400).json({ error: 'Specified virtual_poi_id is not a virtual POI' });
+      }
+
+      // Create association
+      const result = await pool.query(`
+        INSERT INTO poi_associations (virtual_poi_id, physical_poi_id, association_type)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (virtual_poi_id, physical_poi_id) DO UPDATE
+        SET association_type = EXCLUDED.association_type, updated_at = CURRENT_TIMESTAMP
+        RETURNING *
+      `, [virtual_poi_id, physical_poi_id, association_type || 'manages']);
+
+      console.log(`Admin ${req.user.email} created association between virtual POI ${virtual_poi_id} and physical POI ${physical_poi_id}`);
+      res.json(result.rows[0]);
+    } catch (error) {
+      console.error('Error creating POI association:', error);
+      res.status(500).json({ error: 'Failed to create association' });
+    }
+  });
+
+  router.delete('/poi-associations/:id', isAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      const result = await pool.query(
+        'DELETE FROM poi_associations WHERE id = $1 RETURNING *',
+        [id]
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Association not found' });
+      }
+
+      console.log(`Admin ${req.user.email} deleted association ${id}`);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error deleting POI association:', error);
+      res.status(500).json({ error: 'Failed to delete association' });
+    }
+  });
+
+  // Batch create associations (for drawing UI workflow)
+  router.post('/poi-associations/batch', isAdmin, async (req, res) => {
+    try {
+      const { virtual_poi_id, physical_poi_ids, association_type } = req.body;
+
+      if (!virtual_poi_id || !Array.isArray(physical_poi_ids) || physical_poi_ids.length === 0) {
+        return res.status(400).json({ error: 'virtual_poi_id and physical_poi_ids array are required' });
+      }
+
+      // Validate virtual POI
+      const virtualPoi = await pool.query(
+        'SELECT poi_type FROM pois WHERE id = $1',
+        [virtual_poi_id]
+      );
+
+      if (virtualPoi.rows.length === 0) {
+        return res.status(400).json({ error: 'Virtual POI not found' });
+      }
+
+      if (virtualPoi.rows[0].poi_type !== 'virtual') {
+        return res.status(400).json({ error: 'Specified virtual_poi_id is not a virtual POI' });
+      }
+
+      // Create all associations
+      const created = [];
+      for (const physical_poi_id of physical_poi_ids) {
+        const result = await pool.query(`
+          INSERT INTO poi_associations (virtual_poi_id, physical_poi_id, association_type)
+          VALUES ($1, $2, $3)
+          ON CONFLICT (virtual_poi_id, physical_poi_id) DO UPDATE
+          SET association_type = EXCLUDED.association_type, updated_at = CURRENT_TIMESTAMP
+          RETURNING *
+        `, [virtual_poi_id, physical_poi_id, association_type || 'manages']);
+
+        created.push(result.rows[0]);
+      }
+
+      console.log(`Admin ${req.user.email} created ${created.length} associations for virtual POI ${virtual_poi_id}`);
+      res.json({ success: true, created });
+    } catch (error) {
+      console.error('Error creating batch POI associations:', error);
+      res.status(500).json({ error: 'Failed to create associations' });
     }
   });
 

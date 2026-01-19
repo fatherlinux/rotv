@@ -103,6 +103,15 @@ function AppContent() {
   // Linear features (trails and rivers from database)
   const [linearFeatures, setLinearFeatures] = useState([]);
   const [selectedLinearFeature, setSelectedLinearFeature] = useState(null);
+
+  // Virtual POIs and associations state (for Entity: legacy Destination)
+  const [virtualPois, setVirtualPois] = useState([]);
+  const [associations, setAssociations] = useState([]);
+
+  // Drawing mode for adding associations to existing organization
+  const [isDrawingAssociations, setIsDrawingAssociations] = useState(false);
+  const [addingAssociationsToOrgId, setAddingAssociationsToOrgId] = useState(null);
+
   const [activeFilters, setActiveFilters] = useState({
     owner: null,
     era: null,
@@ -140,9 +149,12 @@ function AppContent() {
   // New POI being created (temporary, not yet saved)
   const [newPOI, setNewPOI] = useState(null);
 
+  // New organization being created (temporary, not yet saved)
+  const [newOrganization, setNewOrganization] = useState(null);
+
   // Reset preview coords when selection changes or edit mode turns off
   useEffect(() => {
-    if (selectedDestination && editMode) {
+    if (selectedDestination && editMode && selectedDestination.latitude && selectedDestination.longitude) {
       setPreviewCoords({
         lat: parseFloat(selectedDestination.latitude),
         lng: parseFloat(selectedDestination.longitude)
@@ -213,11 +225,13 @@ function AppContent() {
   // Reusable function to fetch all data (used on mount and after sync operations)
   const refreshAllData = React.useCallback(async () => {
     try {
-      const [destResponse, filterResponse, linearResponse, iconResponse] = await Promise.all([
+      const [destResponse, filterResponse, linearResponse, iconResponse, virtualPoisResponse, associationsResponse] = await Promise.all([
         fetch('/api/destinations'),
         fetch('/api/filters'),
         fetch('/api/linear-features'),
-        fetch('/api/admin/icons')
+        fetch('/api/admin/icons'),
+        fetch('/api/pois?type=virtual'),
+        fetch('/api/associations')
       ]);
 
       if (!destResponse.ok || !filterResponse.ok) {
@@ -228,12 +242,16 @@ function AppContent() {
       const filterData = await filterResponse.json();
       const linearData = linearResponse.ok ? await linearResponse.json() : [];
       const iconData = iconResponse.ok ? await iconResponse.json() : [];
+      const virtualPoisData = virtualPoisResponse.ok ? await virtualPoisResponse.json() : [];
+      const associationsData = associationsResponse.ok ? await associationsResponse.json() : [];
 
       setDestinations(destData);
       setFilteredDestinations(destData);
       setFilters(filterData);
       setLinearFeatures(linearData);
       setIconConfig(iconData);
+      setVirtualPois(virtualPoisData);
+      setAssociations(associationsData);
       setLoading(false);
     } catch (err) {
       setError(err.message);
@@ -263,6 +281,20 @@ function AppContent() {
     const visibleIdSet = new Set(visiblePoiIds);
     return linearFeatures.filter(feature => visibleIdSet.has(feature.id));
   }, [linearFeatures, visiblePoiIds]);
+
+  // Compute virtual POIs filtered by map viewport visibility
+  // Show virtual POIs when ANY of their associated physical POIs are visible
+  const viewportFilteredVirtualPois = useMemo(() => {
+    if (!visiblePoiIds || visiblePoiIds.length === 0) return [];
+
+    const visibleIdSet = new Set(visiblePoiIds);
+    return virtualPois.filter(vpoi => {
+      return associations.some(assoc =>
+        assoc.virtual_poi_id === vpoi.id &&
+        visibleIdSet.has(assoc.physical_poi_id)
+      );
+    });
+  }, [virtualPois, associations, visiblePoiIds]);
 
   // Navigation state for Results tab swipe navigation
   const [currentPoiIndex, setCurrentPoiIndex] = useState(-1);
@@ -334,9 +366,10 @@ function AppContent() {
     setSelectedDestination(newDest);
   };
 
-  // Handle destination deletion from admin panel
+  // Handle destination deletion from admin panel (also handles organizations)
   const handleDestinationDelete = (deletedId) => {
     setDestinations(prev => prev.filter(d => d.id !== deletedId));
+    setVirtualPois(prev => prev.filter(v => v.id !== deletedId));
     if (selectedDestination?.id === deletedId) {
       setSelectedDestination(null);
     }
@@ -503,6 +536,32 @@ function AppContent() {
     setPreviewCoords(null);
   };
 
+  // Start creating a new organization with found POIs
+  const handleStartNewOrganization = (poisInBounds) => {
+    // Clear any existing selection
+    setSelectedDestination(null);
+    setSelectedLinearFeature(null);
+    setNewPOI(null);
+    setPreviewCoords(null);
+
+    // Create temporary organization object with found POIs
+    setNewOrganization({
+      id: 'new-org-temp',
+      name: '',
+      brief_description: '',
+      property_owner: '',
+      more_info_link: '',
+      poi_type: 'virtual',
+      _poisInBounds: poisInBounds,
+      _selectedPoiIds: new Set(poisInBounds.map(p => p.id))
+    });
+  };
+
+  // Cancel new organization creation
+  const handleCancelNewOrganization = () => {
+    setNewOrganization(null);
+  };
+
   // Save new POI
   const handleSaveNewPOI = async (poiData) => {
     try {
@@ -526,6 +585,94 @@ function AppContent() {
       return newDest;
     } catch (err) {
       throw err;
+    }
+  };
+
+  // Save new organization
+  const handleSaveNewOrganization = async (organizationData, selectedPoiIds) => {
+    try {
+      // Create virtual POI
+      const virtualPoiResponse = await fetch('/api/admin/pois', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          name: organizationData.name,
+          brief_description: organizationData.brief_description,
+          property_owner: organizationData.property_owner,
+          more_info_link: organizationData.more_info_link,
+          poi_type: 'virtual',
+          latitude: null,
+          longitude: null
+        })
+      });
+
+      if (!virtualPoiResponse.ok) {
+        const error = await virtualPoiResponse.json();
+        throw new Error(error.error || 'Failed to create organization');
+      }
+
+      const virtualPoi = await virtualPoiResponse.json();
+
+      // Create associations
+      if (selectedPoiIds && selectedPoiIds.length > 0) {
+        const associationsResponse = await fetch('/api/admin/poi-associations/batch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            virtual_poi_id: virtualPoi.id,
+            physical_poi_ids: selectedPoiIds,
+            association_type: 'manages'
+          })
+        });
+
+        if (!associationsResponse.ok) {
+          throw new Error('Failed to create associations');
+        }
+      }
+
+      // Refresh data
+      await refreshAllData();
+
+      setNewOrganization(null);
+      setSelectedDestination(virtualPoi);
+      return virtualPoi;
+    } catch (err) {
+      throw err;
+    }
+  };
+
+  const handleStartDrawingAssociations = (orgId) => {
+    setAddingAssociationsToOrgId(orgId);
+    setIsDrawingAssociations(true);
+  };
+
+  const handleAddAssociationsFromDrawing = async (orgId, poisInBounds) => {
+    try {
+      // Create associations for all POIs found in the rectangle
+      if (poisInBounds && poisInBounds.length > 0) {
+        await fetch('/api/admin/poi-associations/batch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            virtual_poi_id: orgId,
+            physical_poi_ids: poisInBounds.map(p => p.id),
+            association_type: 'manages'
+          })
+        });
+      }
+
+      // Refresh associations data
+      await refreshAllData();
+      setIsDrawingAssociations(false);
+      setAddingAssociationsToOrgId(null);
+    } catch (err) {
+      console.error('Error adding associations:', err);
+      alert('Error adding associations: ' + err.message);
+      setIsDrawingAssociations(false);
+      setAddingAssociationsToOrgId(null);
     }
   };
 
@@ -681,6 +828,7 @@ function AppContent() {
           <ResultsTab
             viewportFilteredDestinations={viewportFilteredDestinations}
             viewportFilteredLinearFeatures={viewportFilteredLinearFeatures}
+            viewportFilteredVirtualPois={viewportFilteredVirtualPois}
             selectedDestination={selectedDestination}
             selectedLinearFeature={selectedLinearFeature}
             onSelectDestination={handleResultsSelectDestination}
@@ -806,6 +954,8 @@ function AppContent() {
           onPreviewCoordsChange={setPreviewCoords}
           newPOI={newPOI}
           onStartNewPOI={handleStartNewPOI}
+          newOrganization={newOrganization}
+          onStartNewOrganization={handleStartNewOrganization}
           linearFeatures={linearFeatures}
           selectedLinearFeature={selectedLinearFeature}
           onSelectLinearFeature={handleSelectLinearFeature}
@@ -838,14 +988,25 @@ function AppContent() {
           onSearchChange={(value) => handleFilterChange('search', value)}
           onNewsRefresh={() => setNewsRefreshTrigger(prev => prev + 1)}
           skipFlyRef={skipNextFlyRef}
+          isDrawingAssociations={isDrawingAssociations}
+          addingAssociationsToOrgId={addingAssociationsToOrgId}
+          onAddAssociationsFromDrawing={handleAddAssociationsFromDrawing}
+          onCancelDrawingAssociations={() => {
+            setIsDrawingAssociations(false);
+            setAddingAssociationsToOrgId(null);
+          }}
         />
 
         <Sidebar
-          destination={newPOI || selectedDestination}
+          destination={newPOI || newOrganization || selectedDestination}
           isNewPOI={!!newPOI}
+          newOrganization={newOrganization}
+          isNewOrganization={!!newOrganization}
           onClose={() => {
             if (newPOI) {
               handleCancelNewPOI();
+            } else if (newOrganization) {
+              handleCancelNewOrganization();
             } else if (selectedLinearFeature) {
               setSelectedLinearFeature(null);
             } else {
@@ -861,6 +1022,8 @@ function AppContent() {
           onDestinationDelete={handleDestinationDelete}
           onSaveNewPOI={handleSaveNewPOI}
           onCancelNewPOI={handleCancelNewPOI}
+          onSaveNewOrganization={handleSaveNewOrganization}
+          onCancelNewOrganization={handleCancelNewOrganization}
           previewCoords={previewCoords}
           onPreviewCoordsChange={setPreviewCoords}
           linearFeature={selectedLinearFeature}
@@ -869,6 +1032,14 @@ function AppContent() {
           onNavigate={handleNavigatePoi}
           currentIndex={currentPoiIndex}
           totalCount={poiNavigationList.length}
+          associations={associations}
+          allDestinations={destinations}
+          allLinearFeatures={linearFeatures}
+          allVirtualPois={virtualPois}
+          onSelectDestination={handleSelectDestination}
+          onSelectLinearFeature={handleSelectLinearFeature}
+          onAssociationsChanged={refreshAllData}
+          onStartDrawingAssociations={handleStartDrawingAssociations}
         />
       </main>
     </div>

@@ -226,13 +226,19 @@ async function initDatabase() {
     `);
 
     // Create unique constraint on (name, poi_type) to allow same-named features of different types
+    // Only applies to non-deleted POIs (partial index) to allow reusing names after deletion
     await client.query(`
       DO $$ BEGIN
-        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'pois_name_poi_type_key') THEN
-          -- Drop old name-only constraint if it exists
-          ALTER TABLE pois DROP CONSTRAINT IF EXISTS pois_name_key;
-          -- Add new constraint
-          ALTER TABLE pois ADD CONSTRAINT pois_name_poi_type_key UNIQUE (name, poi_type);
+        -- Drop old constraint if it exists
+        IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'pois_name_poi_type_key') THEN
+          ALTER TABLE pois DROP CONSTRAINT pois_name_poi_type_key;
+        END IF;
+        -- Drop old name-only constraint if it exists
+        ALTER TABLE pois DROP CONSTRAINT IF EXISTS pois_name_key;
+        -- Create partial unique index that excludes deleted POIs
+        IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'pois_name_poi_type_active_key') THEN
+          CREATE UNIQUE INDEX pois_name_poi_type_active_key ON pois(name, poi_type)
+          WHERE (deleted IS NULL OR deleted = FALSE);
         END IF;
       END $$;
     `);
@@ -614,6 +620,26 @@ async function initDatabase() {
       ALTER TABLE activities DROP COLUMN IF EXISTS icon
     `);
 
+    // POI Associations table - for virtual POIs linking to physical POIs
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS poi_associations (
+        id SERIAL PRIMARY KEY,
+        virtual_poi_id INTEGER NOT NULL REFERENCES pois(id) ON DELETE CASCADE,
+        physical_poi_id INTEGER NOT NULL REFERENCES pois(id) ON DELETE CASCADE,
+        association_type VARCHAR(50) DEFAULT 'manages',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(virtual_poi_id, physical_poi_id)
+      )
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_poi_assoc_virtual ON poi_associations(virtual_poi_id)
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_poi_assoc_physical ON poi_associations(physical_poi_id)
+    `);
+
     // NOTE: Trails and rivers should only be imported via Google Sheets sync
     // The importGeoJSONFeatures function is available via admin route for manual import if needed
 
@@ -626,8 +652,9 @@ async function initDatabase() {
 // API Routes - Unified POIs
 app.get('/api/pois', async (req, res) => {
   try {
-    // Get all POIs (points, trails, rivers) - exclude image_data (large binary)
-    const result = await pool.query(`
+    const { type } = req.query;
+
+    let query = `
       SELECT id, name, poi_type, latitude, longitude, geometry, geometry_drive_file_id,
              property_owner, brief_description, era, historical_description,
              primary_activities, surface, pets, cell_signal, more_info_link,
@@ -636,8 +663,17 @@ app.get('/api/pois', async (req, res) => {
              locally_modified, deleted, synced, created_at, updated_at
       FROM pois
       WHERE (deleted IS NULL OR deleted = FALSE)
-      ORDER BY poi_type, name
-    `);
+    `;
+
+    const params = [];
+    if (type) {
+      params.push(type);
+      query += ` AND poi_type = $1`;
+    }
+
+    query += ` ORDER BY poi_type, name`;
+
+    const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching POIs:', error);
@@ -807,6 +843,93 @@ app.get('/api/filters', async (req, res) => {
   } catch (error) {
     console.error('Error fetching filters:', error);
     res.status(500).json({ error: 'Failed to fetch filters' });
+  }
+});
+
+// POI Associations endpoints
+app.get('/api/pois/:id/associations', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(`
+      SELECT a.id, a.virtual_poi_id, a.physical_poi_id, a.association_type,
+             vp.name as virtual_poi_name, vp.poi_type as virtual_poi_type,
+             pp.name as physical_poi_name, pp.poi_type as physical_poi_type,
+             a.created_at, a.updated_at
+      FROM poi_associations a
+      LEFT JOIN pois vp ON a.virtual_poi_id = vp.id
+      LEFT JOIN pois pp ON a.physical_poi_id = pp.id
+      WHERE (a.virtual_poi_id = $1 OR a.physical_poi_id = $1)
+        AND (vp.deleted IS NULL OR vp.deleted = FALSE)
+        AND (pp.deleted IS NULL OR pp.deleted = FALSE)
+      ORDER BY a.created_at DESC
+    `, [id]);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching POI associations:', error);
+    res.status(500).json({ error: 'Failed to fetch associations' });
+  }
+});
+
+// Get all associations (for frontend state management)
+app.get('/api/associations', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT a.id, a.virtual_poi_id, a.physical_poi_id, a.association_type,
+             a.created_at, a.updated_at
+      FROM poi_associations a
+      JOIN pois vp ON a.virtual_poi_id = vp.id
+      JOIN pois pp ON a.physical_poi_id = pp.id
+      WHERE (vp.deleted IS NULL OR vp.deleted = FALSE)
+        AND (pp.deleted IS NULL OR pp.deleted = FALSE)
+      ORDER BY a.virtual_poi_id, a.physical_poi_id
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching all associations:', error);
+    res.status(500).json({ error: 'Failed to fetch associations' });
+  }
+});
+
+// Get virtual POIs that have associated physical POIs within viewport bounds
+app.get('/api/pois/virtual-in-viewport', async (req, res) => {
+  try {
+    const { bounds } = req.query;
+
+    if (!bounds) {
+      return res.status(400).json({ error: 'bounds parameter required (format: s,w,n,e)' });
+    }
+
+    const [south, west, north, east] = bounds.split(',').map(parseFloat);
+
+    if ([south, west, north, east].some(isNaN)) {
+      return res.status(400).json({ error: 'Invalid bounds format' });
+    }
+
+    // Find virtual POIs that have at least one associated physical POI within bounds
+    const result = await pool.query(`
+      SELECT DISTINCT vp.id, vp.name, vp.poi_type, vp.property_owner,
+             vp.brief_description, vp.era, vp.historical_description,
+             vp.primary_activities, vp.surface, vp.pets, vp.cell_signal,
+             vp.more_info_link, vp.image_mime_type, vp.image_drive_file_id,
+             vp.locally_modified, vp.deleted, vp.synced,
+             vp.created_at, vp.updated_at
+      FROM pois vp
+      JOIN poi_associations a ON vp.id = a.virtual_poi_id
+      JOIN pois pp ON a.physical_poi_id = pp.id
+      WHERE vp.poi_type = 'virtual'
+        AND (vp.deleted IS NULL OR vp.deleted = FALSE)
+        AND (pp.deleted IS NULL OR pp.deleted = FALSE)
+        AND pp.latitude IS NOT NULL
+        AND pp.longitude IS NOT NULL
+        AND pp.latitude BETWEEN $1 AND $3
+        AND pp.longitude BETWEEN $2 AND $4
+      ORDER BY vp.name
+    `, [south, west, north, east]);
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching virtual POIs in viewport:', error);
+    res.status(500).json({ error: 'Failed to fetch virtual POIs' });
   }
 });
 
