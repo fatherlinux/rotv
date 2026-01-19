@@ -297,8 +297,18 @@ END:VCALENDAR`;
               aspectRatio={mapState.aspectRatio || 1.5}
               visibleDestinations={filteredDestinations}
               onClick={onMapClick}
-              poiCount={filteredDestinations?.length || 0}
+              poiCount={(filteredDestinations?.length || 0) + (filteredLinearFeatures?.length || 0)}
             />
+            <div className="event-legend">
+              <div className="event-legend-title">Event Types</div>
+              <div className="event-legend-items">
+                <span className="event-legend-item"><span className="event-type-icon guided-tour">T</span> Tour</span>
+                <span className="event-legend-item"><span className="event-type-icon program">P</span> Program</span>
+                <span className="event-legend-item"><span className="event-type-icon festival">F</span> Festival</span>
+                <span className="event-legend-item"><span className="event-type-icon volunteer">V</span> Volunteer</span>
+                <span className="event-legend-item"><span className="event-type-icon educational">E</span> Educational</span>
+              </div>
+            </div>
           </div>
         )}
       </div>

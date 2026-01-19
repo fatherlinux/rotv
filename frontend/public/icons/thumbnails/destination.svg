@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
+  <defs>
+    <linearGradient id="destBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#e8f5e9"/>
+      <stop offset="100%" style="stop-color:#c8e6c9"/>
+    </linearGradient>
+  </defs>
+  <!-- Background -->
+  <rect width="120" height="120" fill="url(#destBg)" rx="8"/>
+  <!-- Mountains -->
+  <path d="M0 90 L30 50 L45 65 L70 35 L95 70 L120 45 L120 120 L0 120 Z" fill="#81c784" opacity="0.6"/>
+  <path d="M0 100 L40 60 L60 80 L90 55 L120 85 L120 120 L0 120 Z" fill="#66bb6a" opacity="0.8"/>
+  <!-- Location pin -->
+  <g transform="translate(60, 55)">
+    <path d="M0 -25 C-12 -25 -20 -15 -20 -5 C-20 10 0 30 0 30 C0 30 20 10 20 -5 C20 -15 12 -25 0 -25 Z" fill="#2e7d32"/>
+    <circle cx="0" cy="-7" r="8" fill="#fff"/>
+  </g>
+  <!-- Trees -->
+  <path d="M15 95 L20 80 L25 95 Z" fill="#388e3c"/>
+  <path d="M100 90 L105 75 L110 90 Z" fill="#388e3c"/>
+</svg>

@@ -206,16 +206,20 @@ function EditableCellSignal({ level, onChange }) {
 
 // Read-only view component - works for both destinations and linear features
 function ReadOnlyView({ destination, isLinearFeature, isAdmin, showImage = true, onShare }) {
-  // Cache-bust image URL using updated_at timestamp
-  const imageEndpoint = isLinearFeature ? 'linear-features' : 'destinations';
+  // Use thumbnail service for faster loading
   const imageUrl = destination.image_mime_type
-    ? `/api/${imageEndpoint}/${destination.id}/image?v=${new Date(destination.updated_at).getTime() || Date.now()}`
+    ? `/api/pois/${destination.id}/thumbnail?size=medium`
     : null;
 
-  // Determine placeholder icon based on type
-  const placeholderIcon = isLinearFeature
-    ? (destination.feature_type === 'river' ? '🌊' : '🥾')
-    : '🏞️';
+  // Get default thumbnail SVG path based on type
+  const getDefaultThumbnail = () => {
+    if (isLinearFeature) {
+      if (destination.feature_type === 'river') return '/icons/thumbnails/river.svg';
+      if (destination.feature_type === 'boundary') return '/icons/thumbnails/boundary.svg';
+      return '/icons/thumbnails/trail.svg';
+    }
+    return '/icons/thumbnails/destination.svg';
+  };
 
   return (
     <div className="view-container">
@@ -226,30 +230,23 @@ function ReadOnlyView({ destination, isLinearFeature, isAdmin, showImage = true,
             {imageUrl ? (
               <img src={imageUrl} alt={destination.name} />
             ) : (
-              <div className="image-placeholder">
-                <span className="placeholder-icon">{placeholderIcon}</span>
-                <span className="placeholder-text">Image coming soon</span>
-              </div>
+              <img src={getDefaultThumbnail()} alt={destination.name} className="default-thumbnail" />
             )}
           </div>
         )}
 
         <div className="sidebar-content">
         <div className="badges-row">
-          {/* Linear feature type badge */}
-          {isLinearFeature && (
-            <span className={`feature-type-badge ${destination.feature_type}`}>
-              {destination.feature_type === 'river' ? 'River/Waterway' :
+          {/* POI type badge - shows for all POI types */}
+          {isLinearFeature ? (
+            <span className={`poi-type-badge ${destination.feature_type}`}>
+              {destination.feature_type === 'river' ? 'River' :
                destination.feature_type === 'boundary' ? 'Boundary' : 'Trail'}
             </span>
-          )}
-          {/* Boundary color swatch */}
-          {isLinearFeature && destination.feature_type === 'boundary' && destination.boundary_color && (
-            <span
-              className="boundary-color-swatch"
-              style={{ backgroundColor: destination.boundary_color }}
-              title={`Color: ${destination.boundary_color}`}
-            />
+          ) : (
+            <span className="poi-type-badge destination">
+              Destination
+            </span>
           )}
           {/* Difficulty badge for trails */}
           {isLinearFeature && destination.difficulty && (
@@ -609,12 +606,14 @@ function EditView({ destination, editedData, setEditedData, onSave, onCancel, on
           />
         ) : (
           <div className="sidebar-image">
-            <div className="image-placeholder">
-              <span className="placeholder-icon">
-                {isLinearFeature ? (destination?.feature_type === 'river' ? '🌊' : '🥾') : '🏞️'}
-              </span>
-              <span className="placeholder-text">{isNewPOI ? 'Add image after creation' : 'No image'}</span>
-            </div>
+            {(() => {
+              const thumbUrl = isLinearFeature
+                ? (destination?.feature_type === 'river' ? '/icons/thumbnails/river.svg'
+                  : destination?.feature_type === 'boundary' ? '/icons/thumbnails/boundary.svg'
+                  : '/icons/thumbnails/trail.svg')
+                : '/icons/thumbnails/destination.svg';
+              return <img src={thumbUrl} alt={destination?.name || 'New POI'} className="default-thumbnail" />;
+            })()}
           </div>
         )
       )}
@@ -1235,13 +1234,55 @@ function PoiEvents({ poiId, isAdmin, editMode }) {
   );
 }
 
-function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinationUpdate, onDestinationDelete, onSaveNewPOI, onCancelNewPOI, previewCoords, onPreviewCoordsChange, linearFeature, onLinearFeatureUpdate, onLinearFeatureDelete }) {
+function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinationUpdate, onDestinationDelete, onSaveNewPOI, onCancelNewPOI, previewCoords, onPreviewCoordsChange, linearFeature, onLinearFeatureUpdate, onLinearFeatureDelete, onNavigate, currentIndex, totalCount }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editedData, setEditedData] = useState({});
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [sidebarTab, setSidebarTab] = useState('view');
   const [showShareModal, setShowShareModal] = useState(false);
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+
+  // Touch/swipe handling for mobile navigation
+  const touchStartX = React.useRef(null);
+  const touchStartY = React.useRef(null);
+
+  // Check for mobile on resize
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Swipe gesture handlers
+  const handleTouchStart = (e) => {
+    touchStartX.current = e.touches[0].clientX;
+    touchStartY.current = e.touches[0].clientY;
+  };
+
+  const handleTouchEnd = (e) => {
+    if (touchStartX.current === null || touchStartY.current === null) return;
+    if (!onNavigate) return;
+
+    const touchEndX = e.changedTouches[0].clientX;
+    const touchEndY = e.changedTouches[0].clientY;
+    const deltaX = touchEndX - touchStartX.current;
+    const deltaY = touchEndY - touchStartY.current;
+
+    // Only trigger swipe if horizontal movement is greater than vertical
+    // and the swipe distance is significant (> 50px)
+    const minSwipeDistance = 50;
+    if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > minSwipeDistance) {
+      if (deltaX > 0) {
+        onNavigate('prev');
+      } else {
+        onNavigate('next');
+      }
+    }
+
+    touchStartX.current = null;
+    touchStartY.current = null;
+  };
 
   // Determine what we're displaying
   const displayItem = linearFeature || destination;
@@ -1414,19 +1455,35 @@ function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinat
 
   // Render linear feature view - use same components as destinations with tabs
   if (isLinearFeature) {
-    // Compute image URL for linear feature
+    // Use thumbnail service for faster loading
     const linearImageUrl = linearFeature?.image_mime_type
-      ? `/api/linear-features/${linearFeature.id}/image?v=${new Date(linearFeature.updated_at).getTime() || Date.now()}`
+      ? `/api/pois/${linearFeature.id}/thumbnail?size=medium`
       : null;
 
-    // Determine placeholder icon based on type
-    const placeholderIcon = linearFeature.feature_type === 'river' ? '🌊' :
-                            linearFeature.feature_type === 'boundary' ? '🗺️' : '🥾';
+    // Get default thumbnail SVG path based on type
+    const getLinearDefaultThumbnail = () => {
+      if (linearFeature.feature_type === 'river') return '/icons/thumbnails/river.svg';
+      if (linearFeature.feature_type === 'boundary') return '/icons/thumbnails/boundary.svg';
+      return '/icons/thumbnails/trail.svg';
+    };
 
     return (
-      <div className={`sidebar open ${isEditing ? 'editing' : ''}`}>
+      <div
+        className={`sidebar open ${isEditing ? 'editing' : ''}`}
+        onTouchStart={isMobile && onNavigate ? handleTouchStart : undefined}
+        onTouchEnd={isMobile && onNavigate ? handleTouchEnd : undefined}
+      >
+        {/* Mobile navigation bar - above header so it doesn't move when title wraps */}
+        {isMobile && onNavigate && totalCount > 0 && (
+          <div className="sidebar-navigation-bar">
+            <button className="sidebar-nav-btn" onClick={() => onNavigate('prev')}>← Prev</button>
+            <span className="sidebar-nav-position">{currentIndex + 1} of {totalCount}</span>
+            <button className="sidebar-nav-btn" onClick={() => onNavigate('next')}>Next →</button>
+          </div>
+        )}
+
         <div className="sidebar-header">
-          <h2>{isEditing ? 'Edit: ' : ''}{linearFeature.name}</h2>
+          <h2 title={linearFeature.name}>{isEditing ? 'Edit: ' : ''}{linearFeature.name}</h2>
           <div className="header-buttons">
             <button className="close-btn" onClick={onClose}>&times;</button>
           </div>
@@ -1454,10 +1511,7 @@ function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinat
             {linearImageUrl ? (
               <img src={linearImageUrl} alt={linearFeature?.name} />
             ) : (
-              <div className="image-placeholder">
-                <span className="placeholder-icon">{placeholderIcon}</span>
-                <span className="placeholder-text">Image coming soon</span>
-              </div>
+              <img src={getLinearDefaultThumbnail()} alt={linearFeature?.name} className="default-thumbnail" />
             )}
           </div>
         )}
@@ -1563,16 +1617,29 @@ function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinat
     );
   }
 
-  // Compute image URL for destination
+  // Use thumbnail service for faster loading
   const imageUrl = destination?.image_mime_type
-    ? `/api/destinations/${destination.id}/image?v=${new Date(destination.updated_at).getTime() || Date.now()}`
+    ? `/api/pois/${destination.id}/thumbnail?size=medium`
     : null;
 
   // Render destination view with tabs
   return (
-    <div className={`sidebar ${destination ? 'open' : ''} ${isEditing ? 'editing' : ''}`}>
+    <div
+      className={`sidebar ${destination ? 'open' : ''} ${isEditing ? 'editing' : ''}`}
+      onTouchStart={isMobile && onNavigate ? handleTouchStart : undefined}
+      onTouchEnd={isMobile && onNavigate ? handleTouchEnd : undefined}
+    >
+      {/* Mobile navigation bar - above header so it doesn't move when title wraps */}
+      {isMobile && onNavigate && totalCount > 0 && (
+        <div className="sidebar-navigation-bar">
+          <button className="sidebar-nav-btn" onClick={() => onNavigate('prev')}>← Prev</button>
+          <span className="sidebar-nav-position">{currentIndex + 1} of {totalCount}</span>
+          <button className="sidebar-nav-btn" onClick={() => onNavigate('next')}>Next →</button>
+        </div>
+      )}
+
       <div className="sidebar-header">
-        <h2>{isEditing ? 'Edit: ' : ''}{destination?.name || 'Location Details'}</h2>
+        <h2 title={destination?.name || 'Location Details'}>{isEditing ? 'Edit: ' : ''}{destination?.name || 'Location Details'}</h2>
         <div className="header-buttons">
           <button className="close-btn" onClick={onClose}>&times;</button>
         </div>
@@ -1599,10 +1666,7 @@ function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinat
           {imageUrl ? (
             <img src={imageUrl} alt={destination?.name} />
           ) : (
-            <div className="image-placeholder">
-              <span className="placeholder-icon">🏞️</span>
-              <span className="placeholder-text">Image coming soon</span>
-            </div>
+            <img src="/icons/thumbnails/destination.svg" alt={destination?.name} className="default-thumbnail" />
           )}
         </div>
       )}

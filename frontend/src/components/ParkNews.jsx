@@ -210,8 +210,18 @@ function ParkNews({ isAdmin, onSelectPoi, filteredDestinations, filteredLinearFe
               aspectRatio={mapState.aspectRatio || 1.5}
               visibleDestinations={filteredDestinations}
               onClick={onMapClick}
-              poiCount={filteredDestinations?.length || 0}
+              poiCount={(filteredDestinations?.length || 0) + (filteredLinearFeatures?.length || 0)}
             />
+            <div className="event-legend">
+              <div className="event-legend-title">News Types</div>
+              <div className="event-legend-items">
+                <span className="event-legend-item"><span className="news-type-icon closure">X</span> Closure</span>
+                <span className="event-legend-item"><span className="news-type-icon seasonal">S</span> Seasonal</span>
+                <span className="event-legend-item"><span className="news-type-icon maintenance">W</span> Maintenance</span>
+                <span className="event-legend-item"><span className="news-type-icon wildlife">A</span> Wildlife</span>
+                <span className="event-legend-item"><span className="news-type-icon general">N</span> General</span>
+              </div>
+            </div>
           </div>
         )}
       </div>

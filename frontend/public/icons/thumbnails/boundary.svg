@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
+  <defs>
+    <linearGradient id="boundBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f3e5f5"/>
+      <stop offset="100%" style="stop-color:#e1bee7"/>
+    </linearGradient>
+    <pattern id="gridPattern" width="20" height="20" patternUnits="userSpaceOnUse">
+      <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#ce93d8" stroke-width="0.5" opacity="0.5"/>
+    </pattern>
+  </defs>
+  <!-- Background -->
+  <rect width="120" height="120" fill="url(#boundBg)" rx="8"/>
+  <!-- Grid pattern -->
+  <rect x="10" y="10" width="100" height="100" fill="url(#gridPattern)"/>
+  <!-- Park boundary shape -->
+  <path d="M25 30 L45 20 L75 25 L95 40 L90 70 L80 90 L50 95 L25 80 L20 55 Z"
+        fill="#ce93d8" fill-opacity="0.3"
+        stroke="#7b1fa2" stroke-width="3" stroke-dasharray="8 4"/>
+  <!-- Interior features -->
+  <circle cx="55" cy="55" r="5" fill="#7b1fa2" opacity="0.6"/>
+  <circle cx="40" cy="45" r="3" fill="#7b1fa2" opacity="0.4"/>
+  <circle cx="70" cy="65" r="3" fill="#7b1fa2" opacity="0.4"/>
+  <circle cx="60" cy="75" r="2" fill="#7b1fa2" opacity="0.4"/>
+  <!-- Compass rose -->
+  <g transform="translate(100, 20) scale(0.6)">
+    <circle cx="0" cy="0" r="12" fill="#fff" stroke="#7b1fa2" stroke-width="1"/>
+    <path d="M0 -10 L2 -2 L0 0 L-2 -2 Z" fill="#7b1fa2"/>
+    <path d="M0 10 L2 2 L0 0 L-2 2 Z" fill="#9c27b0" opacity="0.5"/>
+    <path d="M10 0 L2 -2 L0 0 L2 2 Z" fill="#9c27b0" opacity="0.5"/>
+    <path d="M-10 0 L-2 -2 L0 0 L-2 2 Z" fill="#9c27b0" opacity="0.5"/>
+    <text x="0" y="-14" text-anchor="middle" font-size="6" fill="#7b1fa2" font-weight="bold">N</text>
+  </g>
+  <!-- Scale bar -->
+  <g transform="translate(15, 105)">
+    <rect x="0" y="0" width="30" height="3" fill="#7b1fa2"/>
+    <rect x="0" y="0" width="15" height="3" fill="#fff"/>
+    <line x1="0" y1="-2" x2="0" y2="5" stroke="#7b1fa2" stroke-width="1"/>
+    <line x1="15" y1="-2" x2="15" y2="5" stroke="#7b1fa2" stroke-width="1"/>
+    <line x1="30" y1="-2" x2="30" y2="5" stroke="#7b1fa2" stroke-width="1"/>
+  </g>
+</svg>

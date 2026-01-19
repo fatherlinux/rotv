@@ -2072,6 +2072,9 @@ export function createAdminRouter(pool) {
         [req.file.buffer, req.file.mimetype, id]
       );
 
+      // Invalidate thumbnail cache for this POI
+      await pool.query('DELETE FROM thumbnail_cache WHERE poi_id = $1', [id]);
+
       // Also upload to Drive for backup (if user has OAuth credentials)
       let driveFileId = null;
       if (req.user.oauth_credentials) {
@@ -2468,6 +2471,9 @@ export function createAdminRouter(pool) {
       if (result.rows.length === 0) {
         return res.status(404).json({ error: 'Linear feature not found' });
       }
+
+      // Invalidate thumbnail cache for this POI
+      await pool.query('DELETE FROM thumbnail_cache WHERE poi_id = $1', [id]);
 
       console.log(`Admin ${req.user.email} uploaded image for linear feature ${id}`);
       res.json({

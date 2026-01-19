@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { AuthProvider } from './contexts/AuthContext';
 import { useAuth } from './hooks/useAuth';
 import Map from './components/Map';
@@ -12,6 +12,7 @@ import IconsSettings from './components/IconsSettings';
 import ParkNews from './components/ParkNews';
 import ParkEvents from './components/ParkEvents';
 import NewsSettings from './components/NewsSettings';
+import ResultsTab from './components/ResultsTab';
 
 // Default icon type IDs for initializing the filter
 const DEFAULT_ICON_TYPES = new Set(['visitor-center', 'waterfall', 'trail', 'historic', 'bridge', 'train', 'nature', 'skiing', 'biking', 'picnic', 'camping', 'music', 'default', 'lighthouse']);
@@ -256,12 +257,25 @@ function AppContent() {
   }, [destinations, visiblePoiIds]);
 
   // Compute linear features filtered by map viewport visibility (for News/Events tabs)
-  const viewportFilteredLinearFeatures = React.useMemo(() => {
+  const viewportFilteredLinearFeatures = useMemo(() => {
     if (!visiblePoiIds || visiblePoiIds.length === 0) return [];
 
     const visibleIdSet = new Set(visiblePoiIds);
     return linearFeatures.filter(feature => visibleIdSet.has(feature.id));
   }, [linearFeatures, visiblePoiIds]);
+
+  // Navigation state for Results tab swipe navigation
+  const [currentPoiIndex, setCurrentPoiIndex] = useState(-1);
+
+  // Ref to skip map fly animation on next selection (for Results/sidebar clicks)
+  const skipNextFlyRef = useRef(false);
+
+  // Combined navigation list (destinations + linear features, sorted alphabetically)
+  const poiNavigationList = useMemo(() => {
+    const dests = (viewportFilteredDestinations || []).map(d => ({ ...d, _isLinear: false }));
+    const linear = (viewportFilteredLinearFeatures || []).map(f => ({ ...f, _isLinear: true }));
+    return [...dests, ...linear].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  }, [viewportFilteredDestinations, viewportFilteredLinearFeatures]);
 
   // Apply filters when activeFilters change
   useEffect(() => {
@@ -350,7 +364,27 @@ function AppContent() {
     updateUrlWithPoi(feature?.name);
     // Update document title for sharing
     document.title = feature ? `${feature.name} | Roots of The Valley` : 'Roots of The Valley';
-  }, [updateUrlWithPoi]);
+    // Sync navigation index
+    if (feature) {
+      const index = poiNavigationList.findIndex(p => p._isLinear && p.id === feature.id);
+      setCurrentPoiIndex(index);
+      // Auto-enable the layer for the selected feature type so it's visible on the map
+      if (feature.feature_type === 'boundary') {
+        setVisibleBoundaries(prev => {
+          if (prev.has(feature.id)) return prev;
+          const next = new Set(prev);
+          next.add(feature.id);
+          return next;
+        });
+      } else if (feature.feature_type === 'trail') {
+        setShowTrails(true);
+      } else if (feature.feature_type === 'river') {
+        setShowRivers(true);
+      }
+    } else {
+      setCurrentPoiIndex(-1);
+    }
+  }, [updateUrlWithPoi, poiNavigationList]);
 
   // Handle destination selection (clears linear feature selection) - wrapped in useCallback for stable reference
   const handleSelectDestination = useCallback((destination) => {
@@ -359,7 +393,68 @@ function AppContent() {
     updateUrlWithPoi(destination?.name);
     // Update document title for sharing
     document.title = destination ? `${destination.name} | Roots of The Valley` : 'Roots of The Valley';
-  }, [updateUrlWithPoi]);
+    // Sync navigation index
+    if (destination) {
+      const index = poiNavigationList.findIndex(p => !p._isLinear && p.id === destination.id);
+      setCurrentPoiIndex(index);
+    } else {
+      setCurrentPoiIndex(-1);
+    }
+  }, [updateUrlWithPoi, poiNavigationList]);
+
+  // Navigate to next/prev POI in the list
+  const handleNavigatePoi = useCallback((direction) => {
+    if (poiNavigationList.length === 0) return;
+
+    let newIndex;
+    if (currentPoiIndex === -1) {
+      // No current selection, start from beginning or end
+      newIndex = direction === 'next' ? 0 : poiNavigationList.length - 1;
+    } else {
+      // Calculate new index with wrapping
+      newIndex = currentPoiIndex + (direction === 'next' ? 1 : -1);
+      if (newIndex < 0) newIndex = poiNavigationList.length - 1;
+      if (newIndex >= poiNavigationList.length) newIndex = 0;
+    }
+
+    const poi = poiNavigationList[newIndex];
+    if (poi) {
+      if (poi._isLinear) {
+        setSelectedDestination(null);
+        setNewPOI(null);
+        setPreviewCoords(null);
+        setSelectedLinearFeature(poi);
+        updateUrlWithPoi(poi.name);
+        document.title = `${poi.name} | Roots of The Valley`;
+      } else {
+        setSelectedLinearFeature(null);
+        setSelectedDestination(poi);
+        updateUrlWithPoi(poi.name);
+        document.title = `${poi.name} | Roots of The Valley`;
+      }
+      setCurrentPoiIndex(newIndex);
+    }
+  }, [poiNavigationList, currentPoiIndex, updateUrlWithPoi]);
+
+  // Stable callbacks for ResultsTab - select POI, only switch to view tab on desktop
+  // Skip fly animation when selecting from Results to preserve map view
+  const handleResultsSelectDestination = useCallback((poi) => {
+    skipNextFlyRef.current = true; // Don't fly to POI - preserve current map view
+    handleSelectDestination(poi);
+    // On mobile (< 768px), stay on Results tab for swipe navigation
+    if (window.innerWidth >= 768) {
+      setActiveTab('view');
+    }
+  }, [handleSelectDestination]);
+
+  const handleResultsSelectLinearFeature = useCallback((poi) => {
+    skipNextFlyRef.current = true; // Don't fly to POI - preserve current map view
+    handleSelectLinearFeature(poi);
+    // On mobile (< 768px), stay on Results tab for swipe navigation
+    if (window.innerWidth >= 768) {
+      setActiveTab('view');
+    }
+  }, [handleSelectLinearFeature]);
 
   // Handle linear feature update - merge instead of replace to preserve geometry
   const handleLinearFeatureUpdate = (updatedFeature) => {
@@ -467,14 +562,12 @@ function AppContent() {
           >
             View
           </button>
-          {isAdmin && (
-            <button
-              className={`tab-btn ${activeTab === 'edit' ? 'active' : ''}`}
-              onClick={() => setActiveTab('edit')}
-            >
-              Edit
-            </button>
-          )}
+          <button
+            className={`tab-btn ${activeTab === 'results' ? 'active' : ''}`}
+            onClick={() => setActiveTab('results')}
+          >
+            Results
+          </button>
           <button
             className={`tab-btn ${activeTab === 'news' ? 'active' : ''}`}
             onClick={() => setActiveTab('news')}
@@ -487,6 +580,14 @@ function AppContent() {
           >
             Events
           </button>
+          {isAdmin && (
+            <button
+              className={`tab-btn ${activeTab === 'edit' ? 'active' : ''}`}
+              onClick={() => setActiveTab('edit')}
+            >
+              Edit
+            </button>
+          )}
           {isAdmin && (
             <button
               className={`tab-btn ${activeTab === 'settings' ? 'active' : ''}`}
@@ -574,8 +675,24 @@ function AppContent() {
         </nav>
       </header>
 
+      {/* Results tab content - only render when active to avoid processing 300+ tiles on every re-render */}
+      {activeTab === 'results' && (
+        <main className="main-content-full">
+          <ResultsTab
+            viewportFilteredDestinations={viewportFilteredDestinations}
+            viewportFilteredLinearFeatures={viewportFilteredLinearFeatures}
+            selectedDestination={selectedDestination}
+            selectedLinearFeature={selectedLinearFeature}
+            onSelectDestination={handleResultsSelectDestination}
+            onSelectLinearFeature={handleResultsSelectLinearFeature}
+            mapState={mapState}
+            onMapClick={() => setActiveTab('view')}
+          />
+        </main>
+      )}
+
       {/* News tab content */}
-      <main className="main-content-full" style={{ display: activeTab === 'news' ? 'flex' : 'none' }}>
+      <main className="main-content-full" style={{ display: activeTab === 'news' ? 'flex' : 'none', flexDirection: 'column' }}>
         <ParkNews
           isAdmin={isAdmin}
           filteredDestinations={viewportFilteredDestinations}
@@ -595,7 +712,7 @@ function AppContent() {
       </main>
 
       {/* Events tab content */}
-      <main className="main-content-full" style={{ display: activeTab === 'events' ? 'flex' : 'none' }}>
+      <main className="main-content-full" style={{ display: activeTab === 'events' ? 'flex' : 'none', flexDirection: 'column' }}>
         <ParkEvents
           isAdmin={isAdmin}
           filteredDestinations={viewportFilteredDestinations}
@@ -720,6 +837,7 @@ function AppContent() {
           searchQuery={activeFilters.search}
           onSearchChange={(value) => handleFilterChange('search', value)}
           onNewsRefresh={() => setNewsRefreshTrigger(prev => prev + 1)}
+          skipFlyRef={skipNextFlyRef}
         />
 
         <Sidebar
@@ -735,6 +853,7 @@ function AppContent() {
             }
             updateUrlWithPoi(null); // Clear POI from URL
             document.title = 'Roots of The Valley'; // Reset title
+            setCurrentPoiIndex(-1); // Reset navigation index
           }}
           isAdmin={isAdmin}
           editMode={editMode}
@@ -747,6 +866,9 @@ function AppContent() {
           linearFeature={selectedLinearFeature}
           onLinearFeatureUpdate={handleLinearFeatureUpdate}
           onLinearFeatureDelete={handleLinearFeatureDelete}
+          onNavigate={handleNavigatePoi}
+          currentIndex={currentPoiIndex}
+          totalCount={poiNavigationList.length}
         />
       </main>
     </div>
