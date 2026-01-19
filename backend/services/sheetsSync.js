@@ -24,9 +24,9 @@ const ERAS_SHEET_NAME = 'Eras';
 const SURFACES_SHEET_NAME = 'Surfaces';
 const ICONS_SHEET_NAME = 'Icons';
 const INTEGRATION_SHEET_NAME = 'Google Integration';
-const LINEAR_FEATURES_SHEET_NAME = 'Trails & Rivers';
 const NEWS_SHEET_NAME = 'News';
 const EVENTS_SHEET_NAME = 'Events';
+const POI_ASSOCIATIONS_SHEET_NAME = 'Associations';
 
 // Concurrency limit for parallel Google API calls (Google allows ~10/sec per user)
 const PARALLEL_BATCH_SIZE = 5;
@@ -158,6 +158,17 @@ const EVENTS_COLUMNS = {
 // Headers for the events spreadsheet
 const EVENTS_HEADERS = ['ID', 'POI ID', 'POI Name', 'Title', 'Description', 'Start Date', 'End Date', 'Event Type', 'Location Details', 'Source URL'];
 
+// Column mapping for the POI associations spreadsheet
+const POI_ASSOCIATIONS_COLUMNS = {
+  id: 0,
+  virtual_poi_name: 1,
+  physical_poi_name: 2,
+  association_type: 3
+};
+
+// Headers for the POI associations spreadsheet
+const POI_ASSOCIATIONS_HEADERS = ['ID', 'Organization Name', 'Associated Location Name', 'Association Type'];
+
 // Column mapping for the integration settings spreadsheet
 const INTEGRATION_COLUMNS = {
   setting: 0,
@@ -167,33 +178,6 @@ const INTEGRATION_COLUMNS = {
 
 // Headers for the integration settings spreadsheet
 const INTEGRATION_HEADERS = ['Setting', 'Value', 'Updated At'];
-
-// Column mapping for the linear features (trails & rivers) spreadsheet
-const LINEAR_FEATURES_COLUMNS = {
-  name: 0,
-  feature_type: 1,
-  property_owner: 2,
-  brief_description: 3,
-  era: 4,
-  historical_description: 5,
-  primary_activities: 6,
-  surface: 7,
-  pets: 8,
-  cell_signal: 9,
-  more_info_link: 10,
-  length_miles: 11,
-  difficulty: 12,
-  image_drive_file_id: 13,
-  boundary_color: 14
-};
-
-// Headers for the linear features spreadsheet
-// Note: geometry not synced to sheets (too large), stored in database only
-const LINEAR_FEATURES_HEADERS = [
-  'Name', 'Type', 'Property Owner', 'Brief Description', 'Era', 'Historical Description',
-  'Primary Activities', 'Surface', 'Pets', 'Cell Signal', 'More Info Link',
-  'Length (miles)', 'Difficulty', 'Image Drive File ID', 'Boundary Color'
-];
 
 /**
  * Create an OAuth2 client with proper credentials
@@ -713,9 +697,13 @@ function formatCellSignal(level) {
  * Supports both point POIs (lat/long) and linear POIs (trails/rivers)
  */
 function rowToPOI(row) {
+  // Map user-friendly "organization" back to internal "virtual" type
+  const rawType = row[COLUMNS.poi_type] || 'point';
+  const internalType = rawType.toLowerCase() === 'organization' ? 'virtual' : rawType;
+
   return {
     name: row[COLUMNS.name] || '',
-    poi_type: row[COLUMNS.poi_type] || 'point',
+    poi_type: internalType,
     latitude: parseCoordinate(row[COLUMNS.latitude], 'lat'),
     longitude: parseCoordinate(row[COLUMNS.longitude], 'lng'),
     property_owner: row[COLUMNS.property_owner] || null,
@@ -740,9 +728,12 @@ function rowToPOI(row) {
  * Supports both point POIs (lat/long) and linear POIs (trails/rivers)
  */
 function poiToRow(poi) {
+  // Map internal "virtual" type to user-friendly "organization" for spreadsheet
+  const displayType = poi.poi_type === 'virtual' ? 'organization' : (poi.poi_type || 'point');
+
   return [
     poi.name || '',
-    poi.poi_type || 'point',
+    displayType,
     formatCoordinate(poi.latitude, 'lat'),
     formatCoordinate(poi.longitude, 'lng'),
     poi.property_owner || '',
@@ -995,9 +986,10 @@ export async function pushAllToSheets(sheets, pool, drive = null) {
     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
   `, [new Date().toISOString()]);
 
-  // Also push News and Events sheets
+  // Also push News, Events, and Associations sheets
   await pushNewsToSheets(sheets, pool);
   await pushEventsToSheets(sheets, pool);
+  await pushAssociationsToSheets(sheets, pool);
 
   // Clear the sync queue since all data has been pushed
   await pool.query('DELETE FROM sync_queue');
@@ -1018,12 +1010,14 @@ export async function pullAllFromSheets(sheets, pool, drive = null) {
 
   const pois = await readPOIs(sheets, spreadsheetId, APP_SHEET_NAME);
 
-  // Separate point POIs from linear POIs
+  // Separate point POIs from linear POIs and virtual POIs
   const pointPOIs = pois.filter(p => p.poi_type === 'point' || !p.poi_type);
   const linearPOIs = pois.filter(p => p.poi_type === 'trail' || p.poi_type === 'river' || p.poi_type === 'boundary');
+  const virtualPOIs = pois.filter(p => p.poi_type === 'virtual');
 
-  // Clear local point-type POIs only (preserve trails and rivers with geometry)
+  // Clear local point-type and virtual-type POIs (preserve trails and rivers with geometry)
   await pool.query(`DELETE FROM pois WHERE poi_type = 'point'`);
+  await pool.query(`DELETE FROM pois WHERE poi_type = 'virtual'`);
 
   // Insert point POIs from sheets (DB inserts are fast, do sequentially for data integrity)
   const insertedPointPOIs = [];
@@ -1087,6 +1081,63 @@ export async function pullAllFromSheets(sheets, pool, drive = null) {
         await pool.query('DELETE FROM thumbnail_cache WHERE poi_id = $1', [poi.id]);
 
         console.log(`Downloaded image for POI: ${poi.name}`);
+      }
+    });
+  }
+
+  // Insert virtual POIs from sheets
+  const insertedVirtualPOIs = [];
+  for (const poi of virtualPOIs) {
+    if (!poi.name) continue;
+
+    const result = await pool.query(`
+      INSERT INTO pois (
+        name, poi_type, property_owner, brief_description,
+        era, historical_description, more_info_link, image_drive_file_id,
+        synced, locally_modified, deleted, created_at, updated_at
+      ) VALUES ($1, 'virtual', $2, $3, $4, $5, $6, $7, TRUE, FALSE, FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      ON CONFLICT (name, poi_type) DO UPDATE SET
+        property_owner = EXCLUDED.property_owner,
+        brief_description = EXCLUDED.brief_description,
+        era = EXCLUDED.era,
+        historical_description = EXCLUDED.historical_description,
+        more_info_link = EXCLUDED.more_info_link,
+        image_drive_file_id = EXCLUDED.image_drive_file_id,
+        synced = TRUE,
+        locally_modified = FALSE,
+        deleted = FALSE,
+        updated_at = CURRENT_TIMESTAMP
+      RETURNING id
+    `, [
+      poi.name, poi.property_owner, poi.brief_description, poi.era,
+      poi.historical_description, poi.more_info_link, poi.image_drive_file_id
+    ]);
+
+    if (poi.image_drive_file_id) {
+      insertedVirtualPOIs.push({ id: result.rows[0].id, name: poi.name, image_drive_file_id: poi.image_drive_file_id });
+    }
+  }
+
+  // Download images for virtual POIs in parallel batches
+  if (drive && insertedVirtualPOIs.length > 0) {
+    console.log(`Downloading ${insertedVirtualPOIs.length} virtual POI images in parallel batches of ${PARALLEL_BATCH_SIZE}...`);
+
+    await processInParallelBatches(insertedVirtualPOIs, async (poi) => {
+      const imageBuffer = await downloadFileFromDrive(drive, poi.image_drive_file_id);
+      if (imageBuffer) {
+        let mimeType = 'image/jpeg';
+        if (imageBuffer[0] === 0x89 && imageBuffer[1] === 0x50) mimeType = 'image/png';
+        else if (imageBuffer[0] === 0x47 && imageBuffer[1] === 0x49) mimeType = 'image/gif';
+        else if (imageBuffer[0] === 0x52 && imageBuffer[1] === 0x49) mimeType = 'image/webp';
+
+        await pool.query(`
+          UPDATE pois SET image_data = $1, image_mime_type = $2 WHERE id = $3
+        `, [imageBuffer, mimeType, poi.id]);
+
+        // Invalidate thumbnail cache
+        await pool.query('DELETE FROM thumbnail_cache WHERE poi_id = $1', [poi.id]);
+
+        console.log(`Downloaded image for virtual POI: ${poi.name}`);
       }
     });
   }
@@ -1262,6 +1313,9 @@ export async function pullAllFromSheets(sheets, pool, drive = null) {
       }
     }
   }
+
+  // Pull associations from sheets
+  await pullAssociationsFromSheets(sheets, pool);
 
   // Update sync status
   await pool.query(`
@@ -2689,302 +2743,6 @@ export async function ensureIntegrationSheet(sheets, spreadsheetId) {
 }
 
 // ============================================
-// Linear Features (Trails & Rivers) Sync Functions
-// ============================================
-
-/**
- * Convert a spreadsheet row to a linear feature object
- */
-function rowToLinearFeature(row) {
-  return {
-    name: row[LINEAR_FEATURES_COLUMNS.name] || '',
-    feature_type: row[LINEAR_FEATURES_COLUMNS.feature_type] || 'trail',
-    property_owner: row[LINEAR_FEATURES_COLUMNS.property_owner] || null,
-    brief_description: row[LINEAR_FEATURES_COLUMNS.brief_description] || null,
-    era: row[LINEAR_FEATURES_COLUMNS.era] || null,
-    historical_description: row[LINEAR_FEATURES_COLUMNS.historical_description] || null,
-    primary_activities: row[LINEAR_FEATURES_COLUMNS.primary_activities] || null,
-    surface: row[LINEAR_FEATURES_COLUMNS.surface] || null,
-    pets: row[LINEAR_FEATURES_COLUMNS.pets] || null,
-    cell_signal: parseCellSignal(row[LINEAR_FEATURES_COLUMNS.cell_signal]),
-    more_info_link: row[LINEAR_FEATURES_COLUMNS.more_info_link] || null,
-    length_miles: row[LINEAR_FEATURES_COLUMNS.length_miles] ? parseFloat(row[LINEAR_FEATURES_COLUMNS.length_miles]) : null,
-    difficulty: row[LINEAR_FEATURES_COLUMNS.difficulty] || null,
-    image_drive_file_id: row[LINEAR_FEATURES_COLUMNS.image_drive_file_id] || null,
-    boundary_color: row[LINEAR_FEATURES_COLUMNS.boundary_color] || null
-  };
-}
-
-/**
- * Convert a linear feature object to a spreadsheet row
- */
-function linearFeatureToRow(feature) {
-  return [
-    feature.name || '',
-    feature.feature_type || 'trail',
-    feature.property_owner || '',
-    feature.brief_description || '',
-    feature.era || '',
-    feature.historical_description || '',
-    feature.primary_activities || '',
-    feature.surface || '',
-    feature.pets || '',
-    formatCellSignal(feature.cell_signal),
-    feature.more_info_link || '',
-    feature.length_miles || '',
-    feature.difficulty || '',
-    feature.image_drive_file_id || '',
-    feature.boundary_color || ''
-  ];
-}
-
-/**
- * Read all linear features from the Trails & Rivers sheet
- */
-export async function readLinearFeatures(sheets, spreadsheetId) {
-  try {
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId,
-      range: `'${LINEAR_FEATURES_SHEET_NAME}'!A2:O`,
-    });
-
-    const rows = response.data.values || [];
-    return rows
-      .map(rowToLinearFeature)
-      .filter(f => f.name && f.name !== 'Name');
-  } catch (error) {
-    // If sheet doesn't exist, return empty array
-    if (error.message?.includes('Unable to parse range')) {
-      return [];
-    }
-    throw error;
-  }
-}
-
-/**
- * Push all linear features from database to the spreadsheet
- */
-export async function pushLinearFeaturesToSheets(sheets, pool) {
-  const spreadsheetId = await getSpreadsheetId(pool);
-  if (!spreadsheetId) {
-    throw new Error('No spreadsheet configured. Please create a spreadsheet first.');
-  }
-
-  // Ensure Linear Features sheet exists
-  await ensureLinearFeaturesSheet(sheets, spreadsheetId);
-
-  const result = await pool.query(`
-    SELECT name, poi_type as feature_type, property_owner, brief_description, era,
-           historical_description, primary_activities, surface, pets,
-           cell_signal, more_info_link, length_miles, difficulty, image_drive_file_id,
-           boundary_color
-    FROM pois
-    WHERE poi_type IN ('trail', 'river', 'boundary')
-      AND (deleted IS NULL OR deleted = FALSE)
-    ORDER BY poi_type, name
-  `);
-
-  const features = result.rows;
-
-  // Clear existing data (keep header)
-  try {
-    await sheets.spreadsheets.values.clear({
-      spreadsheetId,
-      range: `'${LINEAR_FEATURES_SHEET_NAME}'!A2:O`,
-    });
-  } catch (error) {
-    // Ignore if sheet is empty
-  }
-
-  // Write all linear features
-  if (features.length > 0) {
-    const rows = features.map(linearFeatureToRow);
-    await sheets.spreadsheets.values.update({
-      spreadsheetId,
-      range: `'${LINEAR_FEATURES_SHEET_NAME}'!A2:O`,
-      valueInputOption: 'USER_ENTERED',
-      requestBody: {
-        values: rows
-      }
-    });
-  }
-
-  // Update sync status
-  await pool.query(`
-    INSERT INTO sync_status (key, value, updated_at)
-    VALUES ('last_linear_features_push', $1, CURRENT_TIMESTAMP)
-    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
-  `, [new Date().toISOString()]);
-
-  return features.length;
-}
-
-/**
- * Pull all linear features from the spreadsheet to database
- * Note: Only updates metadata - geometry must be imported from GeoJSON separately
- */
-export async function pullLinearFeaturesFromSheets(sheets, pool, drive = null) {
-  const spreadsheetId = await getSpreadsheetId(pool);
-  if (!spreadsheetId) {
-    throw new Error('No spreadsheet configured. Please create a spreadsheet first.');
-  }
-
-  const features = await readLinearFeatures(sheets, spreadsheetId);
-
-  // Update existing linear features by name (don't delete - we need to preserve geometry)
-  for (const feature of features) {
-    if (!feature.name) continue;
-
-    // Check if feature exists
-    const existing = await pool.query(
-      'SELECT id, image_drive_file_id FROM pois WHERE name = $1 AND poi_type = $2',
-      [feature.name, feature.feature_type]
-    );
-
-    if (existing.rows.length > 0) {
-      // Update existing feature (preserve geometry)
-      const featureId = existing.rows[0].id;
-
-      await pool.query(`
-        UPDATE pois SET
-          property_owner = $1, brief_description = $2, era = $3,
-          historical_description = $4, primary_activities = $5, surface = $6,
-          pets = $7, cell_signal = $8, more_info_link = $9,
-          length_miles = $10, difficulty = $11, image_drive_file_id = $12,
-          boundary_color = $13,
-          updated_at = CURRENT_TIMESTAMP, synced = TRUE, locally_modified = FALSE
-        WHERE id = $14
-      `, [
-        feature.property_owner, feature.brief_description, feature.era,
-        feature.historical_description, feature.primary_activities, feature.surface,
-        feature.pets, feature.cell_signal, feature.more_info_link,
-        feature.length_miles, feature.difficulty, feature.image_drive_file_id,
-        feature.boundary_color,
-        featureId
-      ]);
-
-      // Download image from Drive if available and changed
-      if (feature.image_drive_file_id && drive && feature.image_drive_file_id !== existing.rows[0].image_drive_file_id) {
-        try {
-          const imageBuffer = await downloadFileFromDrive(drive, feature.image_drive_file_id);
-          if (imageBuffer) {
-            let mimeType = 'image/jpeg';
-            if (imageBuffer[0] === 0x89 && imageBuffer[1] === 0x50) mimeType = 'image/png';
-            else if (imageBuffer[0] === 0x47 && imageBuffer[1] === 0x49) mimeType = 'image/gif';
-            else if (imageBuffer[0] === 0x52 && imageBuffer[1] === 0x49) mimeType = 'image/webp';
-
-            await pool.query(`
-              UPDATE pois SET image_data = $1, image_mime_type = $2 WHERE id = $3
-            `, [imageBuffer, mimeType, featureId]);
-
-            // Invalidate thumbnail cache
-            await pool.query('DELETE FROM thumbnail_cache WHERE poi_id = $1', [featureId]);
-
-            console.log(`Downloaded image for linear feature: ${feature.name}`);
-          }
-        } catch (imageError) {
-          console.warn(`Failed to download image for ${feature.name}:`, imageError.message);
-        }
-      }
-    }
-    // Note: We don't insert new features from sheets since geometry is required
-    // New trails/rivers must be imported from GeoJSON
-  }
-
-  // Update sync status
-  await pool.query(`
-    INSERT INTO sync_status (key, value, updated_at)
-    VALUES ('last_linear_features_pull', $1, CURRENT_TIMESTAMP)
-    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
-  `, [new Date().toISOString()]);
-
-  return features.length;
-}
-
-/**
- * Ensure the Linear Features sheet exists with proper headers
- */
-async function ensureLinearFeaturesSheet(sheets, spreadsheetId) {
-  try {
-    const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId });
-    const existingSheets = spreadsheet.data.sheets.map(s => s.properties.title);
-
-    if (!existingSheets.includes(LINEAR_FEATURES_SHEET_NAME)) {
-      console.log('Creating Trails & Rivers sheet...');
-      await sheets.spreadsheets.batchUpdate({
-        spreadsheetId,
-        requestBody: {
-          requests: [{
-            addSheet: {
-              properties: {
-                title: LINEAR_FEATURES_SHEET_NAME,
-                gridProperties: {
-                  frozenRowCount: 1
-                }
-              }
-            }
-          }]
-        }
-      });
-
-      // Add headers
-      await sheets.spreadsheets.values.update({
-        spreadsheetId,
-        range: `'${LINEAR_FEATURES_SHEET_NAME}'!A1:O1`,
-        valueInputOption: 'RAW',
-        requestBody: {
-          values: [LINEAR_FEATURES_HEADERS]
-        }
-      });
-
-      // Format header
-      const updatedSpreadsheet = await sheets.spreadsheets.get({ spreadsheetId });
-      const newSheet = updatedSpreadsheet.data.sheets.find(
-        s => s.properties.title === LINEAR_FEATURES_SHEET_NAME
-      );
-
-      if (newSheet) {
-        await sheets.spreadsheets.batchUpdate({
-          spreadsheetId,
-          requestBody: {
-            requests: [{
-              repeatCell: {
-                range: {
-                  sheetId: newSheet.properties.sheetId,
-                  startRowIndex: 0,
-                  endRowIndex: 1
-                },
-                cell: {
-                  userEnteredFormat: {
-                    backgroundColor: { red: 0.55, green: 0.27, blue: 0.07 }, // Brown for trails
-                    textFormat: { bold: true, foregroundColor: { red: 1, green: 1, blue: 1 } }
-                  }
-                },
-                fields: 'userEnteredFormat(backgroundColor,textFormat)'
-              }
-            },
-            {
-              autoResizeDimensions: {
-                dimensions: {
-                  sheetId: newSheet.properties.sheetId,
-                  dimension: 'COLUMNS',
-                  startIndex: 0,
-                  endIndex: 14
-                }
-              }
-            }]
-          }
-        });
-      }
-      console.log('Trails & Rivers sheet setup complete');
-    }
-  } catch (error) {
-    console.error('Error ensuring Linear Features sheet:', error.message);
-    throw error;
-  }
-}
-
-// ============================================
 // NEWS SHEET SYNC FUNCTIONS
 // ============================================
 
@@ -3436,12 +3194,220 @@ export async function pullEventsFromSheets(sheets, pool) {
   return count;
 }
 
+/**
+ * Convert a spreadsheet row to a POI association object
+ */
+function rowToAssociation(row) {
+  return {
+    id: row[POI_ASSOCIATIONS_COLUMNS.id] ? parseInt(row[POI_ASSOCIATIONS_COLUMNS.id]) : null,
+    virtual_poi_name: row[POI_ASSOCIATIONS_COLUMNS.virtual_poi_name] || '',
+    physical_poi_name: row[POI_ASSOCIATIONS_COLUMNS.physical_poi_name] || '',
+    association_type: row[POI_ASSOCIATIONS_COLUMNS.association_type] || 'manages'
+  };
+}
+
+/**
+ * Convert a POI association object to a spreadsheet row
+ */
+function associationToRow(assoc) {
+  return [
+    assoc.id || '',
+    assoc.virtual_poi_name || '',
+    assoc.physical_poi_name || '',
+    assoc.association_type || 'manages'
+  ];
+}
+
+/**
+ * Ensure POI Associations sheet exists with proper headers
+ */
+async function ensureAssociationsSheet(sheets, spreadsheetId) {
+  console.log(`Ensuring POI Associations sheet exists in spreadsheet ${spreadsheetId}`);
+  try {
+    const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId });
+
+    const associationsSheet = spreadsheet.data.sheets.find(
+      s => s.properties.title === POI_ASSOCIATIONS_SHEET_NAME
+    );
+
+    if (!associationsSheet) {
+      console.log(`POI Associations sheet "${POI_ASSOCIATIONS_SHEET_NAME}" not found, creating...`);
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+          requests: [{
+            addSheet: {
+              properties: {
+                title: POI_ASSOCIATIONS_SHEET_NAME,
+                gridProperties: {
+                  frozenRowCount: 1
+                }
+              }
+            }
+          }]
+        }
+      });
+
+      // Add headers
+      await sheets.spreadsheets.values.update({
+        spreadsheetId,
+        range: `'${POI_ASSOCIATIONS_SHEET_NAME}'!A1:D1`,
+        valueInputOption: 'RAW',
+        requestBody: {
+          values: [POI_ASSOCIATIONS_HEADERS]
+        }
+      });
+      console.log('POI Associations sheet created with headers');
+    }
+  } catch (error) {
+    console.error('Error ensuring POI Associations sheet:', error.message);
+    throw error;
+  }
+}
+
+/**
+ * Push all POI associations to the spreadsheet
+ */
+export async function pushAssociationsToSheets(sheets, pool) {
+  const spreadsheetId = await getSpreadsheetId(pool);
+  if (!spreadsheetId) {
+    throw new Error('No spreadsheet configured. Please create a spreadsheet first.');
+  }
+
+  await ensureAssociationsSheet(sheets, spreadsheetId);
+
+  const result = await pool.query(`
+    SELECT a.id, a.association_type,
+           vp.name as virtual_poi_name,
+           pp.name as physical_poi_name
+    FROM poi_associations a
+    JOIN pois vp ON a.virtual_poi_id = vp.id
+    JOIN pois pp ON a.physical_poi_id = pp.id
+    WHERE (vp.deleted IS NULL OR vp.deleted = FALSE)
+      AND (pp.deleted IS NULL OR pp.deleted = FALSE)
+    ORDER BY vp.name, pp.name
+  `);
+
+  const associations = result.rows;
+
+  // Clear existing data (keep header)
+  try {
+    await sheets.spreadsheets.values.clear({
+      spreadsheetId,
+      range: `'${POI_ASSOCIATIONS_SHEET_NAME}'!A2:D`,
+    });
+  } catch (error) {
+    // Ignore if sheet is empty
+  }
+
+  // Write all associations
+  if (associations.length > 0) {
+    const rows = associations.map(associationToRow);
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `'${POI_ASSOCIATIONS_SHEET_NAME}'!A2:D`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: {
+        values: rows
+      }
+    });
+  }
+
+  // Update sync status
+  await pool.query(`
+    INSERT INTO sync_status (key, value, updated_at)
+    VALUES ('last_associations_push', $1, CURRENT_TIMESTAMP)
+    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
+  `, [new Date().toISOString()]);
+
+  return associations.length;
+}
+
+/**
+ * Pull all POI associations from the spreadsheet to database
+ */
+export async function pullAssociationsFromSheets(sheets, pool) {
+  const spreadsheetId = await getSpreadsheetId(pool);
+  if (!spreadsheetId) {
+    throw new Error('No spreadsheet configured. Please create a spreadsheet first.');
+  }
+
+  // Read associations from sheet
+  let rows = [];
+  try {
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `'${POI_ASSOCIATIONS_SHEET_NAME}'!A2:D`,
+    });
+    rows = response.data.values || [];
+  } catch (error) {
+    console.log('POI Associations sheet may not exist yet:', error.message);
+    return 0;
+  }
+
+  const associations = rows.map(rowToAssociation).filter(a => a.virtual_poi_name && a.physical_poi_name);
+
+  // Clear existing associations
+  await pool.query('DELETE FROM poi_associations');
+
+  // Insert associations from sheets
+  // IMPORTANT: Look up POI IDs by name since IDs differ between environments
+  let count = 0;
+  for (const assoc of associations) {
+    if (!assoc.virtual_poi_name || !assoc.physical_poi_name) continue;
+
+    // Look up virtual POI by name
+    const virtualPoiResult = await pool.query(
+      'SELECT id FROM pois WHERE name = $1 AND poi_type = $2 AND (deleted IS NULL OR deleted = FALSE)',
+      [assoc.virtual_poi_name, 'virtual']
+    );
+
+    if (virtualPoiResult.rows.length === 0) {
+      console.warn(`Virtual POI not found: ${assoc.virtual_poi_name}`);
+      continue;
+    }
+
+    const virtualPoiId = virtualPoiResult.rows[0].id;
+
+    // Look up physical POI by name
+    const physicalPoiResult = await pool.query(
+      'SELECT id FROM pois WHERE name = $1 AND (deleted IS NULL OR deleted = FALSE)',
+      [assoc.physical_poi_name]
+    );
+
+    if (physicalPoiResult.rows.length === 0) {
+      console.warn(`Physical POI not found: ${assoc.physical_poi_name}`);
+      continue;
+    }
+
+    const physicalPoiId = physicalPoiResult.rows[0].id;
+
+    // Insert association
+    await pool.query(`
+      INSERT INTO poi_associations (virtual_poi_id, physical_poi_id, association_type)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (virtual_poi_id, physical_poi_id) DO UPDATE
+      SET association_type = EXCLUDED.association_type, updated_at = CURRENT_TIMESTAMP
+    `, [virtualPoiId, physicalPoiId, assoc.association_type || 'manages']);
+
+    count++;
+  }
+
+  // Update sync status
+  await pool.query(`
+    INSERT INTO sync_status (key, value, updated_at)
+    VALUES ('last_associations_pull', $1, CURRENT_TIMESTAMP)
+    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
+  `, [new Date().toISOString()]);
+
+  return count;
+}
+
 // Export constants for admin routes
 export const SPREADSHEET_ID = null; // No longer used - app creates its own
 export const SHEET_NAME = APP_SHEET_NAME;
 export const ACTIVITIES_SHEET = ACTIVITIES_SHEET_NAME;
 export const ERAS_SHEET = ERAS_SHEET_NAME;
 export const SURFACES_SHEET = SURFACES_SHEET_NAME;
-export const LINEAR_FEATURES_SHEET = LINEAR_FEATURES_SHEET_NAME;
 export const NEWS_SHEET = NEWS_SHEET_NAME;
 export const EVENTS_SHEET = EVENTS_SHEET_NAME;

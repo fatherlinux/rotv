@@ -6,6 +6,7 @@ import MapThumbnail from './MapThumbnail';
 const ResultsTab = memo(function ResultsTab({
   viewportFilteredDestinations,
   viewportFilteredLinearFeatures,
+  viewportFilteredVirtualPois,
   selectedDestination,
   selectedLinearFeature,
   onSelectDestination,
@@ -17,25 +18,33 @@ const ResultsTab = memo(function ResultsTab({
   const { sortedPois, poiMap } = useMemo(() => {
     const dests = (viewportFilteredDestinations || []).map(d => ({
       ...d,
-      _isLinear: false
+      _isLinear: false,
+      _isVirtual: false
     }));
     const linear = (viewportFilteredLinearFeatures || []).map(f => ({
       ...f,
-      _isLinear: true
+      _isLinear: true,
+      _isVirtual: false
     }));
-    const sorted = [...dests, ...linear].sort((a, b) =>
+    const virtual = (viewportFilteredVirtualPois || []).map(v => ({
+      ...v,
+      _isLinear: false,
+      _isVirtual: true
+    }));
+    const sorted = [...dests, ...linear, ...virtual].sort((a, b) =>
       (a.name || '').localeCompare(b.name || '')
     );
 
     // Create lookup map for event delegation
     const map = new Map();
     sorted.forEach(poi => {
-      const key = `${poi._isLinear ? 'linear' : 'point'}-${poi.id}`;
+      const type = poi._isVirtual ? 'virtual' : (poi._isLinear ? 'linear' : 'point');
+      const key = `${type}-${poi.id}`;
       map.set(key, poi);
     });
 
     return { sortedPois: sorted, poiMap: map };
-  }, [viewportFilteredDestinations, viewportFilteredLinearFeatures]);
+  }, [viewportFilteredDestinations, viewportFilteredLinearFeatures, viewportFilteredVirtualPois]);
 
   // Event delegation handler - single handler for all tiles
   const handleListClick = useCallback((e) => {
@@ -105,7 +114,8 @@ const ResultsTab = memo(function ResultsTab({
         <div className="news-events-content">
           <div className="results-tab-list" onClick={handleListClick}>
             {sortedPois.map(poi => {
-              const poiKey = `${poi._isLinear ? 'linear' : 'point'}-${poi.id}`;
+              const type = poi._isVirtual ? 'virtual' : (poi._isLinear ? 'linear' : 'point');
+              const poiKey = `${type}-${poi.id}`;
               const isSelected = poi._isLinear
                 ? selectedLinearId === poi.id
                 : selectedId === poi.id;
@@ -115,6 +125,7 @@ const ResultsTab = memo(function ResultsTab({
                   poiKey={poiKey}
                   poi={poi}
                   isLinear={poi._isLinear}
+                  isVirtual={poi._isVirtual}
                   isSelected={isSelected}
                 />
               );
@@ -137,6 +148,7 @@ const ResultsTab = memo(function ResultsTab({
                 <span className="poi-type-legend-item"><span className="poi-type-icon trail">T</span> Trail</span>
                 <span className="poi-type-legend-item"><span className="poi-type-icon river">R</span> River</span>
                 <span className="poi-type-legend-item"><span className="poi-type-icon boundary">B</span> Boundary</span>
+                <span className="poi-type-legend-item"><span className="poi-type-icon virtual">O</span> Organization</span>
               </div>
             </div>
           </div>

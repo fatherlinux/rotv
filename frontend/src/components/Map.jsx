@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { MapContainer, TileLayer, Marker, Tooltip, useMap, ImageOverlay, GeoJSON, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import MapAdmin from './MapAdmin';
+import VirtualPoiCreator from './VirtualPoiCreator';
 
 // Custom icon definitions
 const createIcon = (iconUrl) => L.icon({
@@ -127,42 +128,48 @@ function Legend({
 }) {
   const isEditTab = activeTab === 'edit';
 
-  // Layer icons for the unified grid - order: Trails, Rivers (NPS Map moved to Boundaries section)
-  const layerIcons = [
-    { id: 'trails', label: 'Trails', isActive: showTrails, onToggle: () => onToggleTrails(!showTrails) },
-    { id: 'rivers', label: 'Rivers', isActive: showRivers, onToggle: () => onToggleRivers(!showRivers) }
-  ];
-
-  // Convert iconConfig to the format needed for legend display
+  // Convert iconConfig to the format needed for legend display, then merge with layer icons
   const iconTypes = useMemo(() => {
+    let poiTypes;
     if (!iconConfig || iconConfig.length === 0) {
       // Fallback to default set if config not loaded yet
-      return [
-        { id: 'visitor-center', label: 'Visitor Center', svg_filename: 'visitor-center.svg' },
-        { id: 'waterfall', label: 'Waterfall', svg_filename: 'waterfall.svg' },
-        { id: 'trail', label: 'Trail', svg_filename: 'trail.svg' },
-        { id: 'historic', label: 'Historic Site', svg_filename: 'historic.svg' },
-        { id: 'bridge', label: 'Bridge', svg_filename: 'bridge.svg' },
-        { id: 'train', label: 'Train Station', svg_filename: 'train.svg' },
-        { id: 'nature', label: 'Nature Area', svg_filename: 'nature.svg' },
-        { id: 'skiing', label: 'Skiing', svg_filename: 'skiing.svg' },
-        { id: 'biking', label: 'Biking', svg_filename: 'biking.svg' },
-        { id: 'picnic', label: 'Picnic Area', svg_filename: 'picnic.svg' },
-        { id: 'camping', label: 'Camping', svg_filename: 'camping.svg' },
-        { id: 'music', label: 'Music Venue', svg_filename: 'music.svg' },
-        { id: 'default', label: 'Other', svg_filename: 'default.svg' }
+      poiTypes = [
+        { id: 'visitor-center', label: 'Visitor Center', svg_filename: 'visitor-center.svg', type: 'poi' },
+        { id: 'waterfall', label: 'Waterfall', svg_filename: 'waterfall.svg', type: 'poi' },
+        { id: 'trail', label: 'Trailheads', svg_filename: 'trail.svg', type: 'poi' },
+        { id: 'historic', label: 'Historic Site', svg_filename: 'historic.svg', type: 'poi' },
+        { id: 'bridge', label: 'Bridge', svg_filename: 'bridge.svg', type: 'poi' },
+        { id: 'train', label: 'Train Station', svg_filename: 'train.svg', type: 'poi' },
+        { id: 'nature', label: 'Nature Area', svg_filename: 'nature.svg', type: 'poi' },
+        { id: 'skiing', label: 'Skiing', svg_filename: 'skiing.svg', type: 'poi' },
+        { id: 'biking', label: 'Biking', svg_filename: 'biking.svg', type: 'poi' },
+        { id: 'picnic', label: 'Picnic Area', svg_filename: 'picnic.svg', type: 'poi' },
+        { id: 'camping', label: 'Camping', svg_filename: 'camping.svg', type: 'poi' },
+        { id: 'music', label: 'Music Venue', svg_filename: 'music.svg', type: 'poi' },
+        { id: 'default', label: 'Other', svg_filename: 'default.svg', type: 'poi' }
       ];
+    } else {
+      poiTypes = iconConfig
+        .filter(icon => icon.enabled !== false)
+        .map(icon => ({
+          id: icon.name,
+          label: icon.name === 'trail' ? 'Trailheads' : icon.label,
+          svg_filename: icon.svg_filename || `${icon.name}.svg`,
+          svg_content: icon.svg_content,
+          iconUrl: getIconUrl(icon),
+          type: 'poi'
+        }));
     }
-    return iconConfig
-      .filter(icon => icon.enabled !== false)
-      .map(icon => ({
-        id: icon.name,
-        label: icon.label,
-        svg_filename: icon.svg_filename || `${icon.name}.svg`,
-        svg_content: icon.svg_content,
-        iconUrl: getIconUrl(icon)
-      }));
-  }, [iconConfig]);
+
+    // Add layer icons (Trails, Rivers)
+    const layerIcons = [
+      { id: 'trails', label: 'Trails', type: 'layer', isActive: showTrails, onToggle: () => onToggleTrails(!showTrails) },
+      { id: 'rivers', label: 'Rivers', type: 'layer', isActive: showRivers, onToggle: () => onToggleRivers(!showRivers) }
+    ];
+
+    // Combine and sort all alphabetically
+    return [...poiTypes, ...layerIcons].sort((a, b) => a.label.localeCompare(b.label));
+  }, [iconConfig, showTrails, showRivers, onToggleTrails, onToggleRivers]);
 
   return (
     <div className={`legend ${isExpanded ? 'legend-expanded' : ''}`}>
@@ -181,42 +188,46 @@ function Legend({
         <div className="legend-divider"></div>
 
         <div className="legend-header-row">
-          <h4>Filters & Layers</h4>
+          <h4>Points of Interest</h4>
           <div className="legend-filter-btns">
             <button onClick={onShowAll} title="Show All POIs">All</button>
             <button onClick={onHideAll} title="Hide All POIs">None</button>
           </div>
         </div>
 
-        {/* Unified icon grid - POI types first, then Map Layers at bottom */}
+        {/* Unified icon grid - all POI types and layers sorted alphabetically */}
         <div className="legend-icons">
-          {/* POI type icons */}
-          {iconTypes.map(type => (
-            <div
-              key={type.id}
-              className={`legend-icon-item ${visibleTypes.has(type.id) ? 'active' : 'inactive'}`}
-              onClick={() => onToggleType(type.id)}
-            >
-              {type.svg_content ? (
-                <div className="legend-icon-svg" dangerouslySetInnerHTML={{ __html: type.svg_content }} />
-              ) : (
-                <img src={type.iconUrl || `/icons/${type.svg_filename}`} alt={type.label} />
-              )}
-              <span>{type.label}</span>
-            </div>
-          ))}
-
-          {/* Map Layer icons at bottom */}
-          {layerIcons.map(layer => (
-            <div
-              key={layer.id}
-              className={`legend-icon-item ${layer.isActive ? 'active' : 'inactive'}`}
-              onClick={layer.onToggle}
-            >
-              <img src={`/icons/layers/${layer.id}.svg`} alt={layer.label} />
-              <span>{layer.label}</span>
-            </div>
-          ))}
+          {iconTypes.map(type => {
+            if (type.type === 'layer') {
+              // Layer icon (Trails, Rivers)
+              return (
+                <div
+                  key={type.id}
+                  className={`legend-icon-item ${type.isActive ? 'active' : 'inactive'}`}
+                  onClick={type.onToggle}
+                >
+                  <img src={`/icons/layers/${type.id}.svg`} alt={type.label} />
+                  <span>{type.label}</span>
+                </div>
+              );
+            } else {
+              // POI type icon
+              return (
+                <div
+                  key={type.id}
+                  className={`legend-icon-item ${visibleTypes.has(type.id) ? 'active' : 'inactive'}`}
+                  onClick={() => onToggleType(type.id)}
+                >
+                  {type.svg_content ? (
+                    <div className="legend-icon-svg" dangerouslySetInnerHTML={{ __html: type.svg_content }} />
+                  ) : (
+                    <img src={type.iconUrl || `/icons/${type.svg_filename}`} alt={type.label} />
+                  )}
+                  <span>{type.label}</span>
+                </div>
+              );
+            }
+          })}
         </div>
 
         {/* Boundaries & Overlays section */}
@@ -508,40 +519,72 @@ function MapBoundsTracker({ destinations, visibleTypes, getDestinationIconType, 
 
       // Add visible point destinations
       if (destinations && destinations.length > 0) {
+        let destFilteredOut = 0;
+        let destIncluded = 0;
         destinations.forEach(dest => {
           if (!dest.latitude || !dest.longitude) return;
 
           // Check if POI type is visible in legend
           const iconType = getDestinationIconType(dest);
-          if (!visibleTypes.has(iconType)) return;
+          if (!visibleTypes.has(iconType)) {
+            destFilteredOut++;
+            return;
+          }
 
           // Check if POI is within map bounds
           const lat = parseFloat(dest.latitude);
           const lng = parseFloat(dest.longitude);
           if (bounds.contains([lat, lng])) {
             visibleIds.push(dest.id);
+            destIncluded++;
           }
         });
+        if (visibleTypes.size < 5 || visibleTypes.size === 0) { // Only log when filters are selective
+          console.log('[MapBoundsTracker] visibleTypes:', Array.from(visibleTypes));
+          console.log('[MapBoundsTracker] Destinations: filtered out =', destFilteredOut, ', included in viewport =', destIncluded);
+        }
       }
 
-      // Add ALL linear features in viewport to Results (regardless of layer visibility)
-      // This ensures Results tab shows all POIs even if their layer is toggled off on the map
+      // Add linear features in viewport to Results
+      // Linear features respect their layer toggles (showTrails, showRivers, visibleBoundaries)
+      // NOT the icon type filter (visibleTypes) which only applies to point destinations
       if (linearFeatures && linearFeatures.length > 0) {
+        let linearIncluded = 0;
         linearFeatures.forEach(feature => {
+          // Check if the feature's layer is visible
+          let isLayerVisible = false;
+          if (feature.feature_type === 'trail') {
+            isLayerVisible = showTrails;
+          } else if (feature.feature_type === 'river') {
+            isLayerVisible = showRivers;
+          } else if (feature.feature_type === 'boundary') {
+            isLayerVisible = visibleBoundaries.has(feature.id);
+          }
+
+          if (!isLayerVisible) return;
+
           // Check if any part of the feature intersects with map bounds
           // Use bounding box intersection which works for all geometry types
           if (feature.geometry) {
             const geoBounds = getGeometryBounds(feature.geometry);
             if (boundsIntersect(bounds, geoBounds)) {
               visibleIds.push(feature.id);
+              linearIncluded++;
             }
           }
         });
+        if (visibleTypes.size < 5 || visibleTypes.size === 0 || showTrails || showRivers) {
+          console.log('[MapBoundsTracker] Linear features included in viewport:', linearIncluded,
+                      '(showTrails:', showTrails, 'showRivers:', showRivers, ')');
+        }
       }
 
       // Emit visible IDs (destinations + linear features)
       // Skip if this is a programmatic move (e.g., selection zoom) to preserve current selection
       if (onVisiblePoisChange && !map._isProgrammaticMove) {
+        if (visibleTypes.size < 5 || visibleTypes.size === 0) {
+          console.log('[MapBoundsTracker] Total visible POI IDs:', visibleIds.length);
+        }
         onVisiblePoisChange(visibleIds);
       }
 
@@ -949,7 +992,7 @@ const DEFAULT_NPS_MAP_BOUNDS = [
 // Default icon type IDs for initializing the filter (before config loads)
 const DEFAULT_ICON_TYPES = new Set(['visitor-center', 'waterfall', 'trail', 'historic', 'bridge', 'train', 'nature', 'skiing', 'biking', 'picnic', 'camping', 'music', 'default']);
 
-function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, onDestinationUpdate, editMode, activeTab, onDestinationCreate, previewCoords, onPreviewCoordsChange, newPOI, onStartNewPOI, linearFeatures, selectedLinearFeature, onSelectLinearFeature, visibleTypes, onVisibleTypesChange, onVisiblePoisChange, onMapStateChange, showNpsMap, onToggleNpsMap, showTrails, onToggleTrails, showRivers, onToggleRivers, visibleBoundaries, onToggleBoundary, onShowAllBoundaries, onHideAllBoundaries, searchQuery, onSearchChange, onNewsRefresh, skipFlyRef }) {
+function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, onDestinationUpdate, editMode, activeTab, onDestinationCreate, previewCoords, onPreviewCoordsChange, newPOI, onStartNewPOI, linearFeatures, selectedLinearFeature, onSelectLinearFeature, visibleTypes, onVisibleTypesChange, onVisiblePoisChange, onMapStateChange, showNpsMap, onToggleNpsMap, showTrails, onToggleTrails, showRivers, onToggleRivers, visibleBoundaries, onToggleBoundary, onShowAllBoundaries, onHideAllBoundaries, searchQuery, onSearchChange, onNewsRefresh, skipFlyRef, newOrganization, onStartNewOrganization, isDrawingAssociations, addingAssociationsToOrgId, onAddAssociationsFromDrawing, onCancelDrawingAssociations }) {
   const [showAdmin, setShowAdmin] = useState(false);
   const [isLegendExpanded, setIsLegendExpanded] = useState(false);
   const [mapBounds, setMapBounds] = useState(DEFAULT_NPS_MAP_BOUNDS);
@@ -958,6 +1001,7 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
   const [importType, setImportType] = useState('trail');
   const [importingFile, setImportingFile] = useState(false);
   const [importMessage, setImportMessage] = useState(null);
+  const [isCreatingVirtualPoi, setIsCreatingVirtualPoi] = useState(false);
   const fileRef = useRef(null); // Store File object in ref to avoid React re-renders
   const [visiblePoiCount, setVisiblePoiCount] = useState(0);
   const [visiblePoiIds, setVisiblePoiIds] = useState([]);
@@ -1138,19 +1182,17 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
   const handleShowAll = () => {
     // Show all POI types
     if (onVisibleTypesChange) onVisibleTypesChange(new Set(allIconTypes));
-    // Show all layers except NPS Map
+    // Show all layers (Trails and Rivers only - boundaries are controlled separately)
     onToggleTrails(true);
     onToggleRivers(true);
-    onShowAllBoundaries();
   };
 
   const handleHideAll = () => {
     // Hide all POI types
     if (onVisibleTypesChange) onVisibleTypesChange(new Set());
-    // Hide all layers except NPS Map
+    // Hide all layers (Trails and Rivers only - boundaries are controlled separately)
     onToggleTrails(false);
     onToggleRivers(false);
-    onHideAllBoundaries();
   };
 
   // Handle file selection - store in ref (no re-render), update name for UI
@@ -1335,7 +1377,11 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
 
   return (
     <div className={`map-container ${editMode ? 'edit-mode-active' : ''}`}>
-      {editMode && <div className="edit-mode-banner">Edit Mode: Click marker or trail to select and edit in sidebar.</div>}
+      {editMode && !isCreatingVirtualPoi && (
+        <div className="edit-mode-banner">
+          Edit Mode: Click marker or trail to select and edit in sidebar.
+        </div>
+      )}
       <MapContainer
         center={PARK_CENTER}
         zoom={DEFAULT_ZOOM}
@@ -1597,11 +1643,48 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
             />
           );
         })}
+
+        {/* Virtual POI Creator - for creating new organizations or adding associations */}
+        {isAdmin && editMode && (
+          <VirtualPoiCreator
+            isActive={isCreatingVirtualPoi || isDrawingAssociations}
+            mode={isDrawingAssociations ? 'add' : 'create'}
+            onCancel={() => {
+              if (isCreatingVirtualPoi) {
+                setIsCreatingVirtualPoi(false);
+              }
+              if (isDrawingAssociations && onCancelDrawingAssociations) {
+                onCancelDrawingAssociations();
+              }
+            }}
+            destinations={destinations}
+            linearFeatures={linearFeatures}
+            visibleTypes={visibleTypes}
+            showTrails={showTrails}
+            showRivers={showRivers}
+            visibleBoundaries={visibleBoundaries}
+            getDestinationIconType={getDestinationIconType}
+            onPoisSelected={(pois) => {
+              if (isCreatingVirtualPoi) {
+                // Creating new organization
+                setIsCreatingVirtualPoi(false);
+                if (onStartNewOrganization) {
+                  onStartNewOrganization(pois);
+                }
+              } else if (isDrawingAssociations && addingAssociationsToOrgId) {
+                // Adding associations to existing organization
+                if (onAddAssociationsFromDrawing) {
+                  onAddAssociationsFromDrawing(addingAssociationsToOrgId, pois);
+                }
+              }
+            }}
+          />
+        )}
       </MapContainer>
 
       {/* Results count overlay - clickable to toggle filter popup */}
       <button
-        className={`map-poi-count ${(selectedDestination || selectedLinearFeature || newPOI) ? 'sidebar-open' : ''}`}
+        className={`map-poi-count ${(selectedDestination || selectedLinearFeature || newPOI || newOrganization) ? 'sidebar-open' : ''}`}
         onClick={() => setIsLegendExpanded(!isLegendExpanded)}
       >
         {visiblePoiCount} Result{visiblePoiCount !== 1 ? 's' : ''}
@@ -1610,12 +1693,23 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
       {/* Admin refresh news & events chip - only in edit mode */}
       {isAdmin && editMode && (
         <button
-          className={`map-refresh-news ${refreshingNews ? 'refreshing' : ''}`}
+          className={`map-refresh-news ${refreshingNews ? 'refreshing' : ''} ${(selectedDestination || selectedLinearFeature || newPOI || newOrganization) ? 'sidebar-open' : ''}`}
           onClick={handleRefreshNews}
           disabled={refreshingNews || visiblePoiIds.length === 0}
           title={visiblePoiIds.length === 0 ? 'No destinations visible to update' : `Update news & events for ${visiblePoiIds.length} visible destinations`}
         >
           {refreshingNews ? 'Updating...' : 'Update News & Events'}
+        </button>
+      )}
+
+      {/* Admin create organization button - only in edit mode and not while creating */}
+      {isAdmin && editMode && !isCreatingVirtualPoi && !newOrganization && (
+        <button
+          className={`map-create-organization ${(selectedDestination || selectedLinearFeature || newPOI || newOrganization) ? 'sidebar-open' : ''}`}
+          onClick={() => setIsCreatingVirtualPoi(true)}
+          title="Create a new organization by drawing a rectangle around locations"
+        >
+          + Create Organization
         </button>
       )}
 

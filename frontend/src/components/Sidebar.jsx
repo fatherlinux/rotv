@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import ImageUploader from './ImageUploader';
 import NewsEvents from './NewsEvents';
 
@@ -218,6 +218,7 @@ function ReadOnlyView({ destination, isLinearFeature, isAdmin, showImage = true,
       if (destination.feature_type === 'boundary') return '/icons/thumbnails/boundary.svg';
       return '/icons/thumbnails/trail.svg';
     }
+    if (destination.poi_type === 'virtual') return '/icons/thumbnails/organization.svg';
     return '/icons/thumbnails/destination.svg';
   };
 
@@ -242,6 +243,10 @@ function ReadOnlyView({ destination, isLinearFeature, isAdmin, showImage = true,
             <span className={`poi-type-badge ${destination.feature_type}`}>
               {destination.feature_type === 'river' ? 'River' :
                destination.feature_type === 'boundary' ? 'Boundary' : 'Trail'}
+            </span>
+          ) : destination.poi_type === 'virtual' ? (
+            <span className="poi-type-badge virtual">
+              Organization
             </span>
           ) : (
             <span className="poi-type-badge destination">
@@ -345,7 +350,7 @@ function ReadOnlyView({ destination, isLinearFeature, isAdmin, showImage = true,
 }
 
 // Edit view component - works for both destinations and linear features
-function EditView({ destination, editedData, setEditedData, onSave, onCancel, onDelete, saving, deleting, onPreviewCoordsChange, isNewPOI, onImageUpdate, isLinearFeature, showImage = true }) {
+function EditView({ destination, editedData, setEditedData, onSave, onCancel, onDelete, saving, deleting, onPreviewCoordsChange, isNewPOI, isNewOrganization, onImageUpdate, isLinearFeature, showImage = true }) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [aiError, setAiError] = useState(null);
   const [researchSources, setResearchSources] = useState(null);
@@ -667,115 +672,129 @@ function EditView({ destination, editedData, setEditedData, onSave, onCancel, on
         <label>Brief Description</label>
         <textarea
           value={editedData.brief_description || ''}
-          onChange={(e) => handleChange('brief_description', e.target.value)}
-          rows={3}
+          onChange={(e) => {
+            handleChange('brief_description', e.target.value);
+            // Auto-expand textarea to fit content
+            e.target.style.height = 'auto';
+            e.target.style.height = e.target.scrollHeight + 'px';
+          }}
+          style={{ overflow: 'hidden', resize: 'none' }}
           placeholder="A short overview of this location..."
+          onInput={(e) => {
+            e.target.style.height = 'auto';
+            e.target.style.height = e.target.scrollHeight + 'px';
+          }}
         />
       </div>
 
-      <div className="edit-row">
-        <div className="edit-section half">
-          <label>Era</label>
-          <select
-            value={editedData.era || ''}
-            onChange={(e) => handleChange('era', e.target.value)}
-            className="era-select"
-          >
-            <option value="">Select an era...</option>
-            {availableEras.map(era => (
-              <option key={era.id} value={era.name}>
-                {era.name}
-                {era.year_start || era.year_end
-                  ? ` (${era.year_start || ''}${era.year_start && era.year_end ? '-' : ''}${era.year_end || '+'})`
-                  : ''}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="edit-section half">
-          <label>Property Owner</label>
-          <input
-            type="text"
-            value={editedData.property_owner || ''}
-            onChange={(e) => handleChange('property_owner', e.target.value)}
-            placeholder="e.g., Federal (NPS)"
-          />
-        </div>
-      </div>
-
-      <div className="edit-section">
-        <label>Primary Activities</label>
-        <div className="activities-selector">
-          <div
-            className="activities-toggle"
-            onClick={() => setShowActivityDropdown(!showActivityDropdown)}
-          >
-            <span className="activities-summary">
-              {selectedActivities.length > 0
-                ? selectedActivities.join(', ')
-                : 'Select activities...'}
-            </span>
-            <span className="activities-arrow">{showActivityDropdown ? '▲' : '▼'}</span>
+      {/* Hide these fields for organizations/virtual POIs */}
+      {!isNewOrganization && destination?.poi_type !== 'virtual' && (
+        <>
+          <div className="edit-row">
+            <div className="edit-section half">
+              <label>Era</label>
+              <select
+                value={editedData.era || ''}
+                onChange={(e) => handleChange('era', e.target.value)}
+                className="era-select"
+              >
+                <option value="">Select an era...</option>
+                {availableEras.map(era => (
+                  <option key={era.id} value={era.name}>
+                    {era.name}
+                    {era.year_start || era.year_end
+                      ? ` (${era.year_start || ''}${era.year_start && era.year_end ? '-' : ''}${era.year_end || '+'})`
+                      : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="edit-section half">
+              <label>Property Owner</label>
+              <input
+                type="text"
+                value={editedData.property_owner || ''}
+                onChange={(e) => handleChange('property_owner', e.target.value)}
+                placeholder="e.g., Federal (NPS)"
+              />
+            </div>
           </div>
-          {showActivityDropdown && (
-            <div className="activities-dropdown">
-              {availableActivities.length === 0 ? (
-                <div className="activities-empty">No activities configured. Add them in Settings.</div>
-              ) : (
-                availableActivities.map(activity => (
-                  <label key={activity.id} className="activity-checkbox">
-                    <input
-                      type="checkbox"
-                      checked={selectedActivities.includes(activity.name)}
-                      onChange={() => toggleActivity(activity.name)}
-                    />
-                    <span>{activity.name}</span>
-                  </label>
-                ))
+
+          <div className="edit-section">
+            <label>Primary Activities</label>
+            <div className="activities-selector">
+              <div
+                className="activities-toggle"
+                onClick={() => setShowActivityDropdown(!showActivityDropdown)}
+              >
+                <span className="activities-summary">
+                  {selectedActivities.length > 0
+                    ? selectedActivities.join(', ')
+                    : 'Select activities...'}
+                </span>
+                <span className="activities-arrow">{showActivityDropdown ? '▲' : '▼'}</span>
+              </div>
+              {showActivityDropdown && (
+                <div className="activities-dropdown">
+                  {availableActivities.length === 0 ? (
+                    <div className="activities-empty">No activities configured. Add them in Settings.</div>
+                  ) : (
+                    availableActivities.map(activity => (
+                      <label key={activity.id} className="activity-checkbox">
+                        <input
+                          type="checkbox"
+                          checked={selectedActivities.includes(activity.name)}
+                          onChange={() => toggleActivity(activity.name)}
+                        />
+                        <span>{activity.name}</span>
+                      </label>
+                    ))
+                  )}
+                </div>
               )}
             </div>
-          )}
-        </div>
-      </div>
+          </div>
 
-      <div className="edit-row">
-        <div className="edit-section half">
-          <label>Surface</label>
-          <select
-            value={editedData.surface || ''}
-            onChange={(e) => handleChange('surface', e.target.value)}
-          >
-            <option value="">Select surface...</option>
-            {availableSurfaces.map(surface => (
-              <option key={surface.id} value={surface.name}>
-                {surface.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="edit-section half">
-          <label>Pets Allowed</label>
-          <select
-            value={editedData.pets || ''}
-            onChange={(e) => handleChange('pets', e.target.value)}
-          >
-            <option value="">Unknown</option>
-            <option value="Yes">Yes</option>
-            <option value="No">No</option>
-            <option value="Leashed">Leashed Only</option>
-          </select>
-        </div>
-      </div>
+          <div className="edit-row">
+            <div className="edit-section half">
+              <label>Surface</label>
+              <select
+                value={editedData.surface || ''}
+                onChange={(e) => handleChange('surface', e.target.value)}
+              >
+                <option value="">Select surface...</option>
+                {availableSurfaces.map(surface => (
+                  <option key={surface.id} value={surface.name}>
+                    {surface.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="edit-section half">
+              <label>Pets Allowed</label>
+              <select
+                value={editedData.pets || ''}
+                onChange={(e) => handleChange('pets', e.target.value)}
+              >
+                <option value="">Unknown</option>
+                <option value="Yes">Yes</option>
+                <option value="No">No</option>
+                <option value="Leashed">Leashed Only</option>
+              </select>
+            </div>
+          </div>
 
-      <div className="edit-row">
-        <div className="edit-section half">
-          <label>Cell Signal</label>
-          <EditableCellSignal
-            level={editedData.cell_signal}
-            onChange={(val) => handleChange('cell_signal', val)}
-          />
-        </div>
-      </div>
+          <div className="edit-row">
+            <div className="edit-section half">
+              <label>Cell Signal</label>
+              <EditableCellSignal
+                level={editedData.cell_signal}
+                onChange={(val) => handleChange('cell_signal', val)}
+              />
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Linear feature specific fields - trails and rivers */}
       {isLinearFeature && editedData.feature_type !== 'boundary' && (
@@ -856,8 +875,8 @@ function EditView({ destination, editedData, setEditedData, onSave, onCancel, on
         </div>
       )}
 
-      {/* Lat/long fields - only for point destinations */}
-      {!isLinearFeature && (
+      {/* Lat/long fields - only for point destinations, not for virtual/organizations */}
+      {!isLinearFeature && destination?.poi_type !== 'virtual' && (
         <div className="edit-row">
           <div className="edit-section half">
             <label>Latitude</label>
@@ -894,7 +913,7 @@ function EditView({ destination, editedData, setEditedData, onSave, onCancel, on
       </div>
 
       <div className="edit-buttons-footer">
-        {!isNewPOI && (
+        {!isNewPOI && !isNewOrganization && (
           <button
             className="delete-btn"
             onClick={() => setShowDeleteConfirm(true)}
@@ -903,12 +922,12 @@ function EditView({ destination, editedData, setEditedData, onSave, onCancel, on
             Delete
           </button>
         )}
-        <div className={`edit-buttons-right ${isNewPOI ? 'full-width' : ''}`}>
+        <div className={`edit-buttons-right ${(isNewPOI || isNewOrganization) ? 'full-width' : ''}`}>
           <button className="cancel-btn" onClick={onCancel} disabled={saving || deleting}>
             Cancel
           </button>
           <button className="save-btn" onClick={onSave} disabled={saving || deleting}>
-            {saving ? 'Saving...' : (isNewPOI ? 'Create POI' : 'Save Changes')}
+            {saving ? 'Saving...' : (isNewPOI ? 'Create POI' : isNewOrganization ? 'Create Organization' : 'Save Changes')}
           </button>
         </div>
       </div>
@@ -1234,14 +1253,568 @@ function PoiEvents({ poiId, isAdmin, editMode }) {
   );
 }
 
-function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinationUpdate, onDestinationDelete, onSaveNewPOI, onCancelNewPOI, previewCoords, onPreviewCoordsChange, linearFeature, onLinearFeatureUpdate, onLinearFeatureDelete, onNavigate, currentIndex, totalCount }) {
+// Associations Modal Component - shows associations in a pop-up
+function AssociationsModal({ isOpen, onClose, poi, associations, allDestinations, allLinearFeatures, allVirtualPois, onSelectDestination, onSelectLinearFeature, isAdmin, editMode, onAssociationsChanged }) {
+  const [isAdding, setIsAdding] = useState(false);
+  const [selectedNewPois, setSelectedNewPois] = useState(new Set());
+  const [deleting, setDeleting] = useState(null);
+
+  if (!isOpen || !poi) return null;
+
+  // Find associations for this POI
+  const poiAssociations = associations.filter(assoc =>
+    assoc.virtual_poi_id === poi.id || assoc.physical_poi_id === poi.id
+  );
+
+  // Determine if this is a virtual POI
+  const isVirtualPoi = poi.poi_type === 'virtual';
+
+  // Get the associated POIs with association IDs
+  const associatedPoisWithAssocId = poiAssociations.map(assoc => {
+    if (isVirtualPoi) {
+      // This is a virtual POI, show associated physical POIs
+      const physicalId = assoc.physical_poi_id;
+      let associatedPoi = allDestinations?.find(d => d.id === physicalId);
+      if (!associatedPoi) {
+        associatedPoi = allLinearFeatures?.find(f => f.id === physicalId);
+      }
+      return associatedPoi ? { ...associatedPoi, _isLinear: !!allLinearFeatures?.find(f => f.id === physicalId), _isVirtual: false, _assocId: assoc.id } : null;
+    } else {
+      // This is a physical POI, show associated virtual POIs
+      const virtualId = assoc.virtual_poi_id;
+      const associatedPoi = allVirtualPois?.find(v => v.id === virtualId);
+      return associatedPoi ? { ...associatedPoi, _isVirtual: true, _isLinear: false, _assocId: assoc.id } : null;
+    }
+  }).filter(Boolean);
+
+  // Get available POIs for adding (not currently associated)
+  const availablePois = useMemo(() => {
+    if (!isVirtualPoi) return []; // Only virtual POIs can add associations
+
+    const currentIds = new Set(associatedPoisWithAssocId.map(p => p.id));
+    const allPhysicalPois = [
+      ...(allDestinations || []).map(d => ({ ...d, _type: 'point' })),
+      ...(allLinearFeatures || []).map(f => ({ ...f, _type: f.feature_type || 'trail' }))
+    ];
+
+    return allPhysicalPois.filter(p => !currentIds.has(p.id));
+  }, [isVirtualPoi, associatedPoisWithAssocId, allDestinations, allLinearFeatures]);
+
+  const handleDeleteAssociation = async (assocId, poiName) => {
+    if (!confirm(`Remove association with "${poiName}"?`)) return;
+
+    setDeleting(assocId);
+    try {
+      const response = await fetch(`/api/admin/poi-associations/${assocId}`, {
+        method: 'DELETE'
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to delete association');
+      }
+
+      if (onAssociationsChanged) {
+        onAssociationsChanged();
+      }
+    } catch (error) {
+      console.error('Error deleting association:', error);
+      alert('Error removing association: ' + error.message);
+    } finally {
+      setDeleting(null);
+    }
+  };
+
+  const handleAddAssociations = async () => {
+    if (selectedNewPois.size === 0) {
+      alert('Please select at least one location to associate');
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/admin/poi-associations/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          virtual_poi_id: poi.id,
+          physical_poi_ids: Array.from(selectedNewPois),
+          association_type: 'manages'
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to add associations');
+      }
+
+      setIsAdding(false);
+      setSelectedNewPois(new Set());
+
+      if (onAssociationsChanged) {
+        onAssociationsChanged();
+      }
+    } catch (error) {
+      console.error('Error adding associations:', error);
+      alert('Error adding associations: ' + error.message);
+    }
+  };
+
+  return (
+    <div className="associations-modal-overlay" onClick={onClose}>
+      <div className="associations-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="associations-modal-header">
+          <h3>{isVirtualPoi ? 'Associated Locations' : 'Organizations'}</h3>
+          <button className="associations-modal-close" onClick={onClose}>&times;</button>
+        </div>
+
+        <div className="associations-modal-content">
+          <p className="associations-modal-description">
+            {isVirtualPoi
+              ? 'Physical locations associated with this organization.'
+              : 'Organizations associated with this location.'}
+          </p>
+
+          {isAdmin && editMode && isVirtualPoi && !isAdding && (
+            <button
+              onClick={() => setIsAdding(true)}
+              className="btn-add-association"
+              style={{ marginBottom: '1rem' }}
+            >
+              + Add Associations
+            </button>
+          )}
+
+          {associatedPoisWithAssocId.length > 0 ? (
+            <div className="associations-modal-list">
+              {associatedPoisWithAssocId.map(associatedPoi => (
+                <div
+                  key={associatedPoi.id}
+                  className="association-item"
+                >
+                  <div
+                    className="association-item-clickable"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (associatedPoi._isVirtual || (!associatedPoi._isLinear && !associatedPoi._isVirtual)) {
+                        onSelectDestination(associatedPoi);
+                        onClose();
+                      } else if (associatedPoi._isLinear) {
+                        onSelectLinearFeature(associatedPoi);
+                        onClose();
+                      }
+                    }}
+                    role="button"
+                    tabIndex={0}
+                  >
+                    <div className={`association-item-badge ${
+                      associatedPoi._isVirtual ? 'virtual' :
+                      !associatedPoi._isLinear ? 'destination' :
+                      associatedPoi.feature_type || 'trail'
+                    }`}>
+                      {associatedPoi._isVirtual ? 'O' :
+                       !associatedPoi._isLinear ? 'D' :
+                       associatedPoi.feature_type === 'river' ? 'R' :
+                       associatedPoi.feature_type === 'boundary' ? 'B' : 'T'}
+                    </div>
+                    <div className="association-item-content">
+                      <div className="association-item-name">{associatedPoi.name}</div>
+                      {associatedPoi.brief_description && (
+                        <div className="association-item-description">{associatedPoi.brief_description}</div>
+                      )}
+                    </div>
+                  </div>
+                  {isAdmin && editMode && isVirtualPoi && (
+                    <button
+                      onClick={() => handleDeleteAssociation(associatedPoi._assocId, associatedPoi.name)}
+                      className="btn-delete-association"
+                      disabled={deleting === associatedPoi._assocId}
+                      title="Remove association"
+                    >
+                      {deleting === associatedPoi._assocId ? '...' : '×'}
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="associations-modal-empty">No associations yet.</div>
+          )}
+
+          {/* Add associations section */}
+          {isAdding && (
+            <div className="add-associations-section">
+              <h4>Add Associations</h4>
+              <div className="available-pois-list">
+                {availablePois.length === 0 ? (
+                  <div className="empty-message">All locations are already associated</div>
+                ) : (
+                  availablePois.map(availablePoi => (
+                    <label key={availablePoi.id} className="poi-checkbox-item">
+                      <input
+                        type="checkbox"
+                        checked={selectedNewPois.has(availablePoi.id)}
+                        onChange={() => {
+                          setSelectedNewPois(prev => {
+                            const next = new Set(prev);
+                            if (next.has(availablePoi.id)) {
+                              next.delete(availablePoi.id);
+                            } else {
+                              next.add(availablePoi.id);
+                            }
+                            return next;
+                          });
+                        }}
+                      />
+                      <span className={`poi-type-badge ${availablePoi._type === 'point' ? 'destination' : availablePoi._type}`}>
+                        {availablePoi._type === 'point' ? 'D' :
+                         availablePoi._type === 'river' ? 'R' :
+                         availablePoi._type === 'boundary' ? 'B' : 'T'}
+                      </span>
+                      <span className="poi-name">{availablePoi.name}</span>
+                    </label>
+                  ))
+                )}
+              </div>
+              <div className="add-associations-actions">
+                <button onClick={() => {
+                  setIsAdding(false);
+                  setSelectedNewPois(new Set());
+                }} className="btn-cancel">
+                  Cancel
+                </button>
+                <button
+                  onClick={handleAddAssociations}
+                  className="btn-save"
+                  disabled={selectedNewPois.size === 0}
+                >
+                  Add {selectedNewPois.size > 0 ? `(${selectedNewPois.size})` : ''}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Associations tab content - shows related POIs (virtual or physical)
+function AssociationsTabContent({ poi, associations, allDestinations, allLinearFeatures, allVirtualPois, onSelectDestination, onSelectLinearFeature, isAdmin, editMode, onAssociationsChanged, onStartDrawingAssociations }) {
+  const [isAdding, setIsAdding] = useState(false);
+  const [selectedNewPois, setSelectedNewPois] = useState(new Set());
+  const [deleting, setDeleting] = useState(null);
+  const [filterText, setFilterText] = useState('');
+
+  // Find associations for this POI
+  const poiAssociations = associations.filter(assoc =>
+    assoc.virtual_poi_id === poi.id || assoc.physical_poi_id === poi.id
+  );
+
+  // Determine if this is a virtual POI
+  const isVirtualPoi = poi.poi_type === 'virtual';
+
+  // Get the associated POIs with association IDs
+  const associatedPoisWithAssocId = poiAssociations.map(assoc => {
+    if (isVirtualPoi) {
+      // This is a virtual POI, show associated physical POIs
+      const physicalId = assoc.physical_poi_id;
+      let associatedPoi = allDestinations?.find(d => d.id === physicalId);
+      if (!associatedPoi) {
+        associatedPoi = allLinearFeatures?.find(f => f.id === physicalId);
+      }
+      return associatedPoi ? { ...associatedPoi, _isLinear: !!allLinearFeatures?.find(f => f.id === physicalId), _isVirtual: false, _assocId: assoc.id } : null;
+    } else {
+      // This is a physical POI, show associated virtual POIs
+      const virtualId = assoc.virtual_poi_id;
+      const associatedPoi = allVirtualPois?.find(v => v.id === virtualId);
+      return associatedPoi ? { ...associatedPoi, _isVirtual: true, _isLinear: false, _assocId: assoc.id } : null;
+    }
+  }).filter(Boolean);
+
+  // Get available POIs for adding (not currently associated)
+  const availablePois = useMemo(() => {
+    if (!isVirtualPoi) return []; // Only virtual POIs can add associations
+
+    const currentIds = new Set(associatedPoisWithAssocId.map(p => p.id));
+    const allPhysicalPois = [
+      ...(allDestinations || []).map(d => ({ ...d, _type: 'point' })),
+      ...(allLinearFeatures || []).map(f => ({ ...f, _type: f.feature_type || 'trail' }))
+    ];
+
+    return allPhysicalPois.filter(p => !currentIds.has(p.id));
+  }, [isVirtualPoi, associatedPoisWithAssocId, allDestinations, allLinearFeatures]);
+
+  const handleDeleteAssociation = async (assocId, poiName) => {
+    if (!confirm(`Remove association with "${poiName}"?`)) return;
+
+    setDeleting(assocId);
+    try {
+      const response = await fetch(`/api/admin/poi-associations/${assocId}`, {
+        method: 'DELETE'
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to delete association');
+      }
+
+      if (onAssociationsChanged) {
+        onAssociationsChanged();
+      }
+    } catch (error) {
+      console.error('Error deleting association:', error);
+      alert('Error removing association: ' + error.message);
+    } finally {
+      setDeleting(null);
+    }
+  };
+
+  const handleAddAssociations = async () => {
+    if (selectedNewPois.size === 0) {
+      alert('Please select at least one location to associate');
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/admin/poi-associations/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          virtual_poi_id: poi.id,
+          physical_poi_ids: Array.from(selectedNewPois),
+          association_type: 'manages'
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to add associations');
+      }
+
+      setIsAdding(false);
+      setSelectedNewPois(new Set());
+      setFilterText('');
+
+      if (onAssociationsChanged) {
+        onAssociationsChanged();
+      }
+    } catch (error) {
+      console.error('Error adding associations:', error);
+      alert('Error adding associations: ' + error.message);
+    }
+  };
+
+  if (poiAssociations.length === 0 && !isAdmin) {
+    return (
+      <div className="sidebar-tab-empty">
+        No associated entities for this location.
+      </div>
+    );
+  }
+
+  return (
+    <div className="associations-tab-content">
+      <div className="section">
+        <div className="section-header-with-actions">
+          <div>
+            <h3>{isVirtualPoi ? 'Associated Locations' : 'Organizations'}</h3>
+            <p className="associations-description">
+              {isVirtualPoi
+                ? 'Physical locations associated with this organization.'
+                : 'Organizations associated with this location.'}
+            </p>
+          </div>
+          {isAdmin && editMode && isVirtualPoi && !isAdding && (
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button
+                onClick={() => {
+                  if (onStartDrawingAssociations) {
+                    onStartDrawingAssociations(poi.id);
+                  }
+                }}
+                className="btn-add-association"
+                title="Draw rectangle on map to select multiple locations"
+              >
+                Add from Map
+              </button>
+              <button
+                onClick={() => setIsAdding(true)}
+                className="btn-add-association"
+              >
+                Add from List
+              </button>
+            </div>
+          )}
+        </div>
+
+        {associatedPoisWithAssocId.length > 0 ? (
+          <div className={`associations-list ${isAdding ? 'compact' : ''}`}>
+            {associatedPoisWithAssocId.map(associatedPoi => (
+              <div
+                key={associatedPoi.id}
+                className="association-item"
+              >
+                <div
+                  className="association-item-clickable"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (associatedPoi._isVirtual || (!associatedPoi._isLinear && !associatedPoi._isVirtual)) {
+                      onSelectDestination(associatedPoi);
+                    } else if (associatedPoi._isLinear) {
+                      onSelectLinearFeature(associatedPoi);
+                    }
+                  }}
+                  role="button"
+                  tabIndex={0}
+                >
+                  <div className={`association-item-badge ${
+                    associatedPoi._isVirtual ? 'virtual' :
+                    !associatedPoi._isLinear ? 'destination' :
+                    associatedPoi.feature_type || 'trail'
+                  }`}>
+                    {associatedPoi._isVirtual ? 'O' :
+                     !associatedPoi._isLinear ? 'D' :
+                     associatedPoi.feature_type === 'river' ? 'R' :
+                     associatedPoi.feature_type === 'boundary' ? 'B' : 'T'}
+                  </div>
+                  <div className="association-item-content">
+                    <div className="association-item-name">{associatedPoi.name}</div>
+                    {associatedPoi.brief_description && (
+                      <div className="association-item-description">{associatedPoi.brief_description}</div>
+                    )}
+                  </div>
+                </div>
+                {isAdmin && editMode && isVirtualPoi && (
+                  <button
+                    onClick={() => handleDeleteAssociation(associatedPoi._assocId, associatedPoi.name)}
+                    className="btn-delete-association"
+                    disabled={deleting === associatedPoi._assocId}
+                    title="Remove association"
+                  >
+                    {deleting === associatedPoi._assocId ? '...' : '×'}
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="sidebar-tab-empty">No associations yet.</div>
+        )}
+
+      </div>
+
+      {/* Add associations modal - pop-up overlay */}
+      {isAdding && (
+        <div className="add-associations-modal-overlay" onClick={() => {
+          setIsAdding(false);
+          setFilterText('');
+        }}>
+          <div className="add-associations-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="add-associations-modal-header">
+              <h3>Add Associations</h3>
+              <button className="add-associations-modal-close" onClick={() => {
+                setIsAdding(false);
+                setFilterText('');
+              }}>&times;</button>
+            </div>
+            <div className="add-associations-modal-content">
+              {availablePois.length > 0 && (
+                <div className="filter-input-container">
+                  <input
+                    type="text"
+                    placeholder="Search locations..."
+                    value={filterText}
+                    onChange={(e) => setFilterText(e.target.value)}
+                    className="filter-input"
+                  />
+                </div>
+              )}
+              <div className="available-pois-list">
+                {availablePois.length === 0 ? (
+                  <div className="empty-message">All locations are already associated</div>
+                ) : (
+                  availablePois
+                    .filter(poi => filterText === '' || poi.name.toLowerCase().includes(filterText.toLowerCase()))
+                    .map(availablePoi => (
+                    <label key={availablePoi.id} className="poi-checkbox-item">
+                      <input
+                        type="checkbox"
+                        checked={selectedNewPois.has(availablePoi.id)}
+                        onChange={() => {
+                          setSelectedNewPois(prev => {
+                            const next = new Set(prev);
+                            if (next.has(availablePoi.id)) {
+                              next.delete(availablePoi.id);
+                            } else {
+                              next.add(availablePoi.id);
+                            }
+                            return next;
+                          });
+                        }}
+                      />
+                      <span className={`poi-type-badge ${availablePoi._type === 'point' ? 'destination' : availablePoi._type}`}>
+                        {availablePoi._type === 'point' ? 'D' :
+                         availablePoi._type === 'river' ? 'R' :
+                         availablePoi._type === 'boundary' ? 'B' : 'T'}
+                      </span>
+                      <span className="poi-name">{availablePoi.name}</span>
+                    </label>
+                  ))
+                )}
+              </div>
+            </div>
+            <div className="add-associations-modal-footer">
+              <button onClick={() => {
+                setIsAdding(false);
+                setSelectedNewPois(new Set());
+                setFilterText('');
+              }} className="btn-cancel">
+                Cancel
+              </button>
+              <button
+                onClick={handleAddAssociations}
+                className="btn-save"
+                disabled={selectedNewPois.size === 0}
+              >
+                Add {selectedNewPois.size > 0 ? `(${selectedNewPois.size})` : ''}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, onClose, isAdmin, editMode, onDestinationUpdate, onDestinationDelete, onSaveNewPOI, onCancelNewPOI, onSaveNewOrganization, onCancelNewOrganization, previewCoords, onPreviewCoordsChange, linearFeature, onLinearFeatureUpdate, onLinearFeatureDelete, onNavigate, currentIndex, totalCount, associations, allDestinations, allLinearFeatures, allVirtualPois, onSelectDestination, onSelectLinearFeature, onAssociationsChanged, onStartDrawingAssociations }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editedData, setEditedData] = useState({});
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [sidebarTab, setSidebarTab] = useState('view');
   const [showShareModal, setShowShareModal] = useState(false);
+  const [showAssociationsModal, setShowAssociationsModal] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+
+  // State for new organization creation
+  const [organizationData, setOrganizationData] = useState({
+    name: '',
+    brief_description: '',
+    property_owner: '',
+    more_info_link: ''
+  });
+  const [selectedPoiIds, setSelectedPoiIds] = useState(new Set());
+
+  // Initialize organization data when newOrganization changes
+  useEffect(() => {
+    if (newOrganization) {
+      setSelectedPoiIds(newOrganization._selectedPoiIds || new Set());
+    }
+  }, [newOrganization]);
+
+  // Determine which POI we're showing
+  const activePoi = destination || linearFeature;
+
+  // Check if this POI has associations
+  const hasAssociations = activePoi && associations?.some(assoc =>
+    assoc.virtual_poi_id === activePoi.id || assoc.physical_poi_id === activePoi.id
+  );
 
   // Touch/swipe handling for mobile navigation
   const touchStartX = React.useRef(null);
@@ -1310,10 +1883,89 @@ function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinat
     }
   }, [previewCoords, isEditing, isLinearFeature]);
 
+  // Handle new organization creation - treat like creating a new POI
+  useEffect(() => {
+    if (isNewOrganization && newOrganization) {
+      setIsEditing(true);
+      setSidebarTab('associations'); // Open to Associations tab
+      setEditedData({
+        name: newOrganization.name || '',
+        brief_description: newOrganization.brief_description || '',
+        property_owner: newOrganization.property_owner || '',
+        more_info_link: newOrganization.more_info_link || '',
+        historical_description: '',
+        primary_activities: '',
+        era: '',
+        surface: '',
+        pets: '',
+        cell_signal: null
+      });
+    }
+  }, [isNewOrganization, newOrganization]);
+
+  // Auto-resize textareas when entering edit mode or data changes
+  useEffect(() => {
+    if (isEditing) {
+      // Small delay to ensure DOM is updated
+      setTimeout(() => {
+        const textareas = document.querySelectorAll('.edit-section textarea, .history-tab-content textarea');
+        textareas.forEach(textarea => {
+          textarea.style.height = 'auto';
+          textarea.style.height = textarea.scrollHeight + 'px';
+        });
+      }, 0);
+    }
+  }, [isEditing, editedData.brief_description, editedData.historical_description]);
+
+  // Handler for saving new organization
+  const handleSaveNewOrganization = async () => {
+    if (!editedData.name?.trim()) {
+      alert('Please enter a name for the organization');
+      return;
+    }
+
+    if (selectedPoiIds.size === 0) {
+      alert('Please select at least one location to associate');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await onSaveNewOrganization(editedData, Array.from(selectedPoiIds));
+    } catch (error) {
+      const errorMsg = error.message || 'Unknown error';
+      if (errorMsg.includes('duplicate') || errorMsg.includes('already exists')) {
+        alert(`An organization with the name "${editedData.name}" already exists. Please choose a different name.`);
+      } else {
+        alert('Error creating organization: ' + errorMsg);
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleTogglePoi = (poiId) => {
+    setSelectedPoiIds(prev => {
+      const next = new Set(prev);
+      if (next.has(poiId)) {
+        next.delete(poiId);
+      } else {
+        next.add(poiId);
+      }
+      return next;
+    });
+  };
+
   // Save handler for destinations
   const handleSaveDestination = async () => {
     if (!editedData.name || !editedData.name.trim()) {
       alert('Name is required');
+      return;
+    }
+
+    // Check for new organization creation
+    if (isNewOrganization) {
+      await handleSaveNewOrganization();
       return;
     }
 
@@ -1392,6 +2044,8 @@ function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinat
   const handleCancel = () => {
     if (isNewPOI && onCancelNewPOI) {
       onCancelNewPOI();
+    } else if (isNewOrganization && onCancelNewOrganization) {
+      onCancelNewOrganization();
     } else {
       setEditedData({ ...displayItem });
       setIsEditing(false);
@@ -1542,6 +2196,12 @@ function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinat
           >
             History
           </button>
+          <button
+            className={`sidebar-tab ${sidebarTab === 'associations' ? 'active' : ''}`}
+            onClick={() => setSidebarTab('associations')}
+          >
+            Associations
+          </button>
         </div>
 
         {/* Tab Content */}
@@ -1571,7 +2231,13 @@ function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinat
                 }}
               />
             ) : (
-              <ReadOnlyView destination={linearFeature} isLinearFeature={true} isAdmin={isAdmin} showImage={false} onShare={() => setShowShareModal(true)} />
+              <ReadOnlyView
+                destination={linearFeature}
+                isLinearFeature={true}
+                isAdmin={isAdmin}
+                showImage={false}
+                onShare={() => setShowShareModal(true)}
+              />
             )
           )}
 
@@ -1590,9 +2256,17 @@ function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinat
                   <label>Historical Description</label>
                   <textarea
                     value={editedData.historical_description || ''}
-                    onChange={(e) => setEditedData(prev => ({ ...prev, historical_description: e.target.value }))}
-                    rows={8}
+                    onChange={(e) => {
+                      setEditedData(prev => ({ ...prev, historical_description: e.target.value }));
+                      e.target.style.height = 'auto';
+                      e.target.style.height = e.target.scrollHeight + 'px';
+                    }}
+                    style={{ overflow: 'hidden', resize: 'none' }}
                     placeholder="Detailed historical significance..."
+                    onInput={(e) => {
+                      e.target.style.height = 'auto';
+                      e.target.style.height = e.target.scrollHeight + 'px';
+                    }}
                   />
                 </div>
               ) : linearFeature.historical_description ? (
@@ -1605,6 +2279,22 @@ function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinat
               )}
             </div>
           )}
+
+          {sidebarTab === 'associations' && linearFeature && associations && (
+            <AssociationsTabContent
+              poi={linearFeature}
+              associations={associations}
+              allDestinations={allDestinations}
+              allLinearFeatures={allLinearFeatures}
+              allVirtualPois={allVirtualPois}
+              onSelectDestination={onSelectDestination}
+              onSelectLinearFeature={onSelectLinearFeature}
+              isAdmin={isAdmin}
+              editMode={editMode}
+              onAssociationsChanged={onAssociationsChanged}
+              onStartDrawingAssociations={onStartDrawingAssociations}
+            />
+          )}
         </div>
 
         <ShareModal
@@ -1612,6 +2302,21 @@ function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinat
           onClose={() => setShowShareModal(false)}
           poiName={linearFeature.name}
           poiDescription={linearFeature.brief_description}
+        />
+
+        <AssociationsModal
+          isOpen={showAssociationsModal}
+          onClose={() => setShowAssociationsModal(false)}
+          poi={linearFeature}
+          associations={associations}
+          allDestinations={allDestinations}
+          allLinearFeatures={allLinearFeatures}
+          allVirtualPois={allVirtualPois}
+          onSelectDestination={onSelectDestination}
+          onSelectLinearFeature={onSelectLinearFeature}
+          isAdmin={isAdmin}
+          editMode={editMode}
+          onAssociationsChanged={onAssociationsChanged}
         />
       </div>
     );
@@ -1639,7 +2344,9 @@ function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinat
       )}
 
       <div className="sidebar-header">
-        <h2 title={destination?.name || 'Location Details'}>{isEditing ? 'Edit: ' : ''}{destination?.name || 'Location Details'}</h2>
+        <h2 title={destination?.name || 'Location Details'}>
+          {isNewOrganization ? 'Create Organization' : (isEditing ? 'Edit: ' : '')}{!isNewOrganization && (destination?.name || 'Location Details')}
+        </h2>
         <div className="header-buttons">
           <button className="close-btn" onClick={onClose}>&times;</button>
         </div>
@@ -1697,6 +2404,12 @@ function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinat
         >
           History
         </button>
+        <button
+          className={`sidebar-tab ${sidebarTab === 'associations' ? 'active' : ''}`}
+          onClick={() => setSidebarTab('associations')}
+        >
+          Associations
+        </button>
       </div>
 
       {/* Tab Content */}
@@ -1714,6 +2427,7 @@ function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinat
               deleting={deleting}
               onPreviewCoordsChange={onPreviewCoordsChange}
               isNewPOI={isNewPOI}
+              isNewOrganization={isNewOrganization}
               showImage={false}
               onImageUpdate={(hasImage, driveFileId) => {
                 if (onDestinationUpdate) {
@@ -1726,7 +2440,12 @@ function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinat
               }}
             />
           ) : (
-            <ReadOnlyView destination={destination} isAdmin={isAdmin} showImage={false} onShare={() => setShowShareModal(true)} />
+            <ReadOnlyView
+              destination={destination}
+              isAdmin={isAdmin}
+              showImage={false}
+              onShare={() => setShowShareModal(true)}
+            />
           )
         )}
 
@@ -1745,9 +2464,17 @@ function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinat
                 <label>Historical Description</label>
                 <textarea
                   value={editedData.historical_description || ''}
-                  onChange={(e) => setEditedData(prev => ({ ...prev, historical_description: e.target.value }))}
-                  rows={8}
+                  onChange={(e) => {
+                    setEditedData(prev => ({ ...prev, historical_description: e.target.value }));
+                    e.target.style.height = 'auto';
+                    e.target.style.height = e.target.scrollHeight + 'px';
+                  }}
+                  style={{ overflow: 'hidden', resize: 'none' }}
                   placeholder="Detailed historical significance..."
+                  onInput={(e) => {
+                    e.target.style.height = 'auto';
+                    e.target.style.height = e.target.scrollHeight + 'px';
+                  }}
                 />
               </div>
             ) : destination.historical_description ? (
@@ -1760,6 +2487,65 @@ function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinat
             )}
           </div>
         )}
+
+        {sidebarTab === 'associations' && destination && (
+          isNewOrganization && newOrganization ? (
+            // New organization - show POI selection interface matching existing associations style
+            <div className="associations-tab-content" style={{ padding: '1rem' }}>
+              <h3 style={{ marginBottom: '1rem' }}>Associated Locations ({selectedPoiIds.size})</h3>
+
+              {selectedPoiIds.size > 0 ? (
+                <div className="associations-list">
+                  {(newOrganization._poisInBounds || [])
+                    .filter(poi => selectedPoiIds.has(poi.id))
+                    .map(poi => (
+                      <div key={poi.id} className="association-item">
+                        <div className="association-item-clickable">
+                          <div className={`association-item-badge ${poi._type === 'point' ? 'destination' : poi._type}`}>
+                            {poi._type === 'point' ? 'D' :
+                             poi._type === 'river' ? 'R' :
+                             poi._type === 'boundary' ? 'B' : 'T'}
+                          </div>
+                          <div className="association-item-content">
+                            <div className="association-item-name">{poi.name}</div>
+                            {poi.brief_description && (
+                              <div className="association-item-description">{poi.brief_description}</div>
+                            )}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleTogglePoi(poi.id)}
+                          className="btn-delete-association"
+                          title="Remove from organization"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                </div>
+              ) : (
+                <div className="sidebar-tab-empty">
+                  No locations found in the selected area that match your active filters.
+                </div>
+              )}
+            </div>
+          ) : associations ? (
+            // Existing POI - show normal associations
+            <AssociationsTabContent
+              poi={destination}
+              associations={associations}
+              allDestinations={allDestinations}
+              allLinearFeatures={allLinearFeatures}
+              allVirtualPois={allVirtualPois}
+              onSelectDestination={onSelectDestination}
+              onSelectLinearFeature={onSelectLinearFeature}
+              isAdmin={isAdmin}
+              editMode={editMode}
+              onAssociationsChanged={onAssociationsChanged}
+              onStartDrawingAssociations={onStartDrawingAssociations}
+            />
+          ) : null
+        )}
       </div>
 
       <ShareModal
@@ -1767,6 +2553,21 @@ function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinat
         onClose={() => setShowShareModal(false)}
         poiName={destination?.name || ''}
         poiDescription={destination?.brief_description}
+      />
+
+      <AssociationsModal
+        isOpen={showAssociationsModal}
+        onClose={() => setShowAssociationsModal(false)}
+        poi={destination}
+        associations={associations}
+        allDestinations={allDestinations}
+        allLinearFeatures={allLinearFeatures}
+        allVirtualPois={allVirtualPois}
+        onSelectDestination={onSelectDestination}
+        onSelectLinearFeature={onSelectLinearFeature}
+        isAdmin={isAdmin}
+        editMode={editMode}
+        onAssociationsChanged={onAssociationsChanged}
       />
     </div>
   );

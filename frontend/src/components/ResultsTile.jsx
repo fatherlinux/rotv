@@ -1,7 +1,7 @@
 import React, { memo } from 'react';
 
 // Individual POI tile for the Results tab
-const ResultsTile = memo(function ResultsTile({ poi, poiKey, isLinear, isSelected }) {
+const ResultsTile = memo(function ResultsTile({ poi, poiKey, isLinear, isVirtual, isSelected }) {
   // Use thumbnail endpoint for fast, cached small images
   const imageUrl = poi.image_mime_type
     ? `/api/pois/${poi.id}/thumbnail?size=small`
@@ -9,6 +9,7 @@ const ResultsTile = memo(function ResultsTile({ poi, poiKey, isLinear, isSelecte
 
   // Get default thumbnail SVG path based on type
   const getDefaultThumbnail = () => {
+    if (isVirtual) return '/icons/thumbnails/virtual.svg';
     if (isLinear) {
       if (poi.feature_type === 'river') return '/icons/thumbnails/river.svg';
       if (poi.feature_type === 'boundary') return '/icons/thumbnails/boundary.svg';
@@ -19,6 +20,7 @@ const ResultsTile = memo(function ResultsTile({ poi, poiKey, isLinear, isSelecte
 
   // Get POI type for styling and labels
   const getPoiType = () => {
+    if (isVirtual) return 'virtual';
     if (!isLinear) return 'destination';
     if (poi.feature_type === 'river') return 'river';
     if (poi.feature_type === 'boundary') return 'boundary';
@@ -28,6 +30,7 @@ const ResultsTile = memo(function ResultsTile({ poi, poiKey, isLinear, isSelecte
   // Get type label
   const getTypeLabel = () => {
     const type = getPoiType();
+    if (type === 'virtual') return 'Organization';
     if (type === 'destination') return 'Destination';
     if (type === 'river') return 'River';
     if (type === 'boundary') return 'Boundary';
@@ -59,7 +62,7 @@ const ResultsTile = memo(function ResultsTile({ poi, poiKey, isLinear, isSelecte
         {/* Badges row */}
         <div className="results-tile-badges">
           <span className={`poi-type-icon ${poiType}`}>
-            {poiType === 'destination' ? 'D' : poiType === 'trail' ? 'T' : poiType === 'river' ? 'R' : 'B'}
+            {poiType === 'virtual' ? 'O' : poiType === 'destination' ? 'D' : poiType === 'trail' ? 'T' : poiType === 'river' ? 'R' : 'B'}
           </span>
           {poi.era && (
             <span className="results-tile-era">{poi.era}</span>
