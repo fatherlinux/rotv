@@ -3,7 +3,7 @@ FROM registry.access.redhat.com/ubi10/ubi:latest AS infrastructure
 
 LABEL maintainer="fatherlinux"
 LABEL description="Roots of The Valley - Cuyahoga Valley National Park destination explorer"
-LABEL version="1.6.0"
+LABEL version="1.7.0"
 
 # Install Node.js
 RUN dnf install -y nodejs npm && dnf clean all

@@ -8,6 +8,7 @@ import passport from 'passport';
 import path from 'path';
 import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
+import sharp from 'sharp';
 
 import { configurePassport } from './config/passport.js';
 import authRoutes from './routes/auth.js';
@@ -665,10 +666,70 @@ app.get('/api/pois/:id/image', async (req, res) => {
     const { image_data, image_mime_type } = result.rows[0];
     res.setHeader('Content-Type', image_mime_type || 'image/jpeg');
     res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.setHeader('Access-Control-Allow-Origin', '*');
     res.send(image_data);
   } catch (error) {
     console.error('Error serving POI image:', error);
     res.status(500).json({ error: 'Failed to serve image' });
+  }
+});
+
+// In-memory cache for thumbnails (cleared on server restart)
+const thumbnailCache = new Map();
+const THUMBNAIL_CACHE_MAX_SIZE = 100; // Max cached thumbnails
+
+// Serve optimized thumbnails for social media sharing (1200x630, compressed)
+app.get('/api/pois/:id/thumbnail', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Check cache first
+    if (thumbnailCache.has(id)) {
+      const cached = thumbnailCache.get(id);
+      res.setHeader('Content-Type', 'image/jpeg');
+      res.setHeader('Cache-Control', 'public, max-age=604800'); // 1 week
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      return res.send(cached);
+    }
+
+    const result = await pool.query(
+      'SELECT image_data, image_mime_type FROM pois WHERE id = $1 AND image_data IS NOT NULL',
+      [id]
+    );
+
+    if (result.rows.length === 0 || !result.rows[0].image_data) {
+      return res.status(404).json({ error: 'Image not found' });
+    }
+
+    const { image_data } = result.rows[0];
+
+    // Resize to 1200x630 (Facebook/Twitter optimal) and compress
+    const thumbnail = await sharp(image_data)
+      .resize(1200, 630, {
+        fit: 'cover',
+        position: 'center'
+      })
+      .jpeg({
+        quality: 80,
+        progressive: true
+      })
+      .toBuffer();
+
+    // Cache the thumbnail (with size limit)
+    if (thumbnailCache.size >= THUMBNAIL_CACHE_MAX_SIZE) {
+      // Remove oldest entry
+      const firstKey = thumbnailCache.keys().next().value;
+      thumbnailCache.delete(firstKey);
+    }
+    thumbnailCache.set(id, thumbnail);
+
+    res.setHeader('Content-Type', 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=604800'); // 1 week
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.send(thumbnail);
+  } catch (error) {
+    console.error('Error serving POI thumbnail:', error);
+    res.status(500).json({ error: 'Failed to serve thumbnail' });
   }
 });
 
@@ -748,6 +809,7 @@ app.get('/api/destinations/:id/image', async (req, res) => {
     const { image_data, image_mime_type } = result.rows[0];
     res.setHeader('Content-Type', image_mime_type || 'image/jpeg');
     res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.setHeader('Access-Control-Allow-Origin', '*');
     res.send(image_data);
   } catch (error) {
     console.error('Error serving destination image:', error);
@@ -814,6 +876,7 @@ app.get('/api/linear-features/:id/image', async (req, res) => {
     const { image_data, image_mime_type } = result.rows[0];
     res.setHeader('Content-Type', image_mime_type || 'image/jpeg');
     res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.setHeader('Access-Control-Allow-Origin', '*');
     res.send(image_data);
   } catch (error) {
     console.error('Error serving linear feature image:', error);
@@ -946,7 +1009,7 @@ app.get('/share/destination/:id', async (req, res) => {
     const poi = result.rows[0];
     const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
     const appUrl = `${baseUrl}/?poi=${encodeURIComponent(poi.name.toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-'))}`;
-    const imageUrl = poi.image_mime_type ? `${baseUrl}/api/destinations/${poi.id}/image` : `${baseUrl}/icons/default.svg`;
+    const imageUrl = poi.image_mime_type ? `${baseUrl}/api/pois/${poi.id}/thumbnail` : `${baseUrl}/icons/default.svg`;
     const description = poi.brief_description || `Explore ${poi.name} at Cuyahoga Valley National Park`;
 
     // Generate HTML with OpenGraph meta tags
@@ -964,6 +1027,7 @@ app.get('/share/destination/:id', async (req, res) => {
   <meta property="og:title" content="${poi.name} | Roots of The Valley">
   <meta property="og:description" content="${description.replace(/"/g, '&quot;')}">
   <meta property="og:image" content="${imageUrl}">
+  <meta property="og:image:type" content="image/jpeg">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta property="og:url" content="${appUrl}">
@@ -1011,7 +1075,7 @@ app.get('/share/linear-feature/:id', async (req, res) => {
     const feature = result.rows[0];
     const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
     const appUrl = `${baseUrl}/?feature=${encodeURIComponent(feature.name.toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-'))}`;
-    const imageUrl = feature.image_mime_type ? `${baseUrl}/api/linear-features/${feature.id}/image` : `${baseUrl}/icons/layers/${feature.poi_type === 'trail' ? 'trails' : 'rivers'}.svg`;
+    const imageUrl = feature.image_mime_type ? `${baseUrl}/api/pois/${feature.id}/thumbnail` : `${baseUrl}/icons/layers/${feature.poi_type === 'trail' ? 'trails' : 'rivers'}.svg`;
     const description = feature.brief_description || `Explore the ${feature.name} at Cuyahoga Valley National Park`;
 
     // Generate HTML with OpenGraph meta tags
@@ -1029,6 +1093,7 @@ app.get('/share/linear-feature/:id', async (req, res) => {
   <meta property="og:title" content="${feature.name} | Roots of The Valley">
   <meta property="og:description" content="${description.replace(/"/g, '&quot;')}">
   <meta property="og:image" content="${imageUrl}">
+  <meta property="og:image:type" content="image/jpeg">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta property="og:url" content="${appUrl}">
@@ -1063,6 +1128,106 @@ app.get('/share/linear-feature/:id', async (req, res) => {
 
 // Serve static frontend files in production
 const staticPath = process.env.STATIC_PATH || path.join(__dirname, '../frontend/dist');
+
+// Helper function to generate slug from POI name (matches frontend logic)
+function generateSlug(name) {
+  if (!name) return '';
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
+// Middleware to inject OpenGraph tags for POI deep links (MUST be before express.static)
+// This allows social media crawlers to get proper previews when users share ?poi= URLs
+app.use(async (req, res, next) => {
+  // Only handle root path with ?poi= parameter
+  if (req.path === '/' && req.query.poi) {
+    const poiSlug = req.query.poi;
+    try {
+      // Look up POI by matching slug against name
+      const result = await pool.query(`
+        SELECT id, name, poi_type, brief_description, image_mime_type
+        FROM pois
+        WHERE (deleted IS NULL OR deleted = FALSE)
+      `);
+
+      // Find matching POI by slug
+      const poi = result.rows.find(p => generateSlug(p.name) === poiSlug);
+
+      if (poi) {
+        const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
+        const appUrl = `${baseUrl}/?poi=${poiSlug}`;
+        const imageUrl = poi.image_mime_type
+          ? `${baseUrl}/api/pois/${poi.id}/thumbnail`
+          : `${baseUrl}/icons/default.svg`;
+        const description = poi.brief_description || `Explore ${poi.name} at Cuyahoga Valley National Park`;
+
+        // Read index.html and inject POI-specific OG tags
+        const indexPath = path.join(staticPath, 'index.html');
+        let html = await fs.readFile(indexPath, 'utf-8');
+
+        // Replace title
+        html = html.replace(
+          /<title>.*?<\/title>/,
+          `<title>${poi.name} | Roots of The Valley</title>`
+        );
+
+        // Replace OpenGraph tags
+        html = html.replace(
+          /<meta property="og:title" content="[^"]*" \/>/,
+          `<meta property="og:title" content="${poi.name} | Roots of The Valley" />`
+        );
+        html = html.replace(
+          /<meta property="og:description" content="[^"]*" \/>/,
+          `<meta property="og:description" content="${description.replace(/"/g, '&quot;')}" />`
+        );
+        html = html.replace(
+          /<meta property="og:url" content="[^"]*" \/>/,
+          `<meta property="og:url" content="${appUrl}" />`
+        );
+
+        // Add og:image tag (insert after og:url)
+        html = html.replace(
+          /(<meta property="og:url" content="[^"]*" \/>)/,
+          `$1\n    <meta property="og:image" content="${imageUrl}" />\n    <meta property="og:image:type" content="image/jpeg" />\n    <meta property="og:image:width" content="1200" />\n    <meta property="og:image:height" content="630" />`
+        );
+
+        // Replace Twitter tags
+        html = html.replace(
+          /<meta name="twitter:title" content="[^"]*" \/>/,
+          `<meta name="twitter:title" content="${poi.name} | Roots of The Valley" />`
+        );
+        html = html.replace(
+          /<meta name="twitter:description" content="[^"]*" \/>/,
+          `<meta name="twitter:description" content="${description.replace(/"/g, '&quot;')}" />`
+        );
+        // Add twitter:image tag (insert after twitter:description)
+        html = html.replace(
+          /(<meta name="twitter:description" content="[^"]*" \/>)/,
+          `$1\n    <meta name="twitter:image" content="${imageUrl}" />`
+        );
+
+        // Replace meta description
+        html = html.replace(
+          /<meta name="description" content="[^"]*" \/>/,
+          `<meta name="description" content="${description.replace(/"/g, '&quot;')}" />`
+        );
+
+        res.setHeader('Content-Type', 'text/html');
+        return res.send(html);
+      }
+    } catch (error) {
+      console.error('Error injecting OG tags:', error);
+      // Fall through to default handling
+    }
+  }
+  next();
+});
+
+// Serve static files (after POI middleware)
 app.use(express.static(staticPath));
 
 // SPA fallback - serve index.html for non-API routes
