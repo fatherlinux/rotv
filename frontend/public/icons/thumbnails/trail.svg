@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
+  <defs>
+    <linearGradient id="trailBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#fff3e0"/>
+      <stop offset="100%" style="stop-color:#ffe0b2"/>
+    </linearGradient>
+  </defs>
+  <!-- Background -->
+  <rect width="120" height="120" fill="url(#trailBg)" rx="8"/>
+  <!-- Hills -->
+  <ellipse cx="30" cy="110" rx="45" ry="25" fill="#a5d6a7"/>
+  <ellipse cx="95" cy="115" rx="40" ry="20" fill="#81c784"/>
+  <!-- Trail path -->
+  <path d="M10 110 Q25 95 35 85 Q50 70 55 55 Q60 40 75 35 Q90 30 110 20"
+        stroke="#8d6e63" stroke-width="8" fill="none" stroke-linecap="round"/>
+  <path d="M10 110 Q25 95 35 85 Q50 70 55 55 Q60 40 75 35 Q90 30 110 20"
+        stroke="#a1887f" stroke-width="4" fill="none" stroke-linecap="round" stroke-dasharray="0 12"/>
+  <!-- Boot icon -->
+  <g transform="translate(75, 65) scale(0.8)">
+    <path d="M5 0 L5 15 L0 20 L0 28 L25 28 L25 20 L20 15 L20 5 L15 0 Z" fill="#5d4037"/>
+    <path d="M0 22 L25 22 L25 28 L0 28 Z" fill="#4e342e"/>
+    <path d="M8 3 L17 3 L17 12 L8 12 Z" fill="#8d6e63"/>
+  </g>
+  <!-- Trees -->
+  <path d="M20 75 L25 60 L30 75 Z" fill="#66bb6a"/>
+  <rect x="24" y="75" width="2" height="5" fill="#5d4037"/>
+  <path d="M90 55 L95 40 L100 55 Z" fill="#66bb6a"/>
+  <rect x="94" y="55" width="2" height="5" fill="#5d4037"/>
+</svg>

@@ -10,8 +10,8 @@ function ImageUploader({ destinationId, hasImage, onImageChange, disabled, isLin
   // Compute API endpoint based on feature type
   const apiEndpoint = isLinearFeature ? 'linear-features' : 'destinations';
 
-  // Compute image URL from ID
-  const imageUrl = hasImage ? `/api/${apiEndpoint}/${destinationId}/image?v=${imageVersion}` : null;
+  // Use thumbnail service for faster preview loading (medium size for edit view)
+  const imageUrl = hasImage ? `/api/pois/${destinationId}/thumbnail?size=medium&v=${imageVersion}` : null;
 
   const handleFileSelect = async (file) => {
     if (!file) return;

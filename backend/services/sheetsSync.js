@@ -1083,6 +1083,9 @@ export async function pullAllFromSheets(sheets, pool, drive = null) {
           UPDATE pois SET image_data = $1, image_mime_type = $2 WHERE id = $3
         `, [imageBuffer, mimeType, poi.id]);
 
+        // Invalidate thumbnail cache
+        await pool.query('DELETE FROM thumbnail_cache WHERE poi_id = $1', [poi.id]);
+
         console.log(`Downloaded image for POI: ${poi.name}`);
       }
     });
@@ -1221,6 +1224,9 @@ export async function pullAllFromSheets(sheets, pool, drive = null) {
           await pool.query(`
             UPDATE pois SET image_data = $1, image_mime_type = $2 WHERE id = $3
           `, [imageBuffer, mimeType, item.id]);
+
+          // Invalidate thumbnail cache
+          await pool.query('DELETE FROM thumbnail_cache WHERE poi_id = $1', [item.id]);
 
           console.log(`Downloaded image for linear feature: ${item.name}`);
         }
@@ -2870,6 +2876,10 @@ export async function pullLinearFeaturesFromSheets(sheets, pool, drive = null) {
             await pool.query(`
               UPDATE pois SET image_data = $1, image_mime_type = $2 WHERE id = $3
             `, [imageBuffer, mimeType, featureId]);
+
+            // Invalidate thumbnail cache
+            await pool.query('DELETE FROM thumbnail_cache WHERE poi_id = $1', [featureId]);
+
             console.log(`Downloaded image for linear feature: ${feature.name}`);
           }
         } catch (imageError) {

@@ -555,6 +555,23 @@ async function initDatabase() {
       ALTER TABLE news_job_status ADD COLUMN IF NOT EXISTS total_pois INTEGER DEFAULT 0
     `);
 
+    // Thumbnail cache table - persists across server restarts
+    // This is a cache table that can be safely truncated/dropped without data loss
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS thumbnail_cache (
+        id SERIAL PRIMARY KEY,
+        poi_id INTEGER NOT NULL,
+        size VARCHAR(20) NOT NULL DEFAULT 'default',
+        image_data BYTEA NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(poi_id, size)
+      )
+    `);
+    // Index for fast lookups
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_thumbnail_cache_lookup ON thumbnail_cache(poi_id, size)
+    `);
+
     // Add boundary_type and boundary_color columns for multiple boundary support
     await client.query(`
       ALTER TABLE pois ADD COLUMN IF NOT EXISTS boundary_type TEXT
@@ -674,26 +691,71 @@ app.get('/api/pois/:id/image', async (req, res) => {
   }
 });
 
-// In-memory cache for thumbnails (cleared on server restart)
-const thumbnailCache = new Map();
-const THUMBNAIL_CACHE_MAX_SIZE = 100; // Max cached thumbnails
+// Two-tier thumbnail cache:
+// L1: In-memory Map (fastest, cleared on restart)
+// L2: Database table (persistent, unlimited size)
+const thumbnailMemoryCache = new Map();
+const MEMORY_CACHE_MAX_SIZE = 500; // Max in-memory thumbnails (LRU eviction)
 
-// Serve optimized thumbnails for social media sharing (1200x630, compressed)
+// Helper to send thumbnail response
+function sendThumbnail(res, imageData) {
+  res.setHeader('Content-Type', 'image/jpeg');
+  res.setHeader('Cache-Control', 'public, max-age=604800'); // 1 week browser cache
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.send(imageData);
+}
+
+// Helper to add to memory cache with LRU eviction
+function addToMemoryCache(key, data) {
+  if (thumbnailMemoryCache.size >= MEMORY_CACHE_MAX_SIZE) {
+    // Remove oldest entry (first key in Map)
+    const firstKey = thumbnailMemoryCache.keys().next().value;
+    thumbnailMemoryCache.delete(firstKey);
+  }
+  thumbnailMemoryCache.set(key, data);
+}
+
+// Serve optimized thumbnails with configurable size
+// Two-tier cache: Memory (L1) -> Database (L2) -> Generate
+// Sizes: small (200x200), medium (400x300), default (1200x630)
 app.get('/api/pois/:id/thumbnail', async (req, res) => {
   try {
     const { id } = req.params;
+    const sizeParam = req.query.size || 'default';
+    const cacheKey = `${id}-${sizeParam}`;
 
-    // Check cache first
-    if (thumbnailCache.has(id)) {
-      const cached = thumbnailCache.get(id);
-      res.setHeader('Content-Type', 'image/jpeg');
-      res.setHeader('Cache-Control', 'public, max-age=604800'); // 1 week
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      return res.send(cached);
+    // L1: Check memory cache first (fastest)
+    if (thumbnailMemoryCache.has(cacheKey)) {
+      return sendThumbnail(res, thumbnailMemoryCache.get(cacheKey));
     }
 
+    // L2: Check database cache
+    const dbCache = await pool.query(
+      'SELECT image_data FROM thumbnail_cache WHERE poi_id = $1 AND size = $2',
+      [id, sizeParam]
+    );
+
+    if (dbCache.rows.length > 0) {
+      const cachedData = dbCache.rows[0].image_data;
+      // Promote to memory cache
+      addToMemoryCache(cacheKey, cachedData);
+      return sendThumbnail(res, cachedData);
+    }
+
+    // Cache miss - need to generate thumbnail
+    // Determine dimensions based on size param
+    let width, height, quality;
+    if (sizeParam === 'small') {
+      width = 200; height = 200; quality = 70;
+    } else if (sizeParam === 'medium') {
+      width = 400; height = 300; quality = 75;
+    } else {
+      width = 1200; height = 630; quality = 80;
+    }
+
+    // Fetch original image
     const result = await pool.query(
-      'SELECT image_data, image_mime_type FROM pois WHERE id = $1 AND image_data IS NOT NULL',
+      'SELECT image_data FROM pois WHERE id = $1 AND image_data IS NOT NULL',
       [id]
     );
 
@@ -701,32 +763,30 @@ app.get('/api/pois/:id/thumbnail', async (req, res) => {
       return res.status(404).json({ error: 'Image not found' });
     }
 
-    const { image_data } = result.rows[0];
-
-    // Resize to 1200x630 (Facebook/Twitter optimal) and compress
-    const thumbnail = await sharp(image_data)
-      .resize(1200, 630, {
+    // Generate thumbnail
+    const thumbnail = await sharp(result.rows[0].image_data)
+      .resize(width, height, {
         fit: 'cover',
         position: 'center'
       })
       .jpeg({
-        quality: 80,
+        quality: quality,
         progressive: true
       })
       .toBuffer();
 
-    // Cache the thumbnail (with size limit)
-    if (thumbnailCache.size >= THUMBNAIL_CACHE_MAX_SIZE) {
-      // Remove oldest entry
-      const firstKey = thumbnailCache.keys().next().value;
-      thumbnailCache.delete(firstKey);
-    }
-    thumbnailCache.set(id, thumbnail);
+    // Store in L2 (database) - persistent cache
+    await pool.query(
+      `INSERT INTO thumbnail_cache (poi_id, size, image_data)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (poi_id, size) DO UPDATE SET image_data = $3, created_at = CURRENT_TIMESTAMP`,
+      [id, sizeParam, thumbnail]
+    );
 
-    res.setHeader('Content-Type', 'image/jpeg');
-    res.setHeader('Cache-Control', 'public, max-age=604800'); // 1 week
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.send(thumbnail);
+    // Store in L1 (memory)
+    addToMemoryCache(cacheKey, thumbnail);
+
+    sendThumbnail(res, thumbnail);
   } catch (error) {
     console.error('Error serving POI thumbnail:', error);
     res.status(500).json({ error: 'Failed to serve thumbnail' });

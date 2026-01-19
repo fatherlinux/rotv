@@ -331,13 +331,22 @@ function MapClickHandler({ isAdmin, editMode, onRightClick, onMapClick }) {
 
 // Component to handle map view updates when selection changes
 // Sets a flag on the map to indicate programmatic movement (vs user interaction)
-function MapUpdater({ selectedDestination, selectedLinearFeature }) {
+function MapUpdater({ selectedDestination, selectedLinearFeature, skipFlyRef }) {
   const map = useMap();
 
   React.useEffect(() => {
     if (selectedDestination && selectedDestination.latitude && selectedDestination.longitude) {
+      // Check if we should skip the fly animation (e.g., selection from Results tab)
+      if (skipFlyRef && skipFlyRef.current) {
+        skipFlyRef.current = false; // Reset the flag
+        return; // Skip the fly animation
+      }
+
       // Mark this as a programmatic move so MapBoundsTracker doesn't update News/Events filter
       map._isProgrammaticMove = true;
+
+      // Track if this is the initial load (for forcing Results update)
+      const isInitialLoad = !map._hasCompletedInitialLoad;
 
       // Fly to the selected destination with appropriate zoom
       const currentZoom = map.getZoom();
@@ -350,37 +359,26 @@ function MapUpdater({ selectedDestination, selectedLinearFeature }) {
       // Clear the flag after animation completes
       setTimeout(() => {
         map._isProgrammaticMove = false;
+        // On initial load only, force a Results update by firing moveend
+        if (isInitialLoad) {
+          map._hasCompletedInitialLoad = true;
+          map._forceNextUpdate = true; // Signal to bypass threshold check
+          map.fire('moveend');
+        }
       }, 600);
     }
-  }, [selectedDestination, map]);
+  }, [selectedDestination, map, skipFlyRef]);
 
-  // Handle linear feature selection - fit bounds to the feature
+  // Handle linear feature selection - no zoom change, just select
   React.useEffect(() => {
     if (selectedLinearFeature && selectedLinearFeature.geometry) {
-      try {
-        // Mark this as a programmatic move
-        map._isProgrammaticMove = true;
-
-        const geoJson = L.geoJSON(selectedLinearFeature.geometry);
-        const bounds = geoJson.getBounds();
-        if (bounds.isValid()) {
-          map.flyToBounds(bounds, {
-            padding: [50, 50],
-            maxZoom: 15,
-            animate: true,
-            duration: 0.5
-          });
-        }
-
-        // Clear the flag after animation completes
-        setTimeout(() => {
-          map._isProgrammaticMove = false;
-        }, 600);
-      } catch (e) {
-        console.warn('Could not fit bounds for linear feature:', e);
+      // Reset skip flag if set (from Results tab selection)
+      if (skipFlyRef && skipFlyRef.current) {
+        skipFlyRef.current = false;
       }
+      // No zoom/pan - just let the selection happen without moving the map
     }
-  }, [selectedLinearFeature, map]);
+  }, [selectedLinearFeature, map, skipFlyRef]);
 
   return null;
 }
@@ -483,6 +481,18 @@ function MapMoveTracker({ onMapMove }) {
   return null;
 }
 
+// Helper to calculate distance between two lat/lng points in miles (Haversine formula)
+function getDistanceMiles(lat1, lng1, lat2, lng2) {
+  const R = 3959; // Earth's radius in miles
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
 // Component to track which POIs are visible in the current map viewport
 function MapBoundsTracker({ destinations, visibleTypes, getDestinationIconType, onVisiblePoisChange, onMapStateChange, linearFeatures, showTrails, showRivers, visibleBoundaries }) {
   const map = useMap();
@@ -514,48 +524,25 @@ function MapBoundsTracker({ destinations, visibleTypes, getDestinationIconType, 
         });
       }
 
-      // Count visible linear features (trails, rivers, boundaries)
-      let linearFeatureCount = 0;
+      // Add ALL linear features in viewport to Results (regardless of layer visibility)
+      // This ensures Results tab shows all POIs even if their layer is toggled off on the map
       if (linearFeatures && linearFeatures.length > 0) {
         linearFeatures.forEach(feature => {
-          // Check if feature type is visible
-          const isVisible = (feature.feature_type === 'trail' && showTrails) ||
-                           (feature.feature_type === 'river' && showRivers) ||
-                           (feature.feature_type === 'boundary' && visibleBoundaries.has(feature.id));
-          if (!isVisible) return;
-
           // Check if any part of the feature intersects with map bounds
-          // by checking if any coordinate is within bounds
-          if (feature.geometry && feature.geometry.coordinates) {
-            let coords;
-            if (feature.geometry.type === 'Polygon') {
-              // Polygon: array of rings, use outer ring
-              coords = feature.geometry.coordinates[0];
-            } else if (feature.geometry.type === 'MultiLineString') {
-              // MultiLineString: array of LineStrings, flatten all coordinates
-              coords = feature.geometry.coordinates.flat();
-            } else {
-              // LineString: array of points
-              coords = feature.geometry.coordinates;
-            }
-
-            const intersects = coords.some(coord => {
-              // GeoJSON is [lng, lat], Leaflet is [lat, lng]
-              const [lng, lat] = coord;
-              return bounds.contains([lat, lng]);
-            });
-
-            if (intersects) {
-              linearFeatureCount++;
+          // Use bounding box intersection which works for all geometry types
+          if (feature.geometry) {
+            const geoBounds = getGeometryBounds(feature.geometry);
+            if (boundsIntersect(bounds, geoBounds)) {
+              visibleIds.push(feature.id);
             }
           }
         });
       }
 
-      // Emit visible IDs and total count (destinations + linear features)
-      // Skip if this is a programmatic move (e.g., selection zoom) to preserve News/Events scope
+      // Emit visible IDs (destinations + linear features)
+      // Skip if this is a programmatic move (e.g., selection zoom) to preserve current selection
       if (onVisiblePoisChange && !map._isProgrammaticMove) {
-        onVisiblePoisChange(visibleIds, linearFeatureCount);
+        onVisiblePoisChange(visibleIds);
       }
 
       // Emit map state for thumbnail
@@ -902,7 +889,7 @@ function DestinationMarker({ dest, icon, isSelected, isEditMode, onSelect, onDra
           <div className="tooltip-content">
             {dest.image_mime_type && (
               <div className="tooltip-thumbnail">
-                <img src={`/api/destinations/${dest.id}/image?v=${new Date(dest.updated_at).getTime() || Date.now()}`} alt="" />
+                <img src={`/api/pois/${dest.id}/thumbnail?size=small`} alt="" />
               </div>
             )}
             <strong>{dest.name}</strong>
@@ -962,7 +949,7 @@ const DEFAULT_NPS_MAP_BOUNDS = [
 // Default icon type IDs for initializing the filter (before config loads)
 const DEFAULT_ICON_TYPES = new Set(['visitor-center', 'waterfall', 'trail', 'historic', 'bridge', 'train', 'nature', 'skiing', 'biking', 'picnic', 'camping', 'music', 'default']);
 
-function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, onDestinationUpdate, editMode, activeTab, onDestinationCreate, previewCoords, onPreviewCoordsChange, newPOI, onStartNewPOI, linearFeatures, selectedLinearFeature, onSelectLinearFeature, visibleTypes, onVisibleTypesChange, onVisiblePoisChange, onMapStateChange, showNpsMap, onToggleNpsMap, showTrails, onToggleTrails, showRivers, onToggleRivers, visibleBoundaries, onToggleBoundary, onShowAllBoundaries, onHideAllBoundaries, searchQuery, onSearchChange, onNewsRefresh }) {
+function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, onDestinationUpdate, editMode, activeTab, onDestinationCreate, previewCoords, onPreviewCoordsChange, newPOI, onStartNewPOI, linearFeatures, selectedLinearFeature, onSelectLinearFeature, visibleTypes, onVisibleTypesChange, onVisiblePoisChange, onMapStateChange, showNpsMap, onToggleNpsMap, showTrails, onToggleTrails, showRivers, onToggleRivers, visibleBoundaries, onToggleBoundary, onShowAllBoundaries, onHideAllBoundaries, searchQuery, onSearchChange, onNewsRefresh, skipFlyRef }) {
   const [showAdmin, setShowAdmin] = useState(false);
   const [isLegendExpanded, setIsLegendExpanded] = useState(false);
   const [mapBounds, setMapBounds] = useState(DEFAULT_NPS_MAP_BOUNDS);
@@ -985,9 +972,10 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
   // Icon configuration from database
   const [iconConfig, setIconConfig] = useState([]);
 
-  // Wrapper to track visible result count (destinations + linear features) and IDs locally and pass to parent
-  const handleVisiblePoisChange = useCallback((visibleIds, linearFeatureCount = 0) => {
-    setVisiblePoiCount(visibleIds.length + linearFeatureCount);
+  // Wrapper to track visible result count and IDs locally and pass to parent
+  // visibleIds now includes both destinations AND linear features
+  const handleVisiblePoisChange = useCallback((visibleIds) => {
+    setVisiblePoiCount(visibleIds.length);
     setVisiblePoiIds(visibleIds);
     if (onVisiblePoisChange) {
       onVisiblePoisChange(visibleIds);
@@ -1408,13 +1396,17 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
                       }
                     });
 
-                    layer.on('click', () => handleLinearFeatureClick(feature));
+                    layer.on('click', (e) => {
+                      // Stop propagation to prevent MapClickHandler from clearing selection
+                      L.DomEvent.stopPropagation(e);
+                      handleLinearFeatureClick(feature);
+                    });
 
                     // Only show tooltip if this feature is selected OR nothing is selected
                     const hasAnySelection = selectedDestination || selectedLinearFeature;
                     if (isSelected || !hasAnySelection) {
                       const hasImage = feature.image_mime_type;
-                      const imageUrl = hasImage ? `/api/linear-features/${feature.id}/image?v=${new Date(feature.updated_at).getTime() || Date.now()}` : null;
+                      const imageUrl = hasImage ? `/api/pois/${feature.id}/thumbnail?size=small` : null;
 
                       let tooltipHtml = '<div class="tooltip-content">';
                       if (hasImage) {
@@ -1454,50 +1446,74 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
             );
           }
 
-          // Non-boundary features (trails, rivers) - single layer
+          // Non-boundary features (trails, rivers) - two layers like boundaries for better click detection
           return (
-            <GeoJSON
-              key={`linear-${feature.id}-${isSelected}-${editMode}-${hasAnySelection}-${feature.updated_at}`}
-              data={geojsonData}
-              style={() => getLinearFeatureStyle(feature, isSelected)}
-              onEachFeature={(geoFeature, layer) => {
-                // Add click handler
-                layer.on('click', () => handleLinearFeatureClick(feature));
-
-                // Only show tooltip if this feature is selected OR nothing is selected
-                const hasAnySelection = selectedDestination || selectedLinearFeature;
-                if (isSelected || !hasAnySelection) {
-                  // Build rich tooltip content (similar to destination tooltips)
-                  const hasImage = feature.image_mime_type;
-                  const imageUrl = hasImage ? `/api/linear-features/${feature.id}/image?v=${new Date(feature.updated_at).getTime() || Date.now()}` : null;
-
-                  let tooltipHtml = '<div class="tooltip-content">';
-                  if (hasImage) {
-                    tooltipHtml += `<div class="tooltip-thumbnail"><img src="${imageUrl}" alt="" /></div>`;
-                  }
-                  tooltipHtml += `<strong>${feature.name}</strong>`;
-                  if (feature.brief_description) {
-                    tooltipHtml += `<p>${feature.brief_description}</p>`;
-                  }
-                  if (feature.length_miles) {
-                    tooltipHtml += `<p class="trail-info">${feature.length_miles} miles${feature.difficulty ? ' • ' + feature.difficulty : ''}</p>`;
-                  }
-                  tooltipHtml += '</div>';
-
-                  layer.bindTooltip(tooltipHtml, {
-                    permanent: isSelected,
-                    direction: 'auto',
-                    offset: [0, 0],
-                    sticky: !isSelected,
-                    className: `destination-tooltip ${isSelected ? 'selected-tooltip' : ''}`
+            <React.Fragment key={`linear-${feature.id}-${isSelected}-${editMode}-${hasAnySelection}-${feature.updated_at}`}>
+              {/* Invisible wide hit area for click/hover detection */}
+              <GeoJSON
+                key={`linear-hit-${feature.id}-${isSelected}-${editMode}-${hasAnySelection}`}
+                data={geojsonData}
+                style={() => ({
+                  color: 'transparent',
+                  weight: 20,
+                  opacity: 1
+                })}
+                onEachFeature={(geoFeature, layer) => {
+                  // Add click handler - stop propagation to prevent MapClickHandler from clearing selection
+                  layer.on('click', (e) => {
+                    L.DomEvent.stopPropagation(e);
+                    handleLinearFeatureClick(feature);
                   });
-                }
-              }}
-            />
+
+                  // Only show tooltip if this feature is selected OR nothing is selected
+                  const hasAnySelection = selectedDestination || selectedLinearFeature;
+                  if (isSelected || !hasAnySelection) {
+                    // Build rich tooltip content (similar to destination tooltips)
+                    const hasImage = feature.image_mime_type;
+                    const imageUrl = hasImage ? `/api/pois/${feature.id}/thumbnail?size=small` : null;
+
+                    let tooltipHtml = '<div class="tooltip-content">';
+                    if (hasImage) {
+                      tooltipHtml += `<div class="tooltip-thumbnail"><img src="${imageUrl}" alt="" /></div>`;
+                    }
+                    tooltipHtml += `<strong>${feature.name}</strong>`;
+                    if (feature.brief_description) {
+                      tooltipHtml += `<p>${feature.brief_description}</p>`;
+                    }
+                    if (feature.length_miles) {
+                      tooltipHtml += `<p class="trail-info">${feature.length_miles} miles${feature.difficulty ? ' • ' + feature.difficulty : ''}</p>`;
+                    }
+                    tooltipHtml += '</div>';
+
+                    layer.bindTooltip(tooltipHtml, {
+                      permanent: isSelected,
+                      direction: 'auto',
+                      offset: [0, 0],
+                      sticky: !isSelected,
+                      className: `destination-tooltip ${isSelected ? 'selected-tooltip' : ''}`
+                    });
+                  }
+                }}
+              />
+              {/* Visible styled line (no pointer events) */}
+              <GeoJSON
+                key={`linear-visible-${feature.id}-${isSelected}-${editMode}-${hasAnySelection}`}
+                data={geojsonData}
+                style={() => getLinearFeatureStyle(feature, isSelected)}
+                onEachFeature={(geoFeature, layer) => {
+                  layer.on('add', () => {
+                    const el = layer.getElement();
+                    if (el) {
+                      el.style.pointerEvents = 'none';
+                    }
+                  });
+                }}
+              />
+            </React.Fragment>
           );
         })}
 
-        <MapUpdater selectedDestination={selectedDestination} selectedLinearFeature={selectedLinearFeature} />
+        <MapUpdater selectedDestination={selectedDestination} selectedLinearFeature={selectedLinearFeature} skipFlyRef={skipFlyRef} />
         <MapVisibilityHandler activeTab={activeTab} />
         <MapBoundsTracker
           destinations={destinations}
@@ -1585,7 +1601,7 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
 
       {/* Results count overlay - clickable to toggle filter popup */}
       <button
-        className="map-poi-count"
+        className={`map-poi-count ${(selectedDestination || selectedLinearFeature || newPOI) ? 'sidebar-open' : ''}`}
         onClick={() => setIsLegendExpanded(!isLegendExpanded)}
       >
         {visiblePoiCount} Result{visiblePoiCount !== 1 ? 's' : ''}
