@@ -4,15 +4,11 @@ import NewsEvents from './NewsEvents';
 
 // Sidebar component with tabs: Info, News, Events, History
 // Share Modal Component
-// poiId and poiType are used to construct share URLs with proper OpenGraph meta tags
-function ShareModal({ isOpen, onClose, poiName, poiDescription, poiId, poiType = 'destination' }) {
+function ShareModal({ isOpen, onClose, poiName, poiDescription }) {
   const [copied, setCopied] = useState(false);
 
-  // Use the share endpoint URL which serves proper OpenGraph meta tags for social platforms
-  const baseUrl = window.location.origin;
-  const shareUrl = poiId
-    ? `${baseUrl}/share/${poiType}/${poiId}`
-    : window.location.href;
+  // Use the current URL directly - server injects OG tags for ?poi= URLs
+  const shareUrl = window.location.href;
 
   const shareText = poiDescription
     ? `${poiName} - ${poiDescription.substring(0, 100)}${poiDescription.length > 100 ? '...' : ''}`
@@ -39,7 +35,7 @@ function ShareModal({ isOpen, onClose, poiName, poiDescription, poiId, poiType =
   };
 
   const shareLinks = {
-    facebook: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}`,
+    facebook: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}&quote=${encodeURIComponent(shareText)}`,
     threads: `https://www.threads.net/intent/post?text=${encodeURIComponent(shareText + ' ' + shareUrl)}`,
     linkedin: `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(shareUrl)}`,
     twitter: `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(shareUrl)}`,
@@ -1562,8 +1558,6 @@ function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinat
           onClose={() => setShowShareModal(false)}
           poiName={linearFeature.name}
           poiDescription={linearFeature.brief_description}
-          poiId={linearFeature.id}
-          poiType="linear-feature"
         />
       </div>
     );
@@ -1709,8 +1703,6 @@ function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinat
         onClose={() => setShowShareModal(false)}
         poiName={destination?.name || ''}
         poiDescription={destination?.brief_description}
-        poiId={destination?.id}
-        poiType="destination"
       />
     </div>
   );
