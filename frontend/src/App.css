@@ -2981,12 +2981,7 @@ body {
   cursor: not-allowed;
 }
 
-/* Sidebar Edit Mode - desktop only, mobile stays 100% width */
-@media (min-width: 769px) {
-  .sidebar.editing {
-    width: 450px;
-  }
-}
+/* Sidebar Edit Mode - desktop stays same width as view mode */
 
 /* View container - fills remaining space */
 .view-container {
