@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import ImageUploader from './ImageUploader';
 import NewsEvents from './NewsEvents';
 
+// Sidebar component with tabs: Info, News, Events, History
 // Share Modal Component
 // poiId and poiType are used to construct share URLs with proper OpenGraph meta tags
 function ShareModal({ isOpen, onClose, poiName, poiDescription, poiId, poiType = 'destination' }) {
@@ -221,22 +222,23 @@ function ReadOnlyView({ destination, isLinearFeature, isAdmin, showImage = true,
     : '🏞️';
 
   return (
-    <>
-      {/* Image section - URL computed from ID (can be hidden if shown elsewhere) */}
-      {showImage && (
-        <div className="sidebar-image">
-          {imageUrl ? (
-            <img src={imageUrl} alt={destination.name} />
-          ) : (
-            <div className="image-placeholder">
-              <span className="placeholder-icon">{placeholderIcon}</span>
-              <span className="placeholder-text">Image coming soon</span>
-            </div>
-          )}
-        </div>
-      )}
+    <div className="view-container">
+      <div className="view-scroll">
+        {/* Image section - URL computed from ID (can be hidden if shown elsewhere) */}
+        {showImage && (
+          <div className="sidebar-image">
+            {imageUrl ? (
+              <img src={imageUrl} alt={destination.name} />
+            ) : (
+              <div className="image-placeholder">
+                <span className="placeholder-icon">{placeholderIcon}</span>
+                <span className="placeholder-text">Image coming soon</span>
+              </div>
+            )}
+          </div>
+        )}
 
-      <div className="sidebar-content">
+        <div className="sidebar-content">
         <div className="badges-row">
           {/* Linear feature type badge */}
           {isLinearFeature && (
@@ -285,13 +287,6 @@ function ReadOnlyView({ destination, isLinearFeature, isAdmin, showImage = true,
           </div>
         )}
 
-        {destination.historical_description && (
-          <div className="section">
-            <h3>Historical Significance</h3>
-            <p className="historical-description">{destination.historical_description}</p>
-          </div>
-        )}
-
         <div className="section">
           <h3>Visitor Information</h3>
           <div className="details-grid">
@@ -329,9 +324,6 @@ function ReadOnlyView({ destination, isLinearFeature, isAdmin, showImage = true,
           </div>
         </div>
 
-        {/* News and Events section - read only in view mode */}
-        <NewsEvents poiId={destination.id} isAdmin={false} />
-
         {/* Location - only for point destinations, not linear features */}
         {!isLinearFeature && destination.latitude && destination.longitude && (
           <div className="section">
@@ -339,19 +331,23 @@ function ReadOnlyView({ destination, isLinearFeature, isAdmin, showImage = true,
             <p>{formatCoordinate(destination.latitude, 'lat')}, {formatCoordinate(destination.longitude, 'lng')}</p>
           </div>
         )}
+        </div>
+      </div>
 
-        {destination.more_info_link && (
+      {/* Sticky footer for More Info link */}
+      {destination.more_info_link && (
+        <div className="view-buttons-footer">
           <a
             href={destination.more_info_link}
             target="_blank"
             rel="noopener noreferrer"
-            className="more-info-link"
+            className="more-info-btn"
           >
             More Information
           </a>
-        )}
-      </div>
-    </>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -682,16 +678,6 @@ function EditView({ destination, editedData, setEditedData, onSave, onCancel, on
         />
       </div>
 
-      <div className="edit-section">
-        <label>Historical Description</label>
-        <textarea
-          value={editedData.historical_description || ''}
-          onChange={(e) => handleChange('historical_description', e.target.value)}
-          rows={5}
-          placeholder="Detailed historical significance..."
-        />
-      </div>
-
       <div className="edit-row">
         <div className="edit-section half">
           <label>Era</label>
@@ -909,13 +895,6 @@ function EditView({ destination, editedData, setEditedData, onSave, onCancel, on
         />
       </div>
 
-      {/* News and Events management for existing POIs */}
-      {!isNewPOI && destination?.id && (
-        <div className="edit-section news-management-section">
-          <label>News & Events</label>
-          <NewsEvents poiId={destination.id} isAdmin={true} />
-        </div>
-      )}
 
       </div>
 
@@ -1493,7 +1472,7 @@ function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinat
             className={`sidebar-tab ${sidebarTab === 'view' ? 'active' : ''}`}
             onClick={() => setSidebarTab('view')}
           >
-            {isEditing ? 'Edit' : 'View'}
+            Info
           </button>
           <button
             className={`sidebar-tab ${sidebarTab === 'news' ? 'active' : ''}`}
@@ -1506,6 +1485,12 @@ function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinat
             onClick={() => setSidebarTab('events')}
           >
             Events
+          </button>
+          <button
+            className={`sidebar-tab ${sidebarTab === 'history' ? 'active' : ''}`}
+            onClick={() => setSidebarTab('history')}
+          >
+            History
           </button>
         </div>
 
@@ -1546,6 +1531,29 @@ function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinat
 
           {sidebarTab === 'events' && linearFeature && (
             <PoiEvents poiId={linearFeature.id} isAdmin={isAdmin} editMode={editMode} />
+          )}
+
+          {sidebarTab === 'history' && linearFeature && (
+            <div className="history-tab-content">
+              {isEditing ? (
+                <div className="edit-section">
+                  <label>Historical Description</label>
+                  <textarea
+                    value={editedData.historical_description || ''}
+                    onChange={(e) => setEditedData(prev => ({ ...prev, historical_description: e.target.value }))}
+                    rows={8}
+                    placeholder="Detailed historical significance..."
+                  />
+                </div>
+              ) : linearFeature.historical_description ? (
+                <div className="section">
+                  <h3>Historical Significance</h3>
+                  <p className="historical-description">{linearFeature.historical_description}</p>
+                </div>
+              ) : (
+                <div className="sidebar-tab-empty">No historical information available for this location.</div>
+              )}
+            </div>
           )}
         </div>
 
@@ -1611,7 +1619,7 @@ function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinat
           className={`sidebar-tab ${sidebarTab === 'view' ? 'active' : ''}`}
           onClick={() => setSidebarTab('view')}
         >
-          {isEditing ? 'Edit' : 'View'}
+          Info
         </button>
         <button
           className={`sidebar-tab ${sidebarTab === 'news' ? 'active' : ''}`}
@@ -1624,6 +1632,12 @@ function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinat
           onClick={() => setSidebarTab('events')}
         >
           Events
+        </button>
+        <button
+          className={`sidebar-tab ${sidebarTab === 'history' ? 'active' : ''}`}
+          onClick={() => setSidebarTab('history')}
+        >
+          History
         </button>
       </div>
 
@@ -1664,6 +1678,29 @@ function Sidebar({ destination, isNewPOI, onClose, isAdmin, editMode, onDestinat
 
         {sidebarTab === 'events' && destination && (
           <PoiEvents poiId={destination.id} isAdmin={isAdmin} editMode={editMode} />
+        )}
+
+        {sidebarTab === 'history' && destination && (
+          <div className="history-tab-content">
+            {isEditing ? (
+              <div className="edit-section">
+                <label>Historical Description</label>
+                <textarea
+                  value={editedData.historical_description || ''}
+                  onChange={(e) => setEditedData(prev => ({ ...prev, historical_description: e.target.value }))}
+                  rows={8}
+                  placeholder="Detailed historical significance..."
+                />
+              </div>
+            ) : destination.historical_description ? (
+              <div className="section">
+                <h3>Historical Significance</h3>
+                <p className="historical-description">{destination.historical_description}</p>
+              </div>
+            ) : (
+              <div className="sidebar-tab-empty">No historical information available for this location.</div>
+            )}
+          </div>
         )}
       </div>
 
