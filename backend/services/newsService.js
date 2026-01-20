@@ -85,6 +85,16 @@ Search for:
 3. Closures, road work, or maintenance specifically affecting "{{name}}"
 4. Trail conditions, seasonal updates, or access changes for "{{name}}"
 
+ACTIVITY-BASED EVENT TYPE GUIDANCE:
+The primary activities at this location are: {{activities}}
+Use these activities to prioritize event types:
+- If activities include "Music" or "Concert": prioritize looking for concert events
+- If activities include "Hiking" or "Walking": prioritize guided-tour and educational events
+- If activities include "History" or "Historical": prioritize educational and program events
+- If activities include "Volunteer": prioritize volunteer events
+- If activities include "Festival" or "Events": prioritize festival events
+When categorizing events, match the event type to the most relevant activity.
+
 Return a JSON object with this exact structure:
 {
   "news": [
@@ -122,14 +132,16 @@ IMPORTANT:
 /**
  * Collect news and events for a specific POI
  * @param {Pool} pool - Database connection pool
- * @param {Object} poi - POI object with id, name, poi_type
+ * @param {Object} poi - POI object with id, name, poi_type, primary_activities
  * @param {Object} sheets - Optional sheets client for API key restore
  * @returns {Object} - { news: [], events: [] }
  */
 export async function collectNewsForPoi(pool, poi, sheets = null) {
+  const activities = poi.primary_activities || 'None specified';
   const prompt = NEWS_COLLECTION_PROMPT
     .replace('{{name}}', poi.name)
-    .replace('{{poi_type}}', poi.poi_type);
+    .replace('{{poi_type}}', poi.poi_type)
+    .replace('{{activities}}', activities);
 
   try {
     const response = await generateTextWithCustomPrompt(pool, prompt, sheets);
@@ -410,7 +422,7 @@ export async function processNewsCollectionJob(pool, sheets, pgBossJobId, jobDat
 
   // Get POI details for remaining POIs
   const poisResult = await pool.query(
-    'SELECT id, name, poi_type FROM pois WHERE id = ANY($1)',
+    'SELECT id, name, poi_type, primary_activities FROM pois WHERE id = ANY($1)',
     [remainingPoiIds]
   );
   const pois = poisResult.rows;

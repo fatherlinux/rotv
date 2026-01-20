@@ -3224,7 +3224,7 @@ export function createAdminRouter(pool, clearThumbnailCache) {
 
       // Get POI details
       const poiResult = await pool.query(
-        'SELECT id, name, poi_type FROM pois WHERE id = $1',
+        'SELECT id, name, poi_type, primary_activities FROM pois WHERE id = $1',
         [id]
       );
 
