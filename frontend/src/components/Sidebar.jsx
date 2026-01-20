@@ -207,8 +207,9 @@ function EditableCellSignal({ level, onChange }) {
 // Read-only view component - works for both destinations and linear features
 function ReadOnlyView({ destination, isLinearFeature, isAdmin, showImage = true, onShare }) {
   // Use thumbnail service for faster loading
+  // Include updated_at for cache busting when image changes
   const imageUrl = destination.image_mime_type
-    ? `/api/pois/${destination.id}/thumbnail?size=medium`
+    ? `/api/pois/${destination.id}/thumbnail?size=medium&v=${destination.updated_at || Date.now()}`
     : null;
 
   // Get default thumbnail SVG path based on type
@@ -222,14 +223,19 @@ function ReadOnlyView({ destination, isLinearFeature, isAdmin, showImage = true,
     return '/icons/thumbnails/destination.svg';
   };
 
+  // Debug logging for virtual POI detection
+  if (destination.poi_type === 'virtual') {
+    console.log('[Sidebar View] Virtual POI detected:', destination.name, 'poi_type:', destination.poi_type);
+  }
+
   return (
     <div className="view-container">
       <div className="view-scroll">
         {/* Image section - URL computed from ID (can be hidden if shown elsewhere) */}
         {showImage && (
-          <div className="sidebar-image">
+          <div className={`sidebar-image ${destination.poi_type === 'virtual' ? 'virtual-thumbnail' : ''}`}>
             {imageUrl ? (
-              <img src={imageUrl} alt={destination.name} />
+              <img src={imageUrl} alt={destination.name} className={destination.poi_type === 'virtual' ? 'logo-image' : ''} />
             ) : (
               <img src={getDefaultThumbnail()} alt={destination.name} className="default-thumbnail" />
             )}
@@ -595,11 +601,14 @@ function EditView({ destination, editedData, setEditedData, onSave, onCancel, on
           <ImageUploader
             destinationId={destination.id}
             hasImage={!!editedData.image_mime_type}
-            onImageChange={(hasImage, driveFileId) => {
+            updatedAt={editedData.updated_at}
+            onImageChange={(hasImage, driveFileId, updatedAt) => {
+              const newUpdatedAt = updatedAt || new Date().toISOString();
               setEditedData(prev => ({
                 ...prev,
                 image_mime_type: hasImage ? 'image/jpeg' : null,
-                image_drive_file_id: driveFileId
+                image_drive_file_id: driveFileId,
+                updated_at: newUpdatedAt // Update timestamp for cache busting
               }));
               // Also update parent state so view mode shows the new image
               if (onImageUpdate) {
@@ -608,6 +617,7 @@ function EditView({ destination, editedData, setEditedData, onSave, onCancel, on
             }}
             disabled={saving}
             isLinearFeature={isLinearFeature}
+            isVirtualPoi={destination?.poi_type === 'virtual'}
           />
         ) : (
           <div className="sidebar-image">
@@ -1384,55 +1394,86 @@ function AssociationsModal({ isOpen, onClose, poi, associations, allDestinations
 
           {associatedPoisWithAssocId.length > 0 ? (
             <div className="associations-modal-list">
-              {associatedPoisWithAssocId.map(associatedPoi => (
-                <div
-                  key={associatedPoi.id}
-                  className="association-item"
-                >
+              {associatedPoisWithAssocId.map(associatedPoi => {
+                // Use thumbnail endpoint for fast, cached small images
+                // Include updated_at for cache busting when image changes
+                const imageUrl = associatedPoi.image_mime_type
+                  ? `/api/pois/${associatedPoi.id}/thumbnail?size=small&v=${associatedPoi.updated_at || Date.now()}`
+                  : null;
+
+                // Get default thumbnail SVG path based on type
+                const getDefaultThumbnail = () => {
+                  if (associatedPoi._isVirtual) return '/icons/thumbnails/virtual.svg';
+                  if (associatedPoi._isLinear) {
+                    if (associatedPoi.feature_type === 'river') return '/icons/thumbnails/river.svg';
+                    if (associatedPoi.feature_type === 'boundary') return '/icons/thumbnails/boundary.svg';
+                    return '/icons/thumbnails/trail.svg';
+                  }
+                  return '/icons/thumbnails/destination.svg';
+                };
+
+                const poiType = associatedPoi._isVirtual ? 'virtual' :
+                                !associatedPoi._isLinear ? 'destination' :
+                                associatedPoi.feature_type || 'trail';
+
+                return (
                   <div
-                    className="association-item-clickable"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (associatedPoi._isVirtual || (!associatedPoi._isLinear && !associatedPoi._isVirtual)) {
-                        onSelectDestination(associatedPoi);
-                        onClose();
-                      } else if (associatedPoi._isLinear) {
-                        onSelectLinearFeature(associatedPoi);
-                        onClose();
-                      }
-                    }}
-                    role="button"
-                    tabIndex={0}
+                    key={associatedPoi.id}
+                    className="association-item"
                   >
-                    <div className={`association-item-badge ${
-                      associatedPoi._isVirtual ? 'virtual' :
-                      !associatedPoi._isLinear ? 'destination' :
-                      associatedPoi.feature_type || 'trail'
-                    }`}>
-                      {associatedPoi._isVirtual ? 'O' :
-                       !associatedPoi._isLinear ? 'D' :
-                       associatedPoi.feature_type === 'river' ? 'R' :
-                       associatedPoi.feature_type === 'boundary' ? 'B' : 'T'}
-                    </div>
-                    <div className="association-item-content">
-                      <div className="association-item-name">{associatedPoi.name}</div>
-                      {associatedPoi.brief_description && (
-                        <div className="association-item-description">{associatedPoi.brief_description}</div>
-                      )}
-                    </div>
-                  </div>
-                  {isAdmin && editMode && isVirtualPoi && (
-                    <button
-                      onClick={() => handleDeleteAssociation(associatedPoi._assocId, associatedPoi.name)}
-                      className="btn-delete-association"
-                      disabled={deleting === associatedPoi._assocId}
-                      title="Remove association"
+                    <div
+                      className="association-item-clickable"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (associatedPoi._isVirtual || (!associatedPoi._isLinear && !associatedPoi._isVirtual)) {
+                          onSelectDestination(associatedPoi);
+                          onClose();
+                        } else if (associatedPoi._isLinear) {
+                          onSelectLinearFeature(associatedPoi);
+                          onClose();
+                        }
+                      }}
+                      role="button"
+                      tabIndex={0}
                     >
-                      {deleting === associatedPoi._assocId ? '...' : '×'}
-                    </button>
-                  )}
-                </div>
-              ))}
+                      <div className={`association-item-thumbnail ${associatedPoi._isVirtual ? 'virtual-thumbnail' : ''}`}>
+                        {imageUrl ? (
+                          <img src={imageUrl} alt={associatedPoi.name} loading="lazy" className={associatedPoi._isVirtual ? 'logo-image' : ''} />
+                        ) : (
+                          <img src={getDefaultThumbnail()} alt={associatedPoi.name} className="default-thumbnail" loading="lazy" />
+                        )}
+                      </div>
+                      <div className="association-item-content">
+                        <div className="association-item-name">{associatedPoi.name}</div>
+                        <div className="association-item-badges">
+                          <span className={`poi-type-icon ${poiType}`}>
+                            {associatedPoi._isVirtual ? 'O' :
+                             !associatedPoi._isLinear ? 'D' :
+                             associatedPoi.feature_type === 'river' ? 'R' :
+                             associatedPoi.feature_type === 'boundary' ? 'B' : 'T'}
+                          </span>
+                          {associatedPoi.era && (
+                            <span className="association-item-era">{associatedPoi.era}</span>
+                          )}
+                        </div>
+                        {associatedPoi.brief_description && (
+                          <div className="association-item-description">{associatedPoi.brief_description}</div>
+                        )}
+                      </div>
+                    </div>
+                    {isAdmin && editMode && isVirtualPoi && (
+                      <button
+                        onClick={() => handleDeleteAssociation(associatedPoi._assocId, associatedPoi.name)}
+                        className="btn-delete-association"
+                        disabled={deleting === associatedPoi._assocId}
+                        title="Remove association"
+                      >
+                        {deleting === associatedPoi._assocId ? '...' : '×'}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           ) : (
             <div className="associations-modal-empty">No associations yet.</div>
@@ -1645,53 +1686,84 @@ function AssociationsTabContent({ poi, associations, allDestinations, allLinearF
 
         {associatedPoisWithAssocId.length > 0 ? (
           <div className={`associations-list ${isAdding ? 'compact' : ''}`}>
-            {associatedPoisWithAssocId.map(associatedPoi => (
-              <div
-                key={associatedPoi.id}
-                className="association-item"
-              >
+            {associatedPoisWithAssocId.map(associatedPoi => {
+              // Use thumbnail endpoint for fast, cached small images
+              // Include updated_at for cache busting when image changes
+              const imageUrl = associatedPoi.image_mime_type
+                ? `/api/pois/${associatedPoi.id}/thumbnail?size=small&v=${associatedPoi.updated_at || Date.now()}`
+                : null;
+
+              // Get default thumbnail SVG path based on type
+              const getDefaultThumbnail = () => {
+                if (associatedPoi._isVirtual) return '/icons/thumbnails/virtual.svg';
+                if (associatedPoi._isLinear) {
+                  if (associatedPoi.feature_type === 'river') return '/icons/thumbnails/river.svg';
+                  if (associatedPoi.feature_type === 'boundary') return '/icons/thumbnails/boundary.svg';
+                  return '/icons/thumbnails/trail.svg';
+                }
+                return '/icons/thumbnails/destination.svg';
+              };
+
+              const poiType = associatedPoi._isVirtual ? 'virtual' :
+                              !associatedPoi._isLinear ? 'destination' :
+                              associatedPoi.feature_type || 'trail';
+
+              return (
                 <div
-                  className="association-item-clickable"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (associatedPoi._isVirtual || (!associatedPoi._isLinear && !associatedPoi._isVirtual)) {
-                      onSelectDestination(associatedPoi);
-                    } else if (associatedPoi._isLinear) {
-                      onSelectLinearFeature(associatedPoi);
-                    }
-                  }}
-                  role="button"
-                  tabIndex={0}
+                  key={associatedPoi.id}
+                  className="association-item"
                 >
-                  <div className={`association-item-badge ${
-                    associatedPoi._isVirtual ? 'virtual' :
-                    !associatedPoi._isLinear ? 'destination' :
-                    associatedPoi.feature_type || 'trail'
-                  }`}>
-                    {associatedPoi._isVirtual ? 'O' :
-                     !associatedPoi._isLinear ? 'D' :
-                     associatedPoi.feature_type === 'river' ? 'R' :
-                     associatedPoi.feature_type === 'boundary' ? 'B' : 'T'}
-                  </div>
-                  <div className="association-item-content">
-                    <div className="association-item-name">{associatedPoi.name}</div>
-                    {associatedPoi.brief_description && (
-                      <div className="association-item-description">{associatedPoi.brief_description}</div>
-                    )}
-                  </div>
-                </div>
-                {isAdmin && editMode && isVirtualPoi && (
-                  <button
-                    onClick={() => handleDeleteAssociation(associatedPoi._assocId, associatedPoi.name)}
-                    className="btn-delete-association"
-                    disabled={deleting === associatedPoi._assocId}
-                    title="Remove association"
+                  <div
+                    className="association-item-clickable"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (associatedPoi._isVirtual || (!associatedPoi._isLinear && !associatedPoi._isVirtual)) {
+                        onSelectDestination(associatedPoi);
+                      } else if (associatedPoi._isLinear) {
+                        onSelectLinearFeature(associatedPoi);
+                      }
+                    }}
+                    role="button"
+                    tabIndex={0}
                   >
-                    {deleting === associatedPoi._assocId ? '...' : '×'}
-                  </button>
-                )}
-              </div>
-            ))}
+                    <div className={`association-item-thumbnail ${associatedPoi._isVirtual ? 'virtual-thumbnail' : ''}`}>
+                      {imageUrl ? (
+                        <img src={imageUrl} alt={associatedPoi.name} loading="lazy" className={associatedPoi._isVirtual ? 'logo-image' : ''} />
+                      ) : (
+                        <img src={getDefaultThumbnail()} alt={associatedPoi.name} className="default-thumbnail" loading="lazy" />
+                      )}
+                    </div>
+                    <div className="association-item-content">
+                      <div className="association-item-name">{associatedPoi.name}</div>
+                      <div className="association-item-badges">
+                        <span className={`poi-type-icon ${poiType}`}>
+                          {associatedPoi._isVirtual ? 'O' :
+                           !associatedPoi._isLinear ? 'D' :
+                           associatedPoi.feature_type === 'river' ? 'R' :
+                           associatedPoi.feature_type === 'boundary' ? 'B' : 'T'}
+                        </span>
+                        {associatedPoi.era && (
+                          <span className="association-item-era">{associatedPoi.era}</span>
+                        )}
+                      </div>
+                      {associatedPoi.brief_description && (
+                        <div className="association-item-description">{associatedPoi.brief_description}</div>
+                      )}
+                    </div>
+                  </div>
+                  {isAdmin && editMode && isVirtualPoi && (
+                    <button
+                      onClick={() => handleDeleteAssociation(associatedPoi._assocId, associatedPoi.name)}
+                      className="btn-delete-association"
+                      disabled={deleting === associatedPoi._assocId}
+                      title="Remove association"
+                    >
+                      {deleting === associatedPoi._assocId ? '...' : '×'}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
           </div>
         ) : (
           <div className="sidebar-tab-empty">No associations yet.</div>
@@ -1815,6 +1887,17 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
   const hasAssociations = activePoi && associations?.some(assoc =>
     assoc.virtual_poi_id === activePoi.id || assoc.physical_poi_id === activePoi.id
   );
+
+  // Wrapper functions to switch to Info tab when selecting from associations
+  const handleSelectDestinationFromAssociations = React.useCallback((poi) => {
+    onSelectDestination(poi);
+    setSidebarTab('view'); // Switch to Info tab
+  }, [onSelectDestination]);
+
+  const handleSelectLinearFeatureFromAssociations = React.useCallback((poi) => {
+    onSelectLinearFeature(poi);
+    setSidebarTab('view'); // Switch to Info tab
+  }, [onSelectLinearFeature]);
 
   // Touch/swipe handling for mobile navigation
   const touchStartX = React.useRef(null);
@@ -2110,8 +2193,9 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
   // Render linear feature view - use same components as destinations with tabs
   if (isLinearFeature) {
     // Use thumbnail service for faster loading
+    // Include updated_at for cache busting when image changes
     const linearImageUrl = linearFeature?.image_mime_type
-      ? `/api/pois/${linearFeature.id}/thumbnail?size=medium`
+      ? `/api/pois/${linearFeature.id}/thumbnail?size=medium&v=${linearFeature.updated_at || Date.now()}`
       : null;
 
     // Get default thumbnail SVG path based on type
@@ -2148,17 +2232,20 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
           <ImageUploader
             destinationId={linearFeature.id}
             hasImage={!!linearFeature.image_mime_type}
-            onImageChange={(hasImage, driveFileId) => {
+            updatedAt={linearFeature.updated_at}
+            onImageChange={(hasImage, driveFileId, updatedAt) => {
               if (onLinearFeatureUpdate) {
                 onLinearFeatureUpdate({
                   ...linearFeature,
                   image_mime_type: hasImage ? 'image/jpeg' : null,
-                  image_drive_file_id: driveFileId
+                  image_drive_file_id: driveFileId,
+                  updated_at: updatedAt || new Date().toISOString() // Update timestamp for cache busting
                 });
               }
             }}
             disabled={saving}
             isLinearFeature={true}
+            isVirtualPoi={false}
           />
         ) : (
           <div className="sidebar-image">
@@ -2287,8 +2374,8 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
               allDestinations={allDestinations}
               allLinearFeatures={allLinearFeatures}
               allVirtualPois={allVirtualPois}
-              onSelectDestination={onSelectDestination}
-              onSelectLinearFeature={onSelectLinearFeature}
+              onSelectDestination={handleSelectDestinationFromAssociations}
+              onSelectLinearFeature={handleSelectLinearFeatureFromAssociations}
               isAdmin={isAdmin}
               editMode={editMode}
               onAssociationsChanged={onAssociationsChanged}
@@ -2323,8 +2410,9 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
   }
 
   // Use thumbnail service for faster loading
+  // Include updated_at for cache busting when image changes
   const imageUrl = destination?.image_mime_type
-    ? `/api/pois/${destination.id}/thumbnail?size=medium`
+    ? `/api/pois/${destination.id}/thumbnail?size=medium&v=${destination.updated_at || Date.now()}`
     : null;
 
   // Render destination view with tabs
@@ -2357,21 +2445,24 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
         <ImageUploader
           destinationId={destination.id}
           hasImage={!!destination.image_mime_type}
-          onImageChange={(hasImage, driveFileId) => {
+          updatedAt={destination.updated_at}
+          onImageChange={(hasImage, driveFileId, updatedAt) => {
             if (onDestinationUpdate) {
               onDestinationUpdate({
                 ...destination,
                 image_mime_type: hasImage ? 'image/jpeg' : null,
-                image_drive_file_id: driveFileId
+                image_drive_file_id: driveFileId,
+                updated_at: updatedAt || new Date().toISOString() // Update timestamp for cache busting
               });
             }
           }}
           disabled={saving}
+          isVirtualPoi={destination?.poi_type === 'virtual'}
         />
       ) : (
-        <div className="sidebar-image">
+        <div className={`sidebar-image ${destination?.poi_type === 'virtual' ? 'virtual-thumbnail' : ''}`}>
           {imageUrl ? (
-            <img src={imageUrl} alt={destination?.name} />
+            <img src={imageUrl} alt={destination?.name} className={destination?.poi_type === 'virtual' ? 'logo-image' : ''} />
           ) : (
             <img src="/icons/thumbnails/destination.svg" alt={destination?.name} className="default-thumbnail" />
           )}
@@ -2537,8 +2628,8 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
               allDestinations={allDestinations}
               allLinearFeatures={allLinearFeatures}
               allVirtualPois={allVirtualPois}
-              onSelectDestination={onSelectDestination}
-              onSelectLinearFeature={onSelectLinearFeature}
+              onSelectDestination={handleSelectDestinationFromAssociations}
+              onSelectLinearFeature={handleSelectLinearFeatureFromAssociations}
               isAdmin={isAdmin}
               editMode={editMode}
               onAssociationsChanged={onAssociationsChanged}

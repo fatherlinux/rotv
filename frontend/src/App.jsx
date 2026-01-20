@@ -208,6 +208,15 @@ function AppContent() {
         return;
       }
 
+      // Then check virtual POIs (organizations)
+      const virtualPoi = virtualPois.find(v => generateSlug(v.name) === initialPoiSlug);
+      if (virtualPoi) {
+        setSelectedDestination(virtualPoi);
+        document.title = `${virtualPoi.name} | Roots of The Valley`;
+        setInitialPoiSlug(null);
+        return;
+      }
+
       // Then check linear features (trails, rivers, boundaries)
       const linearFeature = linearFeatures.find(f => generateSlug(f.name) === initialPoiSlug);
       if (linearFeature) {
@@ -220,7 +229,7 @@ function AppContent() {
       // POI not found - clear the param
       setInitialPoiSlug(null);
     }
-  }, [initialPoiSlug, loading, destinations, linearFeatures]);
+  }, [initialPoiSlug, loading, destinations, linearFeatures, virtualPois]);
 
   // Reusable function to fetch all data (used on mount and after sync operations)
   const refreshAllData = React.useCallback(async () => {

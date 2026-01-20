@@ -1,19 +1,34 @@
 import React, { useState, useRef } from 'react';
 
-function ImageUploader({ destinationId, hasImage, onImageChange, disabled, isLinearFeature }) {
+function ImageUploader({ destinationId, hasImage, onImageChange, disabled, isLinearFeature, isVirtualPoi, updatedAt }) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState(null);
   const [dragActive, setDragActive] = useState(false);
-  const [imageVersion, setImageVersion] = useState(Date.now()); // For cache busting
   const fileInputRef = useRef(null);
 
   // Compute API endpoint based on feature type
   const apiEndpoint = isLinearFeature ? 'linear-features' : 'destinations';
 
+  // Use updated_at from parent for cache busting (or fallback to timestamp)
+  const cacheParam = updatedAt || Date.now();
+
   // Use thumbnail service for faster preview loading (medium size for edit view)
-  const imageUrl = hasImage ? `/api/pois/${destinationId}/thumbnail?size=medium&v=${imageVersion}` : null;
+  const imageUrl = hasImage ? `/api/pois/${destinationId}/thumbnail?size=medium&v=${cacheParam}` : null;
+
+  // Debug logging
+  console.log('[ImageUploader] Component render:', {
+    destinationId,
+    hasImage,
+    updatedAt,
+    cacheParam,
+    imageUrl,
+    uploading,
+    disabled,
+    error
+  });
 
   const handleFileSelect = async (file) => {
+    console.log('[ImageUploader] handleFileSelect called with file:', file?.name, file?.size, file?.type);
     if (!file) return;
 
     // Validate file type
@@ -29,17 +44,65 @@ function ImageUploader({ destinationId, hasImage, onImageChange, disabled, isLin
       return;
     }
 
+    console.log('[ImageUploader] Starting upload...');
     setUploading(true);
     setError(null);
 
     try {
-      const formData = new FormData();
-      formData.append('image', file);
+      // Convert file to base64 to avoid Vite dev server FormData issues
+      const base64Data = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          try {
+            const dataUrl = e.target.result;
+            if (!dataUrl || typeof dataUrl !== 'string') {
+              reject(new Error('Failed to read file data'));
+              return;
+            }
+            const base64 = dataUrl.split(',')[1]; // Remove data:image/...;base64, prefix
+            if (!base64) {
+              reject(new Error('Failed to extract base64 data'));
+              return;
+            }
+            resolve(base64);
+          } catch (err) {
+            reject(err);
+          }
+        };
+        reader.onerror = (e) => {
+          console.error('FileReader error:', reader.error);
+          reject(reader.error || new Error('Failed to read file'));
+        };
 
-      const response = await fetch(`/api/admin/${apiEndpoint}/${destinationId}/image`, {
+        // Read the file immediately
+        try {
+          reader.readAsDataURL(file);
+        } catch (err) {
+          reject(new Error(`Failed to start reading file: ${err.message}`));
+        }
+      });
+
+      // Use base64 endpoint in dev, regular multipart endpoint in production
+      const isDev = import.meta.env.DEV;
+      const endpoint = isDev
+        ? `/api/admin/${apiEndpoint}/${destinationId}/image-base64`
+        : `/api/admin/${apiEndpoint}/${destinationId}/image`;
+
+      const body = isDev
+        ? JSON.stringify({ imageData: base64Data, mimeType: file.type })
+        : (() => {
+            const formData = new FormData();
+            formData.append('image', file);
+            return formData;
+          })();
+
+      const headers = isDev ? { 'Content-Type': 'application/json' } : {};
+
+      const response = await fetch(endpoint, {
         method: 'POST',
         credentials: 'include',
-        body: formData
+        headers,
+        body
       });
 
       if (!response.ok) {
@@ -48,18 +111,46 @@ function ImageUploader({ destinationId, hasImage, onImageChange, disabled, isLin
       }
 
       const result = await response.json();
-      setImageVersion(Date.now()); // Bust cache for new image
-      onImageChange(true, result.drive_file_id);
+      console.log('[ImageUploader] Upload successful, result:', result);
+
+      // Fetch the updated POI to get the new updated_at timestamp
+      try {
+        const poiResponse = await fetch(`/api/pois/${destinationId}`, {
+          credentials: 'include'
+        });
+        if (poiResponse.ok) {
+          const updatedPoi = await poiResponse.json();
+          console.log('[ImageUploader] Image uploaded - new timestamp:', updatedPoi.updated_at);
+          console.log('[ImageUploader] Calling onImageChange with:', { hasImage: true, driveFileId: result.drive_file_id, timestamp: updatedPoi.updated_at });
+          onImageChange(true, result.drive_file_id, updatedPoi.updated_at);
+        } else {
+          console.error('[ImageUploader] Failed to fetch updated POI after image upload, status:', poiResponse.status);
+          onImageChange(true, result.drive_file_id);
+        }
+      } catch (fetchError) {
+        console.error('[ImageUploader] Error fetching updated POI:', fetchError);
+        onImageChange(true, result.drive_file_id);
+      }
     } catch (err) {
+      console.error('Upload error:', err);
       setError(err.message);
     } finally {
       setUploading(false);
+      // Reset file input to allow re-selecting the same file
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
   };
 
   const handleDelete = async () => {
-    if (!confirm('Delete this image?')) return;
+    console.log('[ImageUploader] handleDelete called');
+    if (!confirm('Delete this image?')) {
+      console.log('[ImageUploader] Delete cancelled by user');
+      return;
+    }
 
+    console.log('[ImageUploader] Starting delete...');
     setUploading(true);
     setError(null);
 
@@ -74,8 +165,27 @@ function ImageUploader({ destinationId, hasImage, onImageChange, disabled, isLin
         throw new Error(err.error || 'Delete failed');
       }
 
-      onImageChange(false, null);
+      console.log('[ImageUploader] Delete successful');
+
+      // Fetch the updated POI to get the new updated_at timestamp
+      try {
+        const poiResponse = await fetch(`/api/pois/${destinationId}`, {
+          credentials: 'include'
+        });
+        if (poiResponse.ok) {
+          const updatedPoi = await poiResponse.json();
+          console.log('[ImageUploader] Calling onImageChange after delete with timestamp:', updatedPoi.updated_at);
+          onImageChange(false, null, updatedPoi.updated_at);
+        } else {
+          console.error('[ImageUploader] Failed to fetch updated POI after image delete');
+          onImageChange(false, null);
+        }
+      } catch (fetchError) {
+        console.error('[ImageUploader] Error fetching updated POI:', fetchError);
+        onImageChange(false, null);
+      }
     } catch (err) {
+      console.error('[ImageUploader] Delete error:', err);
       setError(err.message);
     } finally {
       setUploading(false);
@@ -104,7 +214,9 @@ function ImageUploader({ destinationId, hasImage, onImageChange, disabled, isLin
 
   const handleInputChange = (e) => {
     if (e.target.files && e.target.files[0]) {
-      handleFileSelect(e.target.files[0]);
+      const file = e.target.files[0];
+      console.log('File selected:', file.name, file.size, file.type);
+      handleFileSelect(file);
     }
   };
 
@@ -121,11 +233,11 @@ function ImageUploader({ destinationId, hasImage, onImageChange, disabled, isLin
       )}
 
       {imageUrl ? (
-        <div className="image-preview-container">
+        <div className={`image-preview-container ${isVirtualPoi ? 'virtual-thumbnail' : ''}`}>
           <img
             src={imageUrl}
             alt="Destination"
-            className="image-preview"
+            className={`image-preview ${isVirtualPoi ? 'logo-image' : ''}`}
             onError={(e) => {
               e.target.style.display = 'none';
               e.target.nextSibling.style.display = 'flex';
@@ -138,7 +250,10 @@ function ImageUploader({ destinationId, hasImage, onImageChange, disabled, isLin
             <button
               type="button"
               className="image-change-btn"
-              onClick={handleClick}
+              onClick={() => {
+                console.log('[ImageUploader] Change button clicked');
+                handleClick();
+              }}
               disabled={uploading || disabled}
             >
               Change
@@ -146,7 +261,10 @@ function ImageUploader({ destinationId, hasImage, onImageChange, disabled, isLin
             <button
               type="button"
               className="image-delete-btn"
-              onClick={handleDelete}
+              onClick={() => {
+                console.log('[ImageUploader] Delete button clicked');
+                handleDelete();
+              }}
               disabled={uploading || disabled}
             >
               Delete
