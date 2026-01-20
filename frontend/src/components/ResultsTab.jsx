@@ -150,51 +150,41 @@ const ResultsTab = memo(function ResultsTab({
           onChange={(e) => setSearchText(e.target.value)}
         />
         <div className="results-type-filters">
-          <label className="type-filter-label">
-            <input
-              type="checkbox"
-              checked={typeFilters.destination}
-              onChange={(e) => setTypeFilters(prev => ({ ...prev, destination: e.target.checked }))}
-            />
-            <span className="type-filter-icon destination">D</span>
+          <div
+            className={`type-filter-chip destination ${typeFilters.destination ? 'active' : 'inactive'}`}
+            onClick={() => setTypeFilters(prev => ({ ...prev, destination: !prev.destination }))}
+          >
+            <span className="type-filter-icon">D</span>
             Destination
-          </label>
-          <label className="type-filter-label">
-            <input
-              type="checkbox"
-              checked={typeFilters.trail}
-              onChange={(e) => setTypeFilters(prev => ({ ...prev, trail: e.target.checked }))}
-            />
-            <span className="type-filter-icon trail">T</span>
+          </div>
+          <div
+            className={`type-filter-chip trail ${typeFilters.trail ? 'active' : 'inactive'}`}
+            onClick={() => setTypeFilters(prev => ({ ...prev, trail: !prev.trail }))}
+          >
+            <span className="type-filter-icon">T</span>
             Trail
-          </label>
-          <label className="type-filter-label">
-            <input
-              type="checkbox"
-              checked={typeFilters.river}
-              onChange={(e) => setTypeFilters(prev => ({ ...prev, river: e.target.checked }))}
-            />
-            <span className="type-filter-icon river">R</span>
+          </div>
+          <div
+            className={`type-filter-chip river ${typeFilters.river ? 'active' : 'inactive'}`}
+            onClick={() => setTypeFilters(prev => ({ ...prev, river: !prev.river }))}
+          >
+            <span className="type-filter-icon">R</span>
             River
-          </label>
-          <label className="type-filter-label">
-            <input
-              type="checkbox"
-              checked={typeFilters.boundary}
-              onChange={(e) => setTypeFilters(prev => ({ ...prev, boundary: e.target.checked }))}
-            />
-            <span className="type-filter-icon boundary">B</span>
+          </div>
+          <div
+            className={`type-filter-chip boundary ${typeFilters.boundary ? 'active' : 'inactive'}`}
+            onClick={() => setTypeFilters(prev => ({ ...prev, boundary: !prev.boundary }))}
+          >
+            <span className="type-filter-icon">B</span>
             Boundary
-          </label>
-          <label className="type-filter-label">
-            <input
-              type="checkbox"
-              checked={typeFilters.organization}
-              onChange={(e) => setTypeFilters(prev => ({ ...prev, organization: e.target.checked }))}
-            />
-            <span className="type-filter-icon virtual">O</span>
+          </div>
+          <div
+            className={`type-filter-chip organization ${typeFilters.organization ? 'active' : 'inactive'}`}
+            onClick={() => setTypeFilters(prev => ({ ...prev, organization: !prev.organization }))}
+          >
+            <span className="type-filter-icon">O</span>
             Organization
-          </label>
+          </div>
         </div>
         <div className="results-count">
           Showing {poiCount} of {totalCount} POIs
@@ -232,16 +222,6 @@ const ResultsTab = memo(function ResultsTab({
               onClick={onMapClick}
               poiCount={poiCount}
             />
-            <div className="poi-type-legend">
-              <div className="poi-type-legend-title">POI Types</div>
-              <div className="poi-type-legend-items">
-                <span className="poi-type-legend-item"><span className="poi-type-icon destination">D</span> Destination</span>
-                <span className="poi-type-legend-item"><span className="poi-type-icon trail">T</span> Trail</span>
-                <span className="poi-type-legend-item"><span className="poi-type-icon river">R</span> River</span>
-                <span className="poi-type-legend-item"><span className="poi-type-icon boundary">B</span> Boundary</span>
-                <span className="poi-type-legend-item"><span className="poi-type-icon virtual">O</span> Organization</span>
-              </div>
-            </div>
           </div>
         )}
       </div>

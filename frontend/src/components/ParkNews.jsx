@@ -185,51 +185,41 @@ function ParkNews({ isAdmin, onSelectPoi, filteredDestinations, filteredLinearFe
           onChange={(e) => setSearchText(e.target.value)}
         />
         <div className="results-type-filters">
-          <label className="type-filter-label">
-            <input
-              type="checkbox"
-              checked={typeFilters.closure}
-              onChange={(e) => setTypeFilters(prev => ({ ...prev, closure: e.target.checked }))}
-            />
-            <NewsTypeIcon type="closure" />
+          <div
+            className={`type-filter-chip closure ${typeFilters.closure ? 'active' : 'inactive'}`}
+            onClick={() => setTypeFilters(prev => ({ ...prev, closure: !prev.closure }))}
+          >
+            <span className="type-filter-icon">X</span>
             Closure
-          </label>
-          <label className="type-filter-label">
-            <input
-              type="checkbox"
-              checked={typeFilters.seasonal}
-              onChange={(e) => setTypeFilters(prev => ({ ...prev, seasonal: e.target.checked }))}
-            />
-            <NewsTypeIcon type="seasonal" />
+          </div>
+          <div
+            className={`type-filter-chip seasonal ${typeFilters.seasonal ? 'active' : 'inactive'}`}
+            onClick={() => setTypeFilters(prev => ({ ...prev, seasonal: !prev.seasonal }))}
+          >
+            <span className="type-filter-icon">S</span>
             Seasonal
-          </label>
-          <label className="type-filter-label">
-            <input
-              type="checkbox"
-              checked={typeFilters.maintenance}
-              onChange={(e) => setTypeFilters(prev => ({ ...prev, maintenance: e.target.checked }))}
-            />
-            <NewsTypeIcon type="maintenance" />
+          </div>
+          <div
+            className={`type-filter-chip maintenance ${typeFilters.maintenance ? 'active' : 'inactive'}`}
+            onClick={() => setTypeFilters(prev => ({ ...prev, maintenance: !prev.maintenance }))}
+          >
+            <span className="type-filter-icon">W</span>
             Maintenance
-          </label>
-          <label className="type-filter-label">
-            <input
-              type="checkbox"
-              checked={typeFilters.wildlife}
-              onChange={(e) => setTypeFilters(prev => ({ ...prev, wildlife: e.target.checked }))}
-            />
-            <NewsTypeIcon type="wildlife" />
+          </div>
+          <div
+            className={`type-filter-chip wildlife ${typeFilters.wildlife ? 'active' : 'inactive'}`}
+            onClick={() => setTypeFilters(prev => ({ ...prev, wildlife: !prev.wildlife }))}
+          >
+            <span className="type-filter-icon">A</span>
             Wildlife
-          </label>
-          <label className="type-filter-label">
-            <input
-              type="checkbox"
-              checked={typeFilters.general}
-              onChange={(e) => setTypeFilters(prev => ({ ...prev, general: e.target.checked }))}
-            />
-            <NewsTypeIcon type="general" />
+          </div>
+          <div
+            className={`type-filter-chip general ${typeFilters.general ? 'active' : 'inactive'}`}
+            onClick={() => setTypeFilters(prev => ({ ...prev, general: !prev.general }))}
+          >
+            <span className="type-filter-icon">N</span>
             General
-          </label>
+          </div>
         </div>
         <div className="results-count">
           Showing {filteredNews.length} of {news.length} news items
@@ -293,16 +283,6 @@ function ParkNews({ isAdmin, onSelectPoi, filteredDestinations, filteredLinearFe
               onClick={onMapClick}
               poiCount={(filteredDestinations?.length || 0) + (filteredLinearFeatures?.length || 0)}
             />
-            <div className="event-legend">
-              <div className="event-legend-title">News Types</div>
-              <div className="event-legend-items">
-                <span className="event-legend-item"><span className="news-type-icon closure">X</span> Closure</span>
-                <span className="event-legend-item"><span className="news-type-icon seasonal">S</span> Seasonal</span>
-                <span className="event-legend-item"><span className="news-type-icon maintenance">W</span> Maintenance</span>
-                <span className="event-legend-item"><span className="news-type-icon wildlife">A</span> Wildlife</span>
-                <span className="event-legend-item"><span className="news-type-icon general">N</span> General</span>
-              </div>
-            </div>
           </div>
         )}
       </div>

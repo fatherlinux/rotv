@@ -242,51 +242,41 @@ END:VCALENDAR`;
           onChange={(e) => setSearchText(e.target.value)}
         />
         <div className="results-type-filters">
-          <label className="type-filter-label">
-            <input
-              type="checkbox"
-              checked={typeFilters['guided-tour']}
-              onChange={(e) => setTypeFilters(prev => ({ ...prev, 'guided-tour': e.target.checked }))}
-            />
-            <EventTypeIcon type="guided-tour" />
+          <div
+            className={`type-filter-chip guided-tour ${typeFilters['guided-tour'] ? 'active' : 'inactive'}`}
+            onClick={() => setTypeFilters(prev => ({ ...prev, 'guided-tour': !prev['guided-tour'] }))}
+          >
+            <span className="type-filter-icon">T</span>
             Tour
-          </label>
-          <label className="type-filter-label">
-            <input
-              type="checkbox"
-              checked={typeFilters['program']}
-              onChange={(e) => setTypeFilters(prev => ({ ...prev, 'program': e.target.checked }))}
-            />
-            <EventTypeIcon type="program" />
+          </div>
+          <div
+            className={`type-filter-chip program ${typeFilters['program'] ? 'active' : 'inactive'}`}
+            onClick={() => setTypeFilters(prev => ({ ...prev, 'program': !prev['program'] }))}
+          >
+            <span className="type-filter-icon">P</span>
             Program
-          </label>
-          <label className="type-filter-label">
-            <input
-              type="checkbox"
-              checked={typeFilters['festival']}
-              onChange={(e) => setTypeFilters(prev => ({ ...prev, 'festival': e.target.checked }))}
-            />
-            <EventTypeIcon type="festival" />
+          </div>
+          <div
+            className={`type-filter-chip festival ${typeFilters['festival'] ? 'active' : 'inactive'}`}
+            onClick={() => setTypeFilters(prev => ({ ...prev, 'festival': !prev['festival'] }))}
+          >
+            <span className="type-filter-icon">F</span>
             Festival
-          </label>
-          <label className="type-filter-label">
-            <input
-              type="checkbox"
-              checked={typeFilters['volunteer']}
-              onChange={(e) => setTypeFilters(prev => ({ ...prev, 'volunteer': e.target.checked }))}
-            />
-            <EventTypeIcon type="volunteer" />
+          </div>
+          <div
+            className={`type-filter-chip volunteer ${typeFilters['volunteer'] ? 'active' : 'inactive'}`}
+            onClick={() => setTypeFilters(prev => ({ ...prev, 'volunteer': !prev['volunteer'] }))}
+          >
+            <span className="type-filter-icon">V</span>
             Volunteer
-          </label>
-          <label className="type-filter-label">
-            <input
-              type="checkbox"
-              checked={typeFilters['educational']}
-              onChange={(e) => setTypeFilters(prev => ({ ...prev, 'educational': e.target.checked }))}
-            />
-            <EventTypeIcon type="educational" />
+          </div>
+          <div
+            className={`type-filter-chip educational ${typeFilters['educational'] ? 'active' : 'inactive'}`}
+            onClick={() => setTypeFilters(prev => ({ ...prev, 'educational': !prev['educational'] }))}
+          >
+            <span className="type-filter-icon">E</span>
             Educational
-          </label>
+          </div>
         </div>
         <div className="results-count">
           Showing {filteredEvents.length} of {events.length} events
@@ -381,16 +371,6 @@ END:VCALENDAR`;
               onClick={onMapClick}
               poiCount={(filteredDestinations?.length || 0) + (filteredLinearFeatures?.length || 0)}
             />
-            <div className="event-legend">
-              <div className="event-legend-title">Event Types</div>
-              <div className="event-legend-items">
-                <span className="event-legend-item"><span className="event-type-icon guided-tour">T</span> Tour</span>
-                <span className="event-legend-item"><span className="event-type-icon program">P</span> Program</span>
-                <span className="event-legend-item"><span className="event-type-icon festival">F</span> Festival</span>
-                <span className="event-legend-item"><span className="event-type-icon volunteer">V</span> Volunteer</span>
-                <span className="event-legend-item"><span className="event-type-icon educational">E</span> Educational</span>
-              </div>
-            </div>
           </div>
         )}
       </div>

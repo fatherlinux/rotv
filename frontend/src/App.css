@@ -8406,52 +8406,232 @@ body {
 .results-type-filters {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
+  gap: 0.35rem;
 }
 
-.type-filter-label {
-  display: flex;
+.type-filter-chip {
+  display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.35rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
   cursor: pointer;
-  font-size: 0.85rem;
+  border: 1px solid #ddd;
+  background: white;
+  transition: all 0.15s ease;
   user-select: none;
 }
 
-.type-filter-label input[type="checkbox"] {
-  cursor: pointer;
+.type-filter-chip.active {
+  border-color: currentColor;
+}
+
+.type-filter-chip.inactive {
+  opacity: 0.5;
+  background: #f5f5f5;
+}
+
+.type-filter-chip:hover {
+  border-color: currentColor;
 }
 
 .type-filter-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
   font-size: 0.7rem;
   font-weight: bold;
   color: white;
+  flex-shrink: 0;
 }
 
-.type-filter-icon.destination {
+.type-filter-chip.destination {
+  color: #E53935;
+}
+
+.type-filter-chip.destination.active {
+  background: #ffebee;
+}
+
+.type-filter-chip.destination .type-filter-icon {
   background-color: #E53935;
 }
 
-.type-filter-icon.trail {
+.type-filter-chip.trail {
+  color: #43A047;
+}
+
+.type-filter-chip.trail.active {
+  background: #e8f5e9;
+}
+
+.type-filter-chip.trail .type-filter-icon {
   background-color: #43A047;
 }
 
-.type-filter-icon.river {
+.type-filter-chip.river {
+  color: #1E88E5;
+}
+
+.type-filter-chip.river.active {
+  background: #e3f2fd;
+}
+
+.type-filter-chip.river .type-filter-icon {
   background-color: #1E88E5;
 }
 
-.type-filter-icon.boundary {
+.type-filter-chip.boundary {
+  color: #7B1FA2;
+}
+
+.type-filter-chip.boundary.active {
+  background: #f3e5f5;
+}
+
+.type-filter-chip.boundary .type-filter-icon {
   background-color: #7B1FA2;
 }
 
-.type-filter-icon.virtual {
+.type-filter-chip.organization,
+.type-filter-chip.virtual {
+  color: #FB8C00;
+}
+
+.type-filter-chip.organization.active,
+.type-filter-chip.virtual.active {
+  background: #fff3e0;
+}
+
+.type-filter-chip.organization .type-filter-icon,
+.type-filter-chip.virtual .type-filter-icon {
   background-color: #FB8C00;
+}
+
+/* News type filter chips */
+.type-filter-chip.closure {
+  color: #d32f2f;
+}
+
+.type-filter-chip.closure.active {
+  background: #ffebee;
+}
+
+.type-filter-chip.closure .type-filter-icon {
+  background-color: #d32f2f;
+}
+
+.type-filter-chip.seasonal {
+  color: #1976d2;
+}
+
+.type-filter-chip.seasonal.active {
+  background: #e3f2fd;
+}
+
+.type-filter-chip.seasonal .type-filter-icon {
+  background-color: #1976d2;
+}
+
+.type-filter-chip.maintenance {
+  color: #f57c00;
+}
+
+.type-filter-chip.maintenance.active {
+  background: #fff3e0;
+}
+
+.type-filter-chip.maintenance .type-filter-icon {
+  background-color: #f57c00;
+}
+
+.type-filter-chip.wildlife {
+  color: #388e3c;
+}
+
+.type-filter-chip.wildlife.active {
+  background: #e8f5e9;
+}
+
+.type-filter-chip.wildlife .type-filter-icon {
+  background-color: #388e3c;
+}
+
+.type-filter-chip.general {
+  color: #616161;
+}
+
+.type-filter-chip.general.active {
+  background: #f5f5f5;
+}
+
+.type-filter-chip.general .type-filter-icon {
+  background-color: #616161;
+}
+
+/* Event type filter chips */
+.type-filter-chip.guided-tour {
+  color: #0288d1;
+}
+
+.type-filter-chip.guided-tour.active {
+  background: #e1f5fe;
+}
+
+.type-filter-chip.guided-tour .type-filter-icon {
+  background-color: #0288d1;
+}
+
+.type-filter-chip.program {
+  color: #7b1fa2;
+}
+
+.type-filter-chip.program.active {
+  background: #f3e5f5;
+}
+
+.type-filter-chip.program .type-filter-icon {
+  background-color: #7b1fa2;
+}
+
+.type-filter-chip.festival {
+  color: #c2185b;
+}
+
+.type-filter-chip.festival.active {
+  background: #fce4ec;
+}
+
+.type-filter-chip.festival .type-filter-icon {
+  background-color: #c2185b;
+}
+
+.type-filter-chip.volunteer {
+  color: #689f38;
+}
+
+.type-filter-chip.volunteer.active {
+  background: #f1f8e9;
+}
+
+.type-filter-chip.volunteer .type-filter-icon {
+  background-color: #689f38;
+}
+
+.type-filter-chip.educational {
+  color: #e64a19;
+}
+
+.type-filter-chip.educational.active {
+  background: #fbe9e7;
+}
+
+.type-filter-chip.educational .type-filter-icon {
+  background-color: #e64a19;
 }
 
 .results-count {
