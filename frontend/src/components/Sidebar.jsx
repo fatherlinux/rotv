@@ -268,7 +268,7 @@ function ReadOnlyView({ destination, isLinearFeature, isAdmin, showImage = true,
           {destination.era && destination.poi_type !== 'virtual' && (
             <span className="era-badge-large">{destination.era}</span>
           )}
-          {destination.property_owner && (
+          {destination.property_owner && destination.poi_type !== 'virtual' && (
             <span className={`owner-badge ${getOwnerClass(destination.property_owner)}`}>
               {destination.property_owner}
             </span>
