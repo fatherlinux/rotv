@@ -27,6 +27,14 @@ function ParkNews({ isAdmin, onSelectPoi, filteredDestinations, filteredLinearFe
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [deleting, setDeleting] = useState(null);
+  const [searchText, setSearchText] = useState('');
+  const [typeFilters, setTypeFilters] = useState({
+    closure: true,
+    seasonal: true,
+    maintenance: true,
+    wildlife: true,
+    general: true
+  });
 
   useEffect(() => {
     fetchNews();
@@ -56,25 +64,37 @@ function ParkNews({ isAdmin, onSelectPoi, filteredDestinations, filteredLinearFe
     const hasDestinations = Array.isArray(filteredDestinations);
     const hasLinearFeatures = Array.isArray(filteredLinearFeatures);
 
+    // Start with all news or filter by visible POIs
+    let filtered = news;
+
     // If both filters are explicitly empty arrays, show no news (all filters deselected)
     if (hasDestinations && filteredDestinations.length === 0 &&
         hasLinearFeatures && filteredLinearFeatures.length === 0) {
-      return [];
+      filtered = [];
+    } else if (filteredDestinations || filteredLinearFeatures) {
+      // Combine visible IDs from both point destinations and linear features
+      const visiblePoiIds = new Set([
+        ...(filteredDestinations || []).map(d => d.id),
+        ...(filteredLinearFeatures || []).map(f => f.id)
+      ]);
+      filtered = filtered.filter(item => visiblePoiIds.has(item.poi_id));
     }
 
-    // If no filters applied yet, show all news
-    if (!filteredDestinations && !filteredLinearFeatures) {
-      return news;
+    // Apply text search filter
+    if (searchText.trim()) {
+      const search = searchText.toLowerCase();
+      filtered = filtered.filter(item =>
+        (item.title || '').toLowerCase().includes(search) ||
+        (item.summary || '').toLowerCase().includes(search) ||
+        (item.poi_name || '').toLowerCase().includes(search)
+      );
     }
 
-    // Combine visible IDs from both point destinations and linear features
-    const visiblePoiIds = new Set([
-      ...(filteredDestinations || []).map(d => d.id),
-      ...(filteredLinearFeatures || []).map(f => f.id)
-    ]);
+    // Apply type filter
+    filtered = filtered.filter(item => typeFilters[item.news_type || 'general']);
 
-    return news.filter(item => visiblePoiIds.has(item.poi_id));
-  }, [news, filteredDestinations, filteredLinearFeatures]);
+    return filtered;
+  }, [news, filteredDestinations, filteredLinearFeatures, searchText, typeFilters]);
 
   const handleDelete = async (newsId) => {
     if (!confirm('Delete this news item?')) return;
@@ -155,6 +175,67 @@ function ParkNews({ isAdmin, onSelectPoi, filteredDestinations, filteredLinearFe
         <h2>Park News</h2>
         <p className="tab-subtitle">Recent news from across Cuyahoga Valley National Park</p>
       </div>
+
+      <div className="results-filters">
+        <input
+          type="text"
+          className="results-search-input"
+          placeholder="Search news by title, summary, or location..."
+          value={searchText}
+          onChange={(e) => setSearchText(e.target.value)}
+        />
+        <div className="results-type-filters">
+          <label className="type-filter-label">
+            <input
+              type="checkbox"
+              checked={typeFilters.closure}
+              onChange={(e) => setTypeFilters(prev => ({ ...prev, closure: e.target.checked }))}
+            />
+            <NewsTypeIcon type="closure" />
+            Closure
+          </label>
+          <label className="type-filter-label">
+            <input
+              type="checkbox"
+              checked={typeFilters.seasonal}
+              onChange={(e) => setTypeFilters(prev => ({ ...prev, seasonal: e.target.checked }))}
+            />
+            <NewsTypeIcon type="seasonal" />
+            Seasonal
+          </label>
+          <label className="type-filter-label">
+            <input
+              type="checkbox"
+              checked={typeFilters.maintenance}
+              onChange={(e) => setTypeFilters(prev => ({ ...prev, maintenance: e.target.checked }))}
+            />
+            <NewsTypeIcon type="maintenance" />
+            Maintenance
+          </label>
+          <label className="type-filter-label">
+            <input
+              type="checkbox"
+              checked={typeFilters.wildlife}
+              onChange={(e) => setTypeFilters(prev => ({ ...prev, wildlife: e.target.checked }))}
+            />
+            <NewsTypeIcon type="wildlife" />
+            Wildlife
+          </label>
+          <label className="type-filter-label">
+            <input
+              type="checkbox"
+              checked={typeFilters.general}
+              onChange={(e) => setTypeFilters(prev => ({ ...prev, general: e.target.checked }))}
+            />
+            <NewsTypeIcon type="general" />
+            General
+          </label>
+        </div>
+        <div className="results-count">
+          Showing {filteredNews.length} of {news.length} news items
+        </div>
+      </div>
+
       <div className="news-events-layout">
         <div className="news-events-content">
           <div className="park-news-list">

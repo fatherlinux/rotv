@@ -1,4 +1,4 @@
-import React, { useMemo, useCallback, memo } from 'react';
+import React, { useMemo, useCallback, memo, useState } from 'react';
 import ResultsTile from './ResultsTile';
 
 // Organizations tab component showing all organizations (virtual POIs)
@@ -7,14 +7,29 @@ const OrganizationsTab = memo(function OrganizationsTab({
   selectedDestination,
   onSelectDestination
 }) {
-  // Sort organizations alphabetically
-  const { sortedOrgs, orgMap } = useMemo(() => {
+  const [searchText, setSearchText] = useState('');
+
+  // Sort organizations alphabetically and apply filters
+  const { sortedOrgs, orgMap, totalCount } = useMemo(() => {
     const orgs = (allVirtualPois || []).map(v => ({
       ...v,
       _isLinear: false,
       _isVirtual: true
     }));
-    const sorted = orgs.sort((a, b) =>
+    const total = orgs.length;
+
+    // Apply text search filter
+    let filtered = orgs;
+    if (searchText.trim()) {
+      const search = searchText.toLowerCase();
+      filtered = filtered.filter(org =>
+        (org.name || '').toLowerCase().includes(search) ||
+        (org.brief_description || '').toLowerCase().includes(search)
+      );
+    }
+
+    // Sort alphabetically
+    const sorted = filtered.sort((a, b) =>
       (a.name || '').localeCompare(b.name || '')
     );
 
@@ -25,8 +40,8 @@ const OrganizationsTab = memo(function OrganizationsTab({
       map.set(key, org);
     });
 
-    return { sortedOrgs: sorted, orgMap: map };
-  }, [allVirtualPois]);
+    return { sortedOrgs: sorted, orgMap: map, totalCount: total };
+  }, [allVirtualPois, searchText]);
 
   // Event delegation handler - single handler for all tiles
   const handleListClick = useCallback((e) => {
@@ -71,6 +86,19 @@ const OrganizationsTab = memo(function OrganizationsTab({
       <div className="news-events-header">
         <h2>Organizations</h2>
         <p className="tab-subtitle">{orgCount} organization{orgCount !== 1 ? 's' : ''} managing locations in the valley</p>
+      </div>
+
+      <div className="results-filters">
+        <input
+          type="text"
+          className="results-search-input"
+          placeholder="Search organizations by name or description..."
+          value={searchText}
+          onChange={(e) => setSearchText(e.target.value)}
+        />
+        <div className="results-count">
+          Showing {orgCount} of {totalCount} organizations
+        </div>
       </div>
 
       <div className="news-events-layout">

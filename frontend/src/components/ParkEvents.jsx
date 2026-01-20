@@ -34,6 +34,14 @@ function ParkEvents({ isAdmin, onSelectPoi, filteredDestinations, filteredLinear
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [deleting, setDeleting] = useState(null);
+  const [searchText, setSearchText] = useState('');
+  const [typeFilters, setTypeFilters] = useState({
+    'guided-tour': true,
+    'program': true,
+    'festival': true,
+    'volunteer': true,
+    'educational': true
+  });
 
   useEffect(() => {
     fetchEvents();
@@ -63,25 +71,38 @@ function ParkEvents({ isAdmin, onSelectPoi, filteredDestinations, filteredLinear
     const hasDestinations = Array.isArray(filteredDestinations);
     const hasLinearFeatures = Array.isArray(filteredLinearFeatures);
 
+    // Start with all events or filter by visible POIs
+    let filtered = events;
+
     // If both filters are explicitly empty arrays, show no events (all filters deselected)
     if (hasDestinations && filteredDestinations.length === 0 &&
         hasLinearFeatures && filteredLinearFeatures.length === 0) {
-      return [];
+      filtered = [];
+    } else if (filteredDestinations || filteredLinearFeatures) {
+      // Combine visible IDs from both point destinations and linear features
+      const visiblePoiIds = new Set([
+        ...(filteredDestinations || []).map(d => d.id),
+        ...(filteredLinearFeatures || []).map(f => f.id)
+      ]);
+      filtered = filtered.filter(item => visiblePoiIds.has(item.poi_id));
     }
 
-    // If no filters applied yet, show all events
-    if (!filteredDestinations && !filteredLinearFeatures) {
-      return events;
+    // Apply text search filter
+    if (searchText.trim()) {
+      const search = searchText.toLowerCase();
+      filtered = filtered.filter(item =>
+        (item.title || '').toLowerCase().includes(search) ||
+        (item.description || '').toLowerCase().includes(search) ||
+        (item.poi_name || '').toLowerCase().includes(search) ||
+        (item.location_details || '').toLowerCase().includes(search)
+      );
     }
 
-    // Combine visible IDs from both point destinations and linear features
-    const visiblePoiIds = new Set([
-      ...(filteredDestinations || []).map(d => d.id),
-      ...(filteredLinearFeatures || []).map(f => f.id)
-    ]);
+    // Apply type filter
+    filtered = filtered.filter(item => typeFilters[item.event_type || 'program']);
 
-    return events.filter(item => visiblePoiIds.has(item.poi_id));
-  }, [events, filteredDestinations, filteredLinearFeatures]);
+    return filtered;
+  }, [events, filteredDestinations, filteredLinearFeatures, searchText, typeFilters]);
 
   const handleDelete = async (eventId) => {
     if (!confirm('Delete this event?')) return;
@@ -211,6 +232,67 @@ END:VCALENDAR`;
         <h2>Upcoming Events</h2>
         <p className="tab-subtitle">Events across Cuyahoga Valley National Park</p>
       </div>
+
+      <div className="results-filters">
+        <input
+          type="text"
+          className="results-search-input"
+          placeholder="Search events by title, description, or location..."
+          value={searchText}
+          onChange={(e) => setSearchText(e.target.value)}
+        />
+        <div className="results-type-filters">
+          <label className="type-filter-label">
+            <input
+              type="checkbox"
+              checked={typeFilters['guided-tour']}
+              onChange={(e) => setTypeFilters(prev => ({ ...prev, 'guided-tour': e.target.checked }))}
+            />
+            <EventTypeIcon type="guided-tour" />
+            Tour
+          </label>
+          <label className="type-filter-label">
+            <input
+              type="checkbox"
+              checked={typeFilters['program']}
+              onChange={(e) => setTypeFilters(prev => ({ ...prev, 'program': e.target.checked }))}
+            />
+            <EventTypeIcon type="program" />
+            Program
+          </label>
+          <label className="type-filter-label">
+            <input
+              type="checkbox"
+              checked={typeFilters['festival']}
+              onChange={(e) => setTypeFilters(prev => ({ ...prev, 'festival': e.target.checked }))}
+            />
+            <EventTypeIcon type="festival" />
+            Festival
+          </label>
+          <label className="type-filter-label">
+            <input
+              type="checkbox"
+              checked={typeFilters['volunteer']}
+              onChange={(e) => setTypeFilters(prev => ({ ...prev, 'volunteer': e.target.checked }))}
+            />
+            <EventTypeIcon type="volunteer" />
+            Volunteer
+          </label>
+          <label className="type-filter-label">
+            <input
+              type="checkbox"
+              checked={typeFilters['educational']}
+              onChange={(e) => setTypeFilters(prev => ({ ...prev, 'educational': e.target.checked }))}
+            />
+            <EventTypeIcon type="educational" />
+            Educational
+          </label>
+        </div>
+        <div className="results-count">
+          Showing {filteredEvents.length} of {events.length} events
+        </div>
+      </div>
+
       <div className="news-events-layout">
         <div className="news-events-content">
           <div className="park-events-list">
