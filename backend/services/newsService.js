@@ -88,13 +88,37 @@ Search for:
 3. Closures, road work, or maintenance specifically affecting "{{name}}"
 4. Trail conditions, seasonal updates, or access changes for "{{name}}"
 
-IMPORTANT - WEBSITE-SPECIFIC SEARCH:
-If an official website is provided above:
-- PRIORITIZE searching the official website's events/calendar/programs pages
-- Look for URLs like: /events, /calendar, /programs, /schedule on that domain
-- Check for event listings, registration pages, upcoming programs on their site
-- The organization's own website is the most reliable source for their events
-- Include events found on their official site even if not widely publicized elsewhere
+IMPORTANT - MULTI-STRATEGY EVENT SEARCH:
+If an official website is provided above, use MULTIPLE search approaches:
+
+PRIMARY STRATEGY - Official Website Deep Search:
+- Search the official website thoroughly for events/calendar/programs/adventures
+- Look for URLs like: /events, /calendar, /programs, /schedule, /adventures on that domain
+- Try multiple search queries: "site:[domain] events 2026", "site:[domain] upcoming", "site:[domain] calendar"
+- Check event listings, registration pages, upcoming programs, workshops, classes
+- Look for event announcements in news/blog sections
+- Some sites use JavaScript to load events - search for event descriptions, dates mentioned anywhere on the site
+- The organization's own website is the most reliable source
+
+SECONDARY STRATEGY - Event Platforms & Social Media:
+- Search for "{{name}} events 2026" on event aggregators (Eventbrite, Facebook Events, Meetup, etc.)
+- Look for their Facebook page events: "{{name}} Facebook events"
+- Check for "{{name}} upcoming programs" or "{{name}} registration"
+- Search recent announcements: "{{name}} announces" or "{{name}} hosting"
+- Look for newsletter/email announcements about events
+
+TERTIARY STRATEGY - Local Event Calendars:
+- Check Cuyahoga Valley National Park official events calendar
+- Look for regional event listings that might feature {{name}}
+- Search local news sites for event announcements about {{name}}
+
+SEARCH THOROUGHNESS:
+- Try ALL three strategies above (official website, event platforms, local calendars)
+- If one approach doesn't find events, try the others
+- Organizations often post events in multiple places
+- For JavaScript-heavy sites, look for text descriptions of events anywhere on the site
+- Check multiple pages on their site, not just the main events page
+- Be thorough - many small organizations have rich event calendars
 
 ACTIVITY-BASED EVENT TYPE GUIDANCE:
 The primary activities at this location are: {{activities}}
