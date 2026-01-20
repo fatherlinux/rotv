@@ -1687,6 +1687,7 @@ body {
 .event-type-icon.festival { background: #c62828; }
 .event-type-icon.volunteer { background: #2e7d32; }
 .event-type-icon.educational { background: #f57c00; }
+.event-type-icon.concert { background: #d81b60; }
 
 .news-title, .event-title {
   font-weight: 600;
@@ -8632,6 +8633,18 @@ body {
 
 .type-filter-chip.educational .type-filter-icon {
   background-color: #e64a19;
+}
+
+.type-filter-chip.concert {
+  color: #d81b60;
+}
+
+.type-filter-chip.concert.active {
+  background: #fce4ec;
+}
+
+.type-filter-chip.concert .type-filter-icon {
+  background-color: #d81b60;
 }
 
 .results-count {

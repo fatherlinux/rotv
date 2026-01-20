@@ -103,7 +103,7 @@ Return a JSON object with this exact structure:
       "description": "Brief description - must specify this event is at {{name}}",
       "start_date": "YYYY-MM-DD",
       "end_date": "YYYY-MM-DD or null if single day",
-      "event_type": "guided-tour|program|festival|volunteer|educational",
+      "event_type": "guided-tour|program|festival|volunteer|educational|concert",
       "location_details": "Must be at or near {{name}} specifically",
       "source_url": "Registration or info URL if available"
     }

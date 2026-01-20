@@ -24,7 +24,8 @@ function EventTypeIcon({ type }) {
     'program': 'P',
     'festival': 'F',
     'volunteer': 'V',
-    'educational': 'E'
+    'educational': 'E',
+    'concert': 'C'
   };
   return <span className={`event-type-icon ${type || 'program'}`}>{icons[type] || 'E'}</span>;
 }
@@ -40,7 +41,8 @@ function ParkEvents({ isAdmin, onSelectPoi, filteredDestinations, filteredLinear
     'program': true,
     'festival': true,
     'volunteer': true,
-    'educational': true
+    'educational': true,
+    'concert': true
   });
 
   useEffect(() => {
@@ -276,6 +278,13 @@ END:VCALENDAR`;
           >
             <span className="type-filter-icon">E</span>
             Educational
+          </div>
+          <div
+            className={`type-filter-chip concert ${typeFilters['concert'] ? 'active' : 'inactive'}`}
+            onClick={() => setTypeFilters(prev => ({ ...prev, 'concert': !prev['concert'] }))}
+          >
+            <span className="type-filter-icon">C</span>
+            Concert
           </div>
         </div>
         <div className="results-count">
