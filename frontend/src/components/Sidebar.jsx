@@ -1336,7 +1336,7 @@ function AssociationsModal({ isOpen, onClose, poi, associations, allDestinations
       const associatedPoi = allVirtualPois?.find(v => v.id === virtualId);
       return associatedPoi ? { ...associatedPoi, _isVirtual: true, _isLinear: false, _assocId: assoc.id } : null;
     }
-  }).filter(Boolean);
+  }).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name));
 
   // Get available POIs for adding (not currently associated)
   const availablePois = useMemo(() => {
@@ -1609,7 +1609,7 @@ function AssociationsTabContent({ poi, associations, allDestinations, allLinearF
       const associatedPoi = allVirtualPois?.find(v => v.id === virtualId);
       return associatedPoi ? { ...associatedPoi, _isVirtual: true, _isLinear: false, _assocId: assoc.id } : null;
     }
-  }).filter(Boolean);
+  }).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name));
 
   // Get available POIs for adding (not currently associated)
   const availablePois = useMemo(() => {
