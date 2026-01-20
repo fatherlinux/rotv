@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 
-function ImageUploader({ destinationId, hasImage, onImageChange, disabled, isLinearFeature }) {
+function ImageUploader({ destinationId, hasImage, onImageChange, disabled, isLinearFeature, isVirtualPoi }) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState(null);
   const [dragActive, setDragActive] = useState(false);
@@ -12,6 +12,9 @@ function ImageUploader({ destinationId, hasImage, onImageChange, disabled, isLin
 
   // Use thumbnail service for faster preview loading (medium size for edit view)
   const imageUrl = hasImage ? `/api/pois/${destinationId}/thumbnail?size=medium&v=${imageVersion}` : null;
+
+  // Debug logging
+  console.log('ImageUploader render:', { destinationId, hasImage, imageVersion, imageUrl });
 
   const handleFileSelect = async (file) => {
     if (!file) return;
@@ -48,8 +51,27 @@ function ImageUploader({ destinationId, hasImage, onImageChange, disabled, isLin
       }
 
       const result = await response.json();
-      setImageVersion(Date.now()); // Bust cache for new image
-      onImageChange(true, result.drive_file_id);
+
+      // Fetch the updated POI to get the new updated_at timestamp
+      try {
+        const poiResponse = await fetch(`/api/pois/${destinationId}`, {
+          credentials: 'include'
+        });
+        if (poiResponse.ok) {
+          const updatedPoi = await poiResponse.json();
+          console.log('Image uploaded - new timestamp:', updatedPoi.updated_at);
+          setImageVersion(updatedPoi.updated_at || Date.now()); // Use server timestamp for cache busting
+          onImageChange(true, result.drive_file_id, updatedPoi.updated_at);
+        } else {
+          console.error('Failed to fetch updated POI after image upload, status:', poiResponse.status);
+          setImageVersion(Date.now()); // Fallback to local timestamp
+          onImageChange(true, result.drive_file_id);
+        }
+      } catch (fetchError) {
+        console.error('Error fetching updated POI:', fetchError);
+        setImageVersion(Date.now()); // Fallback to local timestamp
+        onImageChange(true, result.drive_file_id);
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -74,7 +96,22 @@ function ImageUploader({ destinationId, hasImage, onImageChange, disabled, isLin
         throw new Error(err.error || 'Delete failed');
       }
 
-      onImageChange(false, null);
+      // Fetch the updated POI to get the new updated_at timestamp
+      try {
+        const poiResponse = await fetch(`/api/pois/${destinationId}`, {
+          credentials: 'include'
+        });
+        if (poiResponse.ok) {
+          const updatedPoi = await poiResponse.json();
+          onImageChange(false, null, updatedPoi.updated_at);
+        } else {
+          console.error('Failed to fetch updated POI after image delete');
+          onImageChange(false, null);
+        }
+      } catch (fetchError) {
+        console.error('Error fetching updated POI:', fetchError);
+        onImageChange(false, null);
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -121,11 +158,11 @@ function ImageUploader({ destinationId, hasImage, onImageChange, disabled, isLin
       )}
 
       {imageUrl ? (
-        <div className="image-preview-container">
+        <div className={`image-preview-container ${isVirtualPoi ? 'virtual-thumbnail' : ''}`}>
           <img
             src={imageUrl}
             alt="Destination"
-            className="image-preview"
+            className={`image-preview ${isVirtualPoi ? 'logo-image' : ''}`}
             onError={(e) => {
               e.target.style.display = 'none';
               e.target.nextSibling.style.display = 'flex';

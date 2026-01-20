@@ -951,6 +951,16 @@ body {
   object-fit: cover;
 }
 
+/* Virtual POI (organization) sidebar images - use contain for logos */
+.sidebar-image.virtual-thumbnail {
+  background: #ffffff;
+}
+
+.sidebar-image img.logo-image {
+  object-fit: contain;
+  padding: 1rem;
+}
+
 .image-placeholder {
   width: 100%;
   height: 100%;
@@ -7827,6 +7837,16 @@ body {
   display: block;
 }
 
+/* Virtual POI (organization) image preview - use contain for logos */
+.image-preview-container.virtual-thumbnail {
+  background: #ffffff;
+}
+
+.image-preview.logo-image {
+  object-fit: contain;
+  padding: 1rem;
+}
+
 .image-load-error {
   display: flex;
   align-items: center;
@@ -8423,6 +8443,16 @@ body {
   transform: scale(1.05);
 }
 
+/* Virtual POI (organization) thumbnails - use contain for logos */
+.results-tile-image.virtual-thumbnail {
+  background: #ffffff;
+}
+
+.results-tile-image img.logo-image {
+  object-fit: contain;
+  padding: 0.5rem;
+}
+
 .results-tile-placeholder {
   width: 100%;
   height: 100%;
@@ -8611,14 +8641,6 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  max-height: 400px;
-  overflow-y: auto;
-  scrollbar-width: none; /* Firefox */
-  -ms-overflow-style: none; /* IE and Edge */
-}
-
-.associations-list::-webkit-scrollbar {
-  display: none; /* Chrome, Safari, Opera */
 }
 
 .association-item {
@@ -8639,38 +8661,60 @@ body {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
 }
 
-.association-item-badge {
+.association-item-thumbnail {
   flex-shrink: 0;
-  width: 32px;
-  height: 32px;
+  width: 80px;
+  min-width: 80px;
+  height: 80px;
+  overflow: hidden;
+  background: #f0f0f0;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
-  background: var(--primary-color, #4a90e2);
-  color: white;
-  font-weight: 600;
-  font-size: 0.85rem;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
-.association-item-badge.destination {
-  background: #2e7d32;
+.association-item-thumbnail img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.2s ease;
 }
 
-.association-item-badge.trail {
-  background: #795548;
+.association-item-clickable:hover .association-item-thumbnail img {
+  transform: scale(1.05);
 }
 
-.association-item-badge.river {
-  background: #1565c0;
+.association-item-thumbnail img.default-thumbnail {
+  padding: 0.5rem;
+  object-fit: contain;
 }
 
-.association-item-badge.boundary {
-  background: #7b2d8e;
+/* Virtual POI (organization) thumbnails - use contain for logos */
+.association-item-thumbnail.virtual-thumbnail {
+  background: #ffffff;
 }
 
-.association-item-badge.virtual {
-  background: #ff9800;
+.association-item-thumbnail img.logo-image {
+  object-fit: contain;
+  padding: 0.5rem;
+}
+
+.association-item-badges {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.association-item-era {
+  padding: 0.15rem 0.5rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  background: var(--era-badge-bg, #e3f2fd);
+  color: var(--era-badge-color, #1976d2);
+  font-weight: 500;
 }
 
 .association-item-content {
