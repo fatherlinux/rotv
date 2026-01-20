@@ -223,6 +223,11 @@ function ReadOnlyView({ destination, isLinearFeature, isAdmin, showImage = true,
     return '/icons/thumbnails/destination.svg';
   };
 
+  // Debug logging for virtual POI detection
+  if (destination.poi_type === 'virtual') {
+    console.log('[Sidebar View] Virtual POI detected:', destination.name, 'poi_type:', destination.poi_type);
+  }
+
   return (
     <div className="view-container">
       <div className="view-scroll">
@@ -596,6 +601,7 @@ function EditView({ destination, editedData, setEditedData, onSave, onCancel, on
           <ImageUploader
             destinationId={destination.id}
             hasImage={!!editedData.image_mime_type}
+            updatedAt={editedData.updated_at}
             onImageChange={(hasImage, driveFileId, updatedAt) => {
               const newUpdatedAt = updatedAt || new Date().toISOString();
               setEditedData(prev => ({
@@ -2226,6 +2232,7 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
           <ImageUploader
             destinationId={linearFeature.id}
             hasImage={!!linearFeature.image_mime_type}
+            updatedAt={linearFeature.updated_at}
             onImageChange={(hasImage, driveFileId, updatedAt) => {
               if (onLinearFeatureUpdate) {
                 onLinearFeatureUpdate({
@@ -2438,6 +2445,7 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
         <ImageUploader
           destinationId={destination.id}
           hasImage={!!destination.image_mime_type}
+          updatedAt={destination.updated_at}
           onImageChange={(hasImage, driveFileId, updatedAt) => {
             if (onDestinationUpdate) {
               onDestinationUpdate({

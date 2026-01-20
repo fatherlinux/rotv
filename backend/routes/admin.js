@@ -72,7 +72,7 @@ import { submitBatchNewsJob } from '../services/jobScheduler.js';
 
 const router = express.Router();
 
-export function createAdminRouter(pool) {
+export function createAdminRouter(pool, clearThumbnailCache) {
   // Helper to queue sync operation after a change
   async function queuePOISync(operation, recordId, data) {
     try {
@@ -2201,6 +2201,98 @@ export function createAdminRouter(pool) {
     }
   });
 
+  // Upload image for a destination (base64 JSON variant - for dev server issues)
+  router.post('/destinations/:id/image-base64', isAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { imageData, mimeType } = req.body;
+
+    if (!imageData || !mimeType) {
+      return res.status(400).json({ error: 'No image data provided' });
+    }
+
+    // Validate mime type
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (!allowedTypes.includes(mimeType)) {
+      return res.status(400).json({ error: 'Invalid file type. Only JPEG, PNG, WebP, and GIF are allowed.' });
+    }
+
+    try {
+      // Decode base64
+      const buffer = Buffer.from(imageData, 'base64');
+
+      // Validate size (10MB max)
+      if (buffer.length > 10 * 1024 * 1024) {
+        return res.status(400).json({ error: 'Image must be less than 10MB' });
+      }
+
+      // Check if destination exists
+      const destCheck = await pool.query('SELECT id, name, image_drive_file_id FROM pois WHERE id = $1', [id]);
+      if (destCheck.rows.length === 0) {
+        return res.status(404).json({ error: 'Destination not found' });
+      }
+
+      const destination = destCheck.rows[0];
+
+      // Store image in database
+      await pool.query(
+        `UPDATE pois
+         SET image_data = $1, image_mime_type = $2,
+             updated_at = CURRENT_TIMESTAMP, locally_modified = TRUE, synced = FALSE
+         WHERE id = $3`,
+        [buffer, mimeType, id]
+      );
+
+      // Invalidate thumbnail cache for this POI
+      await pool.query('DELETE FROM thumbnail_cache WHERE poi_id = $1', [id]);
+
+      // Clear in-memory thumbnail cache
+      if (clearThumbnailCache) {
+        clearThumbnailCache(id);
+      }
+
+      // Also upload to Drive as backup if user has OAuth
+      let driveFileId = null;
+      if (req.user.oauth_credentials) {
+        try {
+          const drive = createDriveService(req.user.oauth_credentials);
+
+          // Delete old image from Drive if it exists
+          if (destination.image_drive_file_id) {
+            try {
+              await deleteFileFromDrive(drive, destination.image_drive_file_id);
+              console.log(`Deleted old image from Drive: ${destination.image_drive_file_id}`);
+            } catch (deleteError) {
+              console.warn('Failed to delete old image from Drive (non-fatal):', deleteError.message);
+            }
+          }
+
+          // Upload new image to Drive
+          driveFileId = await uploadImageToDrive(drive, pool, buffer, mimeType, destination.name);
+
+          // Update database with Drive file ID
+          await pool.query(
+            'UPDATE pois SET image_drive_file_id = $1 WHERE id = $2',
+            [driveFileId, id]
+          );
+
+          console.log(`Backed up image to Drive: ${driveFileId}`);
+        } catch (driveError) {
+          console.warn('Failed to backup to Drive (non-fatal):', driveError.message);
+        }
+      }
+
+      console.log(`Admin ${req.user.email} uploaded image for destination ${id}`);
+      res.json({
+        success: true,
+        message: 'Image uploaded successfully',
+        drive_file_id: driveFileId
+      });
+    } catch (error) {
+      console.error('Error uploading destination image:', error);
+      res.status(500).json({ error: 'Failed to upload image' });
+    }
+  });
+
   // Delete image from a destination
   // Clears image from database AND deletes from Drive backup
   router.delete('/destinations/:id/image', isAdmin, async (req, res) => {
@@ -2557,6 +2649,98 @@ export function createAdminRouter(pool) {
       res.json({
         success: true,
         feature: result.rows[0]
+      });
+    } catch (error) {
+      console.error('Error uploading linear feature image:', error);
+      res.status(500).json({ error: 'Failed to upload image' });
+    }
+  });
+
+  // Upload image for linear feature (base64 JSON variant - for dev server issues)
+  router.post('/linear-features/:id/image-base64', isAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { imageData, mimeType } = req.body;
+
+    if (!imageData || !mimeType) {
+      return res.status(400).json({ error: 'No image data provided' });
+    }
+
+    // Validate mime type
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (!allowedTypes.includes(mimeType)) {
+      return res.status(400).json({ error: 'Invalid file type. Only JPEG, PNG, WebP, and GIF are allowed.' });
+    }
+
+    try {
+      // Decode base64
+      const buffer = Buffer.from(imageData, 'base64');
+
+      // Validate size (10MB max)
+      if (buffer.length > 10 * 1024 * 1024) {
+        return res.status(400).json({ error: 'Image must be less than 10MB' });
+      }
+
+      // Check if linear feature exists
+      const featureCheck = await pool.query('SELECT id, name, image_drive_file_id FROM pois WHERE id = $1', [id]);
+      if (featureCheck.rows.length === 0) {
+        return res.status(404).json({ error: 'Linear feature not found' });
+      }
+
+      const feature = featureCheck.rows[0];
+
+      // Store image in database
+      await pool.query(
+        `UPDATE pois
+         SET image_data = $1, image_mime_type = $2,
+             updated_at = CURRENT_TIMESTAMP, locally_modified = TRUE, synced = FALSE
+         WHERE id = $3`,
+        [buffer, mimeType, id]
+      );
+
+      // Invalidate thumbnail cache for this POI
+      await pool.query('DELETE FROM thumbnail_cache WHERE poi_id = $1', [id]);
+
+      // Clear in-memory thumbnail cache
+      if (clearThumbnailCache) {
+        clearThumbnailCache(id);
+      }
+
+      // Also upload to Drive as backup if user has OAuth
+      let driveFileId = null;
+      if (req.user.oauth_credentials) {
+        try {
+          const drive = createDriveService(req.user.oauth_credentials);
+
+          // Delete old image from Drive if it exists
+          if (feature.image_drive_file_id) {
+            try {
+              await deleteFileFromDrive(drive, feature.image_drive_file_id);
+              console.log(`Deleted old image from Drive: ${feature.image_drive_file_id}`);
+            } catch (deleteError) {
+              console.warn('Failed to delete old image from Drive (non-fatal):', deleteError.message);
+            }
+          }
+
+          // Upload new image to Drive
+          driveFileId = await uploadImageToDrive(drive, pool, buffer, mimeType, feature.name);
+
+          // Update database with Drive file ID
+          await pool.query(
+            'UPDATE pois SET image_drive_file_id = $1 WHERE id = $2',
+            [driveFileId, id]
+          );
+
+          console.log(`Backed up image to Drive: ${driveFileId}`);
+        } catch (driveError) {
+          console.warn('Failed to backup to Drive (non-fatal):', driveError.message);
+        }
+      }
+
+      console.log(`Admin ${req.user.email} uploaded image for linear feature ${id}`);
+      res.json({
+        success: true,
+        message: 'Image uploaded successfully',
+        drive_file_id: driveFileId
       });
     } catch (error) {
       console.error('Error uploading linear feature image:', error);

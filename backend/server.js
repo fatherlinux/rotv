@@ -86,7 +86,7 @@ app.use(passport.session());
 app.use('/auth', authRoutes);
 
 // Mount admin routes
-app.use('/api/admin', createAdminRouter(pool));
+app.use('/api/admin', createAdminRouter(pool, clearThumbnailCacheForPoi));
 
 // Import trails and rivers from GeoJSON files into unified pois table
 async function importGeoJSONFeatures(client) {
@@ -751,6 +751,16 @@ function addToMemoryCache(key, data) {
   thumbnailMemoryCache.set(key, data);
 }
 
+// Helper to clear all thumbnail cache entries for a specific POI
+function clearThumbnailCacheForPoi(poiId) {
+  const sizes = ['small', 'medium', 'default'];
+  sizes.forEach(size => {
+    const cacheKey = `${poiId}-${size}`;
+    thumbnailMemoryCache.delete(cacheKey);
+  });
+  console.log(`Cleared memory cache for POI ${poiId}`);
+}
+
 // Serve optimized thumbnails with configurable size
 // Two-tier cache: Memory (L1) -> Database (L2) -> Generate
 // Sizes: small (200x200), medium (400x300), default (1200x630)
@@ -789,9 +799,9 @@ app.get('/api/pois/:id/thumbnail', async (req, res) => {
       width = 1200; height = 630; quality = 80;
     }
 
-    // Fetch original image
+    // Fetch original image and POI type
     const result = await pool.query(
-      'SELECT image_data FROM pois WHERE id = $1 AND image_data IS NOT NULL',
+      'SELECT image_data, poi_type FROM pois WHERE id = $1 AND image_data IS NOT NULL',
       [id]
     );
 
@@ -799,12 +809,23 @@ app.get('/api/pois/:id/thumbnail', async (req, res) => {
       return res.status(404).json({ error: 'Image not found' });
     }
 
+    const isVirtualPoi = result.rows[0].poi_type === 'virtual';
+
     // Generate thumbnail
+    // Use 'contain' for organization logos (virtual POIs) to show full logo without cropping
+    // Use 'cover' for photos (destinations, trails) to fill the frame
+    const resizeOptions = isVirtualPoi
+      ? {
+          fit: 'contain',
+          background: { r: 255, g: 255, b: 255, alpha: 1 } // White background for logos
+        }
+      : {
+          fit: 'cover',
+          position: 'center'
+        };
+
     const thumbnail = await sharp(result.rows[0].image_data)
-      .resize(width, height, {
-        fit: 'cover',
-        position: 'center'
-      })
+      .resize(width, height, resizeOptions)
       .jpeg({
         quality: quality,
         progressive: true

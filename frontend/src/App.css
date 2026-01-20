@@ -956,9 +956,9 @@ body {
   background: #ffffff;
 }
 
-.sidebar-image img.logo-image {
-  object-fit: contain;
-  padding: 1rem;
+.sidebar-image.virtual-thumbnail img.logo-image {
+  object-fit: contain !important;
+  padding: 0.25rem;
 }
 
 .image-placeholder {
@@ -7842,9 +7842,9 @@ body {
   background: #ffffff;
 }
 
-.image-preview.logo-image {
-  object-fit: contain;
-  padding: 1rem;
+.image-preview-container.virtual-thumbnail .image-preview.logo-image {
+  object-fit: contain !important;
+  padding: 0.25rem;
 }
 
 .image-load-error {
