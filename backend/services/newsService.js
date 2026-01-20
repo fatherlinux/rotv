@@ -79,11 +79,22 @@ CRITICAL REQUIREMENTS - BE EXTREMELY STRICT:
 - Do NOT include news about similarly-named places in other locations
 - Do NOT include news about the general Cuyahoga Valley area unless it specifically names "{{name}}"
 
+OFFICIAL WEBSITE:
+{{website}}
+
 Search for:
 1. Recent news articles (last 30 days) that specifically mention "{{name}}"
 2. Upcoming events happening AT "{{name}}" specifically
 3. Closures, road work, or maintenance specifically affecting "{{name}}"
 4. Trail conditions, seasonal updates, or access changes for "{{name}}"
+
+IMPORTANT - WEBSITE-SPECIFIC SEARCH:
+If an official website is provided above:
+- PRIORITIZE searching the official website's events/calendar/programs pages
+- Look for URLs like: /events, /calendar, /programs, /schedule on that domain
+- Check for event listings, registration pages, upcoming programs on their site
+- The organization's own website is the most reliable source for their events
+- Include events found on their official site even if not widely publicized elsewhere
 
 ACTIVITY-BASED EVENT TYPE GUIDANCE:
 The primary activities at this location are: {{activities}}
@@ -132,16 +143,18 @@ IMPORTANT:
 /**
  * Collect news and events for a specific POI
  * @param {Pool} pool - Database connection pool
- * @param {Object} poi - POI object with id, name, poi_type, primary_activities
+ * @param {Object} poi - POI object with id, name, poi_type, primary_activities, more_info_link
  * @param {Object} sheets - Optional sheets client for API key restore
  * @returns {Object} - { news: [], events: [] }
  */
 export async function collectNewsForPoi(pool, poi, sheets = null) {
   const activities = poi.primary_activities || 'None specified';
+  const website = poi.more_info_link || 'No website available';
   const prompt = NEWS_COLLECTION_PROMPT
     .replace('{{name}}', poi.name)
     .replace('{{poi_type}}', poi.poi_type)
-    .replace('{{activities}}', activities);
+    .replace('{{activities}}', activities)
+    .replace('{{website}}', website);
 
   try {
     const response = await generateTextWithCustomPrompt(pool, prompt, sheets);
@@ -422,7 +435,7 @@ export async function processNewsCollectionJob(pool, sheets, pgBossJobId, jobDat
 
   // Get POI details for remaining POIs
   const poisResult = await pool.query(
-    'SELECT id, name, poi_type, primary_activities FROM pois WHERE id = ANY($1)',
+    'SELECT id, name, poi_type, primary_activities, more_info_link FROM pois WHERE id = ANY($1)',
     [remainingPoiIds]
   );
   const pois = poisResult.rows;
