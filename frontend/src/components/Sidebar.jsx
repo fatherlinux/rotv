@@ -371,6 +371,59 @@ function EditView({ destination, editedData, setEditedData, onSave, onCancel, on
   // Research state
   const [researching, setResearching] = useState(false);
 
+  // Pending image state (staging area for image uploads until save)
+  const [pendingImage, setPendingImage] = useState(null);
+
+  // Handle save with pending image processing
+  const handleSaveWithImage = async () => {
+    if (!destination?.id) {
+      // For new POIs, just call parent save (image will be handled separately)
+      await onSave();
+      return;
+    }
+
+    try {
+      const apiEndpoint = isLinearFeature ? 'linear-features' : 'destinations';
+
+      // Handle pending image if exists
+      if (pendingImage) {
+        if (pendingImage.deleted) {
+          // Delete the image
+          await fetch(`/api/admin/${apiEndpoint}/${destination.id}/image`, {
+            method: 'DELETE',
+            credentials: 'include'
+          });
+        } else if (pendingImage.data) {
+          // Upload new image - always use base64 endpoint for simplicity
+          const endpoint = `/api/admin/${apiEndpoint}/${destination.id}/image-base64`;
+          await fetch(endpoint, {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              imageData: pendingImage.data,
+              mimeType: pendingImage.mimeType
+            })
+          });
+        }
+        // Clear pending image after processing
+        setPendingImage(null);
+      }
+
+      // Now call parent save for other fields
+      await onSave();
+    } catch (err) {
+      alert(`Error processing image: ${err.message}`);
+      throw err;
+    }
+  };
+
+  // Handle cancel - clear pending image
+  const handleCancelWithCleanup = () => {
+    setPendingImage(null);
+    onCancel();
+  };
+
   // Standardized activities list
   const [availableActivities, setAvailableActivities] = useState([]);
   const [showActivityDropdown, setShowActivityDropdown] = useState(false);
@@ -601,22 +654,10 @@ function EditView({ destination, editedData, setEditedData, onSave, onCancel, on
           <ImageUploader
             destinationId={destination.id}
             hasImage={!!editedData.image_mime_type}
+            pendingImage={pendingImage}
+            onPendingImageChange={setPendingImage}
             updatedAt={editedData.updated_at}
-            onImageChange={(hasImage, driveFileId, updatedAt) => {
-              const newUpdatedAt = updatedAt || new Date().toISOString();
-              setEditedData(prev => ({
-                ...prev,
-                image_mime_type: hasImage ? 'image/jpeg' : null,
-                image_drive_file_id: driveFileId,
-                updated_at: newUpdatedAt // Update timestamp for cache busting
-              }));
-              // Also update parent state so view mode shows the new image
-              if (onImageUpdate) {
-                onImageUpdate(hasImage, driveFileId);
-              }
-            }}
             disabled={saving}
-            isLinearFeature={isLinearFeature}
             isVirtualPoi={destination?.poi_type === 'virtual'}
           />
         ) : (
@@ -933,10 +974,10 @@ function EditView({ destination, editedData, setEditedData, onSave, onCancel, on
           </button>
         )}
         <div className={`edit-buttons-right ${(isNewPOI || isNewOrganization) ? 'full-width' : ''}`}>
-          <button className="cancel-btn" onClick={onCancel} disabled={saving || deleting}>
+          <button className="cancel-btn" onClick={handleCancelWithCleanup} disabled={saving || deleting}>
             Cancel
           </button>
-          <button className="save-btn" onClick={onSave} disabled={saving || deleting}>
+          <button className="save-btn" onClick={handleSaveWithImage} disabled={saving || deleting}>
             {saving ? 'Saving...' : (isNewPOI ? 'Create POI' : isNewOrganization ? 'Create Organization' : 'Save Changes')}
           </button>
         </div>
@@ -1863,6 +1904,7 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
   const [showShareModal, setShowShareModal] = useState(false);
   const [showAssociationsModal, setShowAssociationsModal] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  const [pendingImage, setPendingImage] = useState(null);
 
   // State for new organization creation
   const [organizationData, setOrganizationData] = useState({
@@ -2062,6 +2104,30 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
         };
         await onSaveNewPOI(poiData);
       } else {
+        // Process pending image first
+        if (pendingImage) {
+          if (pendingImage.deleted) {
+            // Delete the image
+            await fetch(`/api/admin/destinations/${destination.id}/image`, {
+              method: 'DELETE',
+              credentials: 'include'
+            });
+          } else if (pendingImage.data) {
+            // Upload new image
+            await fetch(`/api/admin/destinations/${destination.id}/image-base64`, {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                imageData: pendingImage.data,
+                mimeType: pendingImage.mimeType
+              })
+            });
+          }
+          setPendingImage(null);
+        }
+
+        // Then save other fields
         const response = await fetch(`/api/admin/destinations/${destination.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
@@ -2096,10 +2162,34 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
 
     setSaving(true);
     try {
+      // Process pending image first
+      if (pendingImage) {
+        if (pendingImage.deleted) {
+          // Delete the image
+          await fetch(`/api/admin/linear-features/${linearFeature.id}/image`, {
+            method: 'DELETE',
+            credentials: 'include'
+          });
+        } else if (pendingImage.data) {
+          // Upload new image
+          await fetch(`/api/admin/linear-features/${linearFeature.id}/image-base64`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              imageData: pendingImage.data,
+              mimeType: pendingImage.mimeType
+            })
+          });
+        }
+        setPendingImage(null);
+      }
+
       // Exclude geometry from save payload - it's not editable via sidebar
       // and including it makes the request too large
       const { geometry, ...dataWithoutGeometry } = editedData;
 
+      // Then save other fields
       const response = await fetch(`/api/admin/linear-features/${linearFeature.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -2125,6 +2215,7 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
   };
 
   const handleCancel = () => {
+    setPendingImage(null); // Clear pending image on cancel
     if (isNewPOI && onCancelNewPOI) {
       onCancelNewPOI();
     } else if (isNewOrganization && onCancelNewOrganization) {
@@ -2232,19 +2323,10 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
           <ImageUploader
             destinationId={linearFeature.id}
             hasImage={!!linearFeature.image_mime_type}
+            pendingImage={pendingImage}
+            onPendingImageChange={setPendingImage}
             updatedAt={linearFeature.updated_at}
-            onImageChange={(hasImage, driveFileId, updatedAt) => {
-              if (onLinearFeatureUpdate) {
-                onLinearFeatureUpdate({
-                  ...linearFeature,
-                  image_mime_type: hasImage ? 'image/jpeg' : null,
-                  image_drive_file_id: driveFileId,
-                  updated_at: updatedAt || new Date().toISOString() // Update timestamp for cache busting
-                });
-              }
-            }}
             disabled={saving}
-            isLinearFeature={true}
             isVirtualPoi={false}
           />
         ) : (
@@ -2445,17 +2527,9 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
         <ImageUploader
           destinationId={destination.id}
           hasImage={!!destination.image_mime_type}
+          pendingImage={pendingImage}
+          onPendingImageChange={setPendingImage}
           updatedAt={destination.updated_at}
-          onImageChange={(hasImage, driveFileId, updatedAt) => {
-            if (onDestinationUpdate) {
-              onDestinationUpdate({
-                ...destination,
-                image_mime_type: hasImage ? 'image/jpeg' : null,
-                image_drive_file_id: driveFileId,
-                updated_at: updatedAt || new Date().toISOString() // Update timestamp for cache busting
-              });
-            }
-          }}
           disabled={saving}
           isVirtualPoi={destination?.poi_type === 'virtual'}
         />
