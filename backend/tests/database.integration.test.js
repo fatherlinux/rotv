@@ -79,8 +79,8 @@ describe('Database Schema Tests', () => {
     expect(columns).toContain('id');
     expect(columns).toContain('poi_id');
     expect(columns).toContain('title');
-    expect(columns).toContain('url');
-    expect(columns).toContain('published_date');
+    expect(columns).toContain('source_url');
+    expect(columns).toContain('published_at');
     expect(columns).toContain('created_at');
   });
 
@@ -98,8 +98,8 @@ describe('Database Schema Tests', () => {
     expect(columns).toContain('id');
     expect(columns).toContain('poi_id');
     expect(columns).toContain('title');
-    expect(columns).toContain('event_date');
-    expect(columns).toContain('url');
+    expect(columns).toContain('start_date');
+    expect(columns).toContain('source_url');
     expect(columns).toContain('created_at');
   });
 
@@ -130,10 +130,6 @@ describe('Database Schema Tests', () => {
 });
 
 describe('Database Query Tests', () => {
-  afterAll(async () => {
-    await pool.end();
-  });
-
   it('should query POIs successfully', async () => {
     const result = await pool.query(`
       SELECT id, name, poi_type, latitude, longitude
@@ -156,8 +152,8 @@ describe('Database Query Tests', () => {
       SELECT
         pn.id,
         pn.title,
-        pn.url,
-        pn.published_date,
+        pn.source_url,
+        pn.published_at,
         p.name as poi_name
       FROM poi_news pn
       JOIN pois p ON pn.poi_id = p.id
@@ -178,12 +174,12 @@ describe('Database Query Tests', () => {
       SELECT
         pe.id,
         pe.title,
-        pe.event_date,
-        pe.url,
+        pe.start_date,
+        pe.source_url,
         p.name as poi_name
       FROM poi_events pe
       JOIN pois p ON pe.poi_id = p.id
-      WHERE pe.event_date >= CURRENT_DATE
+      WHERE pe.start_date >= CURRENT_DATE
       LIMIT 10
     `);
 
@@ -192,7 +188,7 @@ describe('Database Query Tests', () => {
     if (result.rows.length > 0) {
       expect(result.rows[0]).toHaveProperty('id');
       expect(result.rows[0]).toHaveProperty('title');
-      expect(result.rows[0]).toHaveProperty('event_date');
+      expect(result.rows[0]).toHaveProperty('start_date');
       expect(result.rows[0]).toHaveProperty('poi_name');
     }
   });

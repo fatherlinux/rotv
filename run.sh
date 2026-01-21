@@ -69,13 +69,10 @@ case "${1:-help}" in
         echo "Running integration tests..."
         echo ""
 
-        TEST_CONTAINER="${CONTAINER_NAME}-test"
-        TEST_PORT=8081
-
-        # Stop and remove any existing test container
-        echo "Cleaning up old test container..."
-        podman stop "$TEST_CONTAINER" 2>/dev/null || true
-        podman rm "$TEST_CONTAINER" 2>/dev/null || true
+        # Stop and remove existing container
+        echo "Stopping main container..."
+        podman stop "$CONTAINER_NAME" 2>/dev/null || true
+        podman rm "$CONTAINER_NAME" 2>/dev/null || true
 
         # Set up permissions if directory is empty or newly created
         if [ ! -f "$DATA_DIR/PG_VERSION" ]; then
@@ -84,42 +81,45 @@ case "${1:-help}" in
             podman unshare chmod 700 "$DATA_DIR" 2>/dev/null || true
         fi
 
-        # Start dedicated test container with rotv_test database
-        echo "Starting test container..."
+        # Remove stale PostgreSQL PID file if it exists
+        podman unshare rm "$DATA_DIR/postmaster.pid" 2>/dev/null || true
+
+        # Start container with test database
+        echo "Starting container with test database..."
         podman run -d \
-            --name "$TEST_CONTAINER" \
+            --name "$CONTAINER_NAME" \
             --privileged \
-            -p ${TEST_PORT}:8080 \
+            -p 8080:8080 \
             -v "$DATA_DIR:/data/pgdata:Z" \
             -e PGDATABASE=rotv_test \
             $ENV_ARGS \
             "$IMAGE_NAME" >/dev/null
 
-        echo "Waiting for test container to be ready..."
+        echo "Waiting for container to be ready..."
         sleep 10
 
         # Create test database if it doesn't exist
         echo "Setting up test database..."
-        podman exec "$TEST_CONTAINER" psql -U rotv -d postgres -c "DROP DATABASE IF EXISTS rotv_test;" 2>/dev/null || true
-        podman exec "$TEST_CONTAINER" psql -U rotv -d postgres -c "CREATE DATABASE rotv_test;" 2>/dev/null || true
+        podman exec "$CONTAINER_NAME" psql -U rotv -d postgres -c "DROP DATABASE IF EXISTS rotv_test;" 2>/dev/null || true
+        podman exec "$CONTAINER_NAME" psql -U rotv -d postgres -c "CREATE DATABASE rotv_test;" 2>/dev/null || true
 
         # Run migrations on test database
         echo "Running migrations on test database..."
-        podman exec "$TEST_CONTAINER" psql -U rotv -d rotv_test -f /app/migrations/schema.sql 2>/dev/null || echo "⚠ No migrations found (continuing anyway)"
+        podman exec "$CONTAINER_NAME" psql -U rotv -d rotv_test -f /app/migrations/schema.sql 2>/dev/null || echo "⚠ No migrations found (continuing anyway)"
 
         echo "✓ Test database ready"
         echo ""
 
-        # Run tests against test container
-        echo "Running tests against test container (http://localhost:${TEST_PORT})..."
-        cd backend && TEST_BASE_URL="http://localhost:${TEST_PORT}" npm test
+        # Run tests INSIDE container
+        echo "Running tests inside container..."
+        podman exec "$CONTAINER_NAME" sh -c "cd /app && npm test"
         TEST_EXIT_CODE=$?
 
-        # Clean up test container
+        # Clean up - stop test container
         echo ""
-        echo "Cleaning up test container..."
-        podman stop "$TEST_CONTAINER" >/dev/null 2>&1
-        podman rm "$TEST_CONTAINER" >/dev/null 2>&1
+        echo "Stopping test container..."
+        podman stop "$CONTAINER_NAME" >/dev/null 2>&1
+        podman rm "$CONTAINER_NAME" >/dev/null 2>&1
 
         echo ""
         if [ $TEST_EXIT_CODE -eq 0 ]; then

@@ -40,7 +40,9 @@ EOF
     echo "Creating database and user..."
     psql -h "$PGRUNDIR" -d postgres -c "CREATE USER rotv WITH PASSWORD 'rotv';" 2>/dev/null || true
     psql -h "$PGRUNDIR" -d postgres -c "CREATE DATABASE rotv OWNER rotv;" 2>/dev/null || true
+    psql -h "$PGRUNDIR" -d postgres -c "CREATE DATABASE rotv_test OWNER rotv;" 2>/dev/null || true
     psql -h "$PGRUNDIR" -d postgres -c "GRANT ALL PRIVILEGES ON DATABASE rotv TO rotv;" 2>/dev/null || true
+    psql -h "$PGRUNDIR" -d postgres -c "GRANT ALL PRIVILEGES ON DATABASE rotv_test TO rotv;" 2>/dev/null || true
 
     pg_ctl -D "$PGDATA" stop
     sleep 2
@@ -59,6 +61,9 @@ for i in {1..30}; do
     fi
     sleep 1
 done
+
+# Ensure rotv_test database exists (for testing)
+psql -h "$PGRUNDIR" -d postgres -c "CREATE DATABASE rotv_test OWNER rotv;" 2>/dev/null || true
 
 # Start the Node.js application
 echo "Starting Roots of The Valley application..."
