@@ -60,24 +60,64 @@ case "${1:-help}" in
             STORAGE_MOUNT="--tmpfs /data/pgdata:rw,size=2G,mode=0700"
         fi
 
+        # Handle seed data in development mode
+        SEED_MOUNT=""
+        if [ "$USE_PERSISTENT" = "false" ]; then
+            # Check if seed data exists
+            if [ ! -f "$SEED_DATA_FILE" ]; then
+                echo "⚠ No seed data found at $SEED_DATA_FILE"
+                echo "Automatically pulling production data..."
+                echo ""
+
+                # Create cache directory
+                mkdir -p "$(dirname "$SEED_DATA_FILE")"
+
+                # Pull data from production
+                echo "Running pg_dump on production container: $PRODUCTION_CONTAINER"
+                ssh -p "$PRODUCTION_PORT" root@"$PRODUCTION_HOST" \
+                    "podman exec $PRODUCTION_CONTAINER pg_dump -U rotv --clean --if-exists --no-owner --no-acl rotv" \
+                    > "$SEED_DATA_FILE"
+
+                if [ $? -eq 0 ]; then
+                    SEED_SIZE=$(du -h "$SEED_DATA_FILE" | cut -f1)
+                    echo "✓ Production data downloaded ($SEED_SIZE)"
+                    echo ""
+                else
+                    echo "❌ Failed to pull production data"
+                    echo "Cannot start in development mode without seed data"
+                    rm -f "$SEED_DATA_FILE"
+                    exit 1
+                fi
+            else
+                # Check freshness of seed data (warn if older than 7 days)
+                SEED_AGE_DAYS=$(( ($(date +%s) - $(date -r "$SEED_DATA_FILE" +%s)) / 86400 ))
+                if [ $SEED_AGE_DAYS -gt 7 ]; then
+                    echo "⚠ Seed data is $SEED_AGE_DAYS days old"
+                    echo "Consider running './run.sh seed' to refresh production data"
+                    echo ""
+                fi
+            fi
+
+            # Mount seed data for import
+            echo "Mounting seed data for import..."
+            SEED_MOUNT="-v $SEED_DATA_FILE:/tmp/seed-data.sql:ro"
+        fi
+
         podman run -d \
             --name "$CONTAINER_NAME" \
             --privileged \
             -p 8080:8080 \
             $STORAGE_MOUNT \
+            $SEED_MOUNT \
             $ENV_ARGS \
             "$IMAGE_NAME"
 
         echo "Application starting at http://localhost:8080"
-        echo "Waiting for PostgreSQL to be ready..."
-        sleep 5
-
-        # Import seed data if available (development only)
-        if [ "$USE_PERSISTENT" = "false" ] && [ -f "$SEED_DATA_FILE" ]; then
-            echo "Importing production seed data..."
-            podman exec -i "$CONTAINER_NAME" psql -U postgres rotv < "$SEED_DATA_FILE" >/dev/null 2>&1
-            echo "✓ Seed data imported"
+        if [ -n "$SEED_MOUNT" ]; then
+            echo "Seed data will be imported during startup..."
         fi
+        echo "Waiting for application to be ready..."
+        sleep 10
 
         echo "✓ Container started successfully"
         echo ""
@@ -183,9 +223,11 @@ case "${1:-help}" in
         mkdir -p "$(dirname "$SEED_DATA_FILE")"
 
         # Pull data from production using pg_dump
+        # --no-owner: Don't include ownership commands (rotv vs postgres user mismatch)
+        # --no-acl: Don't include access privileges
         echo "Running pg_dump on production container: $PRODUCTION_CONTAINER"
         ssh -p "$PRODUCTION_PORT" root@"$PRODUCTION_HOST" \
-            "podman exec $PRODUCTION_CONTAINER pg_dump -U rotv --clean --if-exists rotv" \
+            "podman exec $PRODUCTION_CONTAINER pg_dump -U rotv --clean --if-exists --no-owner --no-acl rotv" \
             > "$SEED_DATA_FILE"
 
         if [ $? -eq 0 ]; then
