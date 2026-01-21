@@ -1238,7 +1238,7 @@ export async function processNewsCollectionJob(pool, sheets, pgBossJobId, jobDat
       `, [processed, newsFound, eventsFound, JSON.stringify(newlyProcessedIds), jobId]);
 
       // Update last_news_collection timestamp for processed POIs
-      const batchPoiIds = batchResults.map(r => r.poiId).filter(id => id);
+      const batchPoiIds = results.map(r => r.poiId).filter(id => id);
       if (batchPoiIds.length > 0) {
         await pool.query(`
           UPDATE pois
