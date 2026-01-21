@@ -203,6 +203,13 @@ git push && git push --tags
 
 **IMPORTANT:** Always develop using containers to ensure consistency with production. This prevents issues like missing dependencies (e.g., Playwright not installed).
 
+**📖 Full Development Architecture:** See `docs/DEVELOPMENT_ARCHITECTURE.md` for comprehensive details on:
+- Ephemeral storage with tmpfs vs persistent storage
+- Automatic production data seeding workflow
+- Container build optimization strategies
+- PostgreSQL startup and seed data import
+- Testing and validation procedures
+
 ### Architecture
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -221,8 +228,10 @@ git push && git push --tags
 │   │ PostgreSQL 17 (localhost:5432)                          │  │
 │   └─────────────────────────────────────────────────────────┘  │
 │                                                                 │
-│   Data Volume: ~/.rotv/pgdata → /data/pgdata                   │
-│   Databases: rotv (production), rotv_test (testing)            │
+│   Development: tmpfs /data/pgdata (ephemeral, 2GB in-memory)   │
+│   Production:  ~/.rotv/pgdata → /data/pgdata (persistent)      │
+│   Seed Data:   ~/.rotv/seed-data.sql → /tmp/seed-data.sql      │
+│   Databases:   rotv (main), rotv_test (testing)                │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -230,17 +239,21 @@ git push && git push --tags
 
 ```bash
 # 1. Setup environment
-cp .env.example .env  # Fill in your API keys
+cp .env.example backend/.env  # Fill in your API keys
 
 # 2. Build container
 ./run.sh build
 
-# 3. Start application
+# 3. Start application (auto-pulls production data on first start)
 ./run.sh start
+# First start: Downloads 384MB production data from server
+# Subsequent starts: Uses cached data (~10 seconds)
 
 # 4. Run tests
 ./run.sh test
 ```
+
+**Note:** Development mode uses ephemeral tmpfs storage - data is discarded on restart and reimported from cached seed data. This ensures a clean slate every time with real production data.
 
 ### Development Workflow
 
@@ -345,13 +358,14 @@ The `/api/destinations` endpoint returns `pois WHERE poi_type = 'point'`.
 
 ### Architecture Documents
 
-For all major features or significant refactors, create an architecture document in the `docs/` directory following the pattern of `NEWS_EVENTS_ARCHITECTURE.md`.
+For all major features or significant refactors, create an architecture document in the `docs/` directory following the pattern of existing architecture documents.
 
 **When to create an architecture document:**
 - New feature that introduces a multi-step workflow or complex system
 - Significant refactor that changes how a major part of the application works
 - Integration of new third-party services or APIs
 - Implementation of new data collection or processing pipelines
+- Changes to development workflow or infrastructure
 - Any feature that future developers would benefit from understanding holistically
 
 **What to include:**
@@ -362,4 +376,6 @@ For all major features or significant refactors, create an architecture document
 5. **Testing & Validation**: How to verify the feature works correctly
 6. **Future Improvements**: Known limitations or planned enhancements
 
-**Example:** See `docs/NEWS_EVENTS_ARCHITECTURE.md` for a comprehensive example of an architecture document.
+**Examples:**
+- `docs/DEVELOPMENT_ARCHITECTURE.md` - Development workflow, ephemeral storage, production seeding, container optimization
+- `docs/NEWS_EVENTS_ARCHITECTURE.md` - News & events collection system with AI-powered content discovery
