@@ -11,13 +11,13 @@ echo "Starting up..."
 mkdir -p "$PGRUNDIR"
 
 # Ensure data directory ownership is correct
-# Only chown if directory ownership is wrong (faster than unconditional chown -R)
+# Both tmpfs and bind mounts need ownership fixed since container runs as root
 PGDATA_OWNER=$(stat -c '%u' "$PGDATA" 2>/dev/null || echo "unknown")
 if [ "$PGDATA_OWNER" != "70" ]; then
     echo "Fixing data directory permissions..."
-    chown -R postgres:postgres "$PGDATA" 2>/dev/null || true
+    chown -R postgres:postgres "$PGDATA"
+    chmod 700 "$PGDATA"
 fi
-chmod 700 "$PGDATA" 2>/dev/null || true
 
 # Remove stale PID file if it exists (from previous unclean shutdown)
 rm -f "$PGDATA/postmaster.pid" 2>/dev/null || true
