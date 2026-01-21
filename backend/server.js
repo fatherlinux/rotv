@@ -667,7 +667,7 @@ app.get('/api/pois', async (req, res) => {
              property_owner, brief_description, era, historical_description,
              primary_activities, surface, pets, cell_signal, more_info_link,
              length_miles, difficulty, image_mime_type, image_drive_file_id,
-             boundary_type, boundary_color,
+             boundary_type, boundary_color, news_url, events_url,
              locally_modified, deleted, synced, created_at, updated_at
       FROM pois
       WHERE (deleted IS NULL OR deleted = FALSE)
@@ -696,7 +696,7 @@ app.get('/api/pois/:id', async (req, res) => {
              property_owner, brief_description, era, historical_description,
              primary_activities, surface, pets, cell_signal, more_info_link,
              length_miles, difficulty, image_mime_type, image_drive_file_id,
-             boundary_type, boundary_color,
+             boundary_type, boundary_color, news_url, events_url,
              locally_modified, deleted, synced, created_at, updated_at
       FROM pois WHERE id = $1`,
       [req.params.id]
@@ -969,7 +969,7 @@ app.get('/api/destinations', async (req, res) => {
       SELECT id, name, poi_type, latitude, longitude,
              property_owner, brief_description, era, historical_description,
              primary_activities, surface, pets, cell_signal, more_info_link,
-             image_mime_type, image_drive_file_id,
+             image_mime_type, image_drive_file_id, news_url, events_url,
              locally_modified, deleted, synced, created_at, updated_at
       FROM pois
       WHERE poi_type = 'point'
@@ -990,7 +990,7 @@ app.get('/api/destinations/:id', async (req, res) => {
       SELECT id, name, poi_type, latitude, longitude,
              property_owner, brief_description, era, historical_description,
              primary_activities, surface, pets, cell_signal, more_info_link,
-             image_mime_type, image_drive_file_id,
+             image_mime_type, image_drive_file_id, news_url, events_url,
              locally_modified, deleted, synced, created_at, updated_at
       FROM pois WHERE id = $1`,
       [req.params.id]
@@ -1037,7 +1037,7 @@ app.get('/api/linear-features', async (req, res) => {
              property_owner, brief_description, era, historical_description,
              primary_activities, surface, pets, cell_signal, more_info_link,
              length_miles, difficulty, image_mime_type, image_drive_file_id,
-             boundary_type, boundary_color,
+             boundary_type, boundary_color, news_url, events_url,
              locally_modified, deleted, synced, created_at, updated_at
       FROM pois
       WHERE poi_type IN ('trail', 'river', 'boundary')

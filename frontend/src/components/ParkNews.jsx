@@ -22,7 +22,7 @@ function NewsTypeIcon({ type }) {
   return <span className={`news-type-icon ${type || 'general'}`}>{icons[type] || 'N'}</span>;
 }
 
-function ParkNews({ isAdmin, onSelectPoi, filteredDestinations, filteredLinearFeatures, mapState, onMapClick, refreshTrigger }) {
+function ParkNews({ isAdmin, onSelectPoi, filteredDestinations, filteredLinearFeatures, filteredVirtualPois, mapState, onMapClick, refreshTrigger }) {
   const [news, setNews] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -59,23 +59,26 @@ function ParkNews({ isAdmin, onSelectPoi, filteredDestinations, filteredLinearFe
     }
   };
 
-  // Filter news based on visible POIs (both point destinations and linear features)
+  // Filter news based on visible POIs (destinations, linear features, and organizations)
   const filteredNews = React.useMemo(() => {
     const hasDestinations = Array.isArray(filteredDestinations);
     const hasLinearFeatures = Array.isArray(filteredLinearFeatures);
+    const hasVirtualPois = Array.isArray(filteredVirtualPois);
 
     // Start with all news or filter by visible POIs
     let filtered = news;
 
-    // If both filters are explicitly empty arrays, show no news (all filters deselected)
+    // If all filters are explicitly empty arrays, show no news (all filters deselected)
     if (hasDestinations && filteredDestinations.length === 0 &&
-        hasLinearFeatures && filteredLinearFeatures.length === 0) {
+        hasLinearFeatures && filteredLinearFeatures.length === 0 &&
+        hasVirtualPois && filteredVirtualPois.length === 0) {
       filtered = [];
-    } else if (filteredDestinations || filteredLinearFeatures) {
-      // Combine visible IDs from both point destinations and linear features
+    } else if (filteredDestinations || filteredLinearFeatures || filteredVirtualPois) {
+      // Combine visible IDs from point destinations, linear features, and virtual POIs (organizations)
       const visiblePoiIds = new Set([
         ...(filteredDestinations || []).map(d => d.id),
-        ...(filteredLinearFeatures || []).map(f => f.id)
+        ...(filteredLinearFeatures || []).map(f => f.id),
+        ...(filteredVirtualPois || []).map(v => v.id)
       ]);
       filtered = filtered.filter(item => visiblePoiIds.has(item.poi_id));
     }
@@ -94,7 +97,7 @@ function ParkNews({ isAdmin, onSelectPoi, filteredDestinations, filteredLinearFe
     filtered = filtered.filter(item => typeFilters[item.news_type || 'general']);
 
     return filtered;
-  }, [news, filteredDestinations, filteredLinearFeatures, searchText, typeFilters]);
+  }, [news, filteredDestinations, filteredLinearFeatures, filteredVirtualPois, searchText, typeFilters]);
 
   const handleDelete = async (newsId) => {
     if (!confirm('Delete this news item?')) return;
@@ -160,7 +163,7 @@ function ParkNews({ isAdmin, onSelectPoi, filteredDestinations, filteredLinearFe
                 aspectRatio={mapState.aspectRatio || 1.5}
                 visibleDestinations={filteredDestinations}
                 onClick={onMapClick}
-                poiCount={(filteredDestinations?.length || 0) + (filteredLinearFeatures?.length || 0)}
+                poiCount={(filteredDestinations?.length || 0) + (filteredLinearFeatures?.length || 0) + (filteredVirtualPois?.length || 0)}
               />
             </div>
           )}
@@ -243,16 +246,6 @@ function ParkNews({ isAdmin, onSelectPoi, filteredDestinations, filteredLinearFe
                   {item.poi_name}
                 </button>
               </div>
-              {isAdmin && (
-                <button
-                  className="news-delete-btn"
-                  onClick={() => handleDelete(item.id)}
-                  disabled={deleting === item.id}
-                  title="Delete this news item"
-                >
-                  {deleting === item.id ? '...' : '×'}
-                </button>
-              )}
             </div>
             {item.summary && <p className="park-news-summary">{item.summary}</p>}
             <div className="park-news-meta">

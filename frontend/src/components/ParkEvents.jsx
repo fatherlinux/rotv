@@ -30,7 +30,7 @@ function EventTypeIcon({ type }) {
   return <span className={`event-type-icon ${type || 'program'}`}>{icons[type] || 'E'}</span>;
 }
 
-function ParkEvents({ isAdmin, onSelectPoi, filteredDestinations, filteredLinearFeatures, mapState, onMapClick, refreshTrigger }) {
+function ParkEvents({ isAdmin, onSelectPoi, filteredDestinations, filteredLinearFeatures, filteredVirtualPois, mapState, onMapClick, refreshTrigger }) {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -68,23 +68,26 @@ function ParkEvents({ isAdmin, onSelectPoi, filteredDestinations, filteredLinear
     }
   };
 
-  // Filter events based on visible POIs (both point destinations and linear features)
+  // Filter events based on visible POIs (destinations, linear features, and organizations)
   const filteredEvents = React.useMemo(() => {
     const hasDestinations = Array.isArray(filteredDestinations);
     const hasLinearFeatures = Array.isArray(filteredLinearFeatures);
+    const hasVirtualPois = Array.isArray(filteredVirtualPois);
 
     // Start with all events or filter by visible POIs
     let filtered = events;
 
-    // If both filters are explicitly empty arrays, show no events (all filters deselected)
+    // If all filters are explicitly empty arrays, show no events (all filters deselected)
     if (hasDestinations && filteredDestinations.length === 0 &&
-        hasLinearFeatures && filteredLinearFeatures.length === 0) {
+        hasLinearFeatures && filteredLinearFeatures.length === 0 &&
+        hasVirtualPois && filteredVirtualPois.length === 0) {
       filtered = [];
-    } else if (filteredDestinations || filteredLinearFeatures) {
-      // Combine visible IDs from both point destinations and linear features
+    } else if (filteredDestinations || filteredLinearFeatures || filteredVirtualPois) {
+      // Combine visible IDs from point destinations, linear features, and virtual POIs (organizations)
       const visiblePoiIds = new Set([
         ...(filteredDestinations || []).map(d => d.id),
-        ...(filteredLinearFeatures || []).map(f => f.id)
+        ...(filteredLinearFeatures || []).map(f => f.id),
+        ...(filteredVirtualPois || []).map(v => v.id)
       ]);
       filtered = filtered.filter(item => visiblePoiIds.has(item.poi_id));
     }
@@ -104,7 +107,7 @@ function ParkEvents({ isAdmin, onSelectPoi, filteredDestinations, filteredLinear
     filtered = filtered.filter(item => typeFilters[item.event_type || 'program']);
 
     return filtered;
-  }, [events, filteredDestinations, filteredLinearFeatures, searchText, typeFilters]);
+  }, [events, filteredDestinations, filteredLinearFeatures, filteredVirtualPois, searchText, typeFilters]);
 
   const handleDelete = async (eventId) => {
     if (!confirm('Delete this event?')) return;
@@ -219,7 +222,7 @@ END:VCALENDAR`;
                 aspectRatio={mapState.aspectRatio || 1.5}
                 visibleDestinations={filteredDestinations}
                 onClick={onMapClick}
-                poiCount={(filteredDestinations?.length || 0) + (filteredLinearFeatures?.length || 0)}
+                poiCount={(filteredDestinations?.length || 0) + (filteredLinearFeatures?.length || 0) + (filteredVirtualPois?.length || 0)}
               />
             </div>
           )}
@@ -309,16 +312,6 @@ END:VCALENDAR`;
                   {item.poi_name}
                 </button>
               </div>
-              {isAdmin && (
-                <button
-                  className="news-delete-btn"
-                  onClick={() => handleDelete(item.id)}
-                  disabled={deleting === item.id}
-                  title="Delete this event"
-                >
-                  {deleting === item.id ? '...' : '×'}
-                </button>
-              )}
             </div>
 
             <div className="park-event-date">

@@ -866,6 +866,7 @@ function AppContent() {
           isAdmin={isAdmin}
           filteredDestinations={viewportFilteredDestinations}
           filteredLinearFeatures={viewportFilteredLinearFeatures}
+          filteredVirtualPois={viewportFilteredVirtualPois}
           mapState={mapState}
           linearFeatures={linearFeatures}
           refreshTrigger={newsRefreshTrigger}
@@ -886,6 +887,7 @@ function AppContent() {
           isAdmin={isAdmin}
           filteredDestinations={viewportFilteredDestinations}
           filteredLinearFeatures={viewportFilteredLinearFeatures}
+          filteredVirtualPois={viewportFilteredVirtualPois}
           mapState={mapState}
           linearFeatures={linearFeatures}
           refreshTrigger={newsRefreshTrigger}
