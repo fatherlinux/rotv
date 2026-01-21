@@ -1,5 +1,128 @@
 # Claude Code Development Guidelines
 
+## Development Governance
+
+### MANDATORY Rules - Read This First
+
+**These rules are non-negotiable and must be followed for every code change:**
+
+#### 1. Test Locally Before Pushing
+
+🚫 **NEVER push code to GitHub without testing locally first**
+
+**Required steps before any `git push`:**
+
+```bash
+# 1. Build the container locally
+./run.sh build
+
+# 2. Start the container
+./run.sh start
+
+# 3. Run all tests and verify they pass
+./run.sh test
+
+# 4. Manually verify the feature works in the browser
+# Open http://localhost:8080 and test your changes
+
+# 5. Only after ALL tests pass and manual verification succeeds:
+git push
+```
+
+**Why:** We experienced production failures (e.g., Playwright not installed) because code was pushed without testing in the container environment. Container builds catch dependency issues that local Node.js development misses.
+
+#### 2. Semantic Versioning (SemVer)
+
+**Follow [Semantic Versioning 2.0.0](https://semver.org/) strictly:**
+
+Given a version number `MAJOR.MINOR.PATCH`, increment:
+- **MAJOR** (1.0.0 → 2.0.0): Breaking changes, incompatible API changes
+- **MINOR** (1.0.0 → 1.1.0): New features, backward-compatible
+- **PATCH** (1.0.0 → 1.0.1): Bug fixes, backward-compatible
+
+**Current version is tracked in:**
+- `frontend/package.json` - Source of truth
+- `Containerfile` LABEL - Should match frontend version
+
+**Version bump workflow:**
+
+```bash
+# 1. Determine version bump type based on changes
+# Breaking change → MAJOR
+# New feature → MINOR
+# Bug fix → PATCH
+
+# 2. Update frontend/package.json
+# Edit: "version": "1.10.0" → "1.11.0"
+
+# 3. Update Containerfile LABEL
+# Edit: LABEL version="1.10.0" → LABEL version="1.11.0"
+
+# 4. Commit with conventional commit message
+git commit -m "feat: add new feature
+
+BREAKING CHANGE: old API removed"
+
+# 5. Create and push git tag
+git tag -a v1.11.0 -m "Release v1.11.0 - Description"
+git push && git push --tags
+```
+
+**Pre-release versions:**
+- Use for testing: `1.11.0-alpha.1`, `1.11.0-beta.1`, `1.11.0-rc.1`
+
+#### 3. Testing Requirements for PRs
+
+**Before creating a Pull Request:**
+
+✅ **All tests must pass locally:**
+```bash
+./run.sh test
+```
+
+✅ **Container must build successfully:**
+```bash
+./run.sh build
+```
+
+✅ **Manual verification in running container:**
+```bash
+./run.sh start
+# Test the feature in browser
+```
+
+✅ **No breaking changes without MAJOR version bump**
+
+✅ **New features must include tests** (when applicable)
+
+**PR Checklist:**
+- [ ] Tests pass locally (`./run.sh test`)
+- [ ] Container builds (`./run.sh build`)
+- [ ] Manual testing completed
+- [ ] Version bumped correctly (SemVer)
+- [ ] CLAUDE.md updated (if workflow changed)
+- [ ] Architecture doc created (if major feature)
+
+### Workflow Summary
+
+**Every code change should follow this flow:**
+
+```
+1. Make code changes
+2. ./run.sh build          # Build container
+3. ./run.sh start          # Start container
+4. Manual test in browser  # Verify it works
+5. ./run.sh test           # Run automated tests
+6. Update version (SemVer) # If releasing
+7. git commit              # Commit changes
+8. git tag (if release)    # Tag version
+9. git push --tags         # Push to GitHub
+```
+
+**This prevents production issues and ensures quality.**
+
+---
+
 ## Container-Based Development (Recommended)
 
 **IMPORTANT:** Always develop using containers to ensure consistency with production. This prevents issues like missing dependencies (e.g., Playwright not installed).
