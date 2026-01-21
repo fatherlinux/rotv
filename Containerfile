@@ -3,14 +3,15 @@ FROM registry.access.redhat.com/ubi10/ubi:latest AS infrastructure
 
 LABEL maintainer="fatherlinux"
 LABEL description="Roots of The Valley - Cuyahoga Valley National Park destination explorer"
-LABEL version="1.9.0"
+LABEL version="1.10.0"
 
 # Install Node.js and Chromium dependencies for Playwright
 RUN dnf install -y nodejs npm \
     # Playwright/Chromium system dependencies
     nspr nss alsa-lib atk cups-libs gtk3 \
     libXcomposite libXdamage libXrandr libxkbcommon \
-    mesa-libgbm pango libdrm libXScrnSaver \
+    mesa-libgbm pango libdrm \
+    libxshmfence libX11 libXext libXfixes \
     && dnf clean all
 
 # Add PostgreSQL official repository and install PostgreSQL 17
@@ -58,9 +59,6 @@ RUN cd frontend && npm run build
 COPY backend/package*.json ./
 RUN npm install --only=production
 
-# Install Playwright Chromium browser (needed for JavaScript rendering)
-RUN npx playwright install chromium
-
 # Copy backend code
 COPY backend/ ./
 
@@ -76,6 +74,9 @@ RUN chown -R rotv:rotv /app
 
 # Switch to non-root user
 USER rotv
+
+# Install Playwright Chromium browser as rotv user (needed for JavaScript rendering)
+RUN npx playwright install chromium
 
 EXPOSE 8080
 

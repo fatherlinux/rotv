@@ -404,7 +404,9 @@ export async function collectNewsForPoi(pool, poi, sheets = null, timezone = 'Am
   let newsLinks = [];
 
   // Only render events page if we're collecting events
-  if (collectionType !== 'news' && await isJavaScriptHeavySite(eventsUrl)) {
+  // If no dedicated events URL, fall back to checking the main website
+  const eventsPageToRender = eventsUrl !== 'No dedicated events page' ? eventsUrl : website;
+  if (collectionType !== 'news' && eventsPageToRender !== 'No website available' && await isJavaScriptHeavySite(eventsPageToRender)) {
     console.log(`[AI Research] Rendering events page (collectionType: ${collectionType})`);
     updateProgress(poi.id, {
       phase: 'rendering_events',
@@ -413,7 +415,7 @@ export async function collectNewsForPoi(pool, poi, sheets = null, timezone = 'Am
     });
 
     console.log(`[AI Research] 🌐 Detected JS-heavy events page, rendering with Playwright...`);
-    const rendered = await renderJavaScriptPage(eventsUrl, {
+    const rendered = await renderJavaScriptPage(eventsPageToRender, {
       waitTime: 4000,
       timeout: 20000
     });
@@ -435,7 +437,9 @@ export async function collectNewsForPoi(pool, poi, sheets = null, timezone = 'Am
   }
 
   // Only render news page if we're collecting news
-  if (collectionType !== 'events' && await isJavaScriptHeavySite(newsUrl)) {
+  // If no dedicated news URL, fall back to checking the main website
+  const newsPageToRender = newsUrl !== 'No dedicated news page' ? newsUrl : website;
+  if (collectionType !== 'events' && newsPageToRender !== 'No website available' && await isJavaScriptHeavySite(newsPageToRender)) {
     console.log(`[AI Research] Rendering news page (collectionType: ${collectionType})`);
     updateProgress(poi.id, {
       phase: 'rendering_news',
@@ -444,7 +448,7 @@ export async function collectNewsForPoi(pool, poi, sheets = null, timezone = 'Am
     });
 
     console.log(`[AI Research] 🌐 Detected JS-heavy news page, rendering with Playwright...`);
-    const rendered = await renderJavaScriptPage(newsUrl, {
+    const rendered = await renderJavaScriptPage(newsPageToRender, {
       waitTime: 4000,
       timeout: 20000
     });
