@@ -16,7 +16,9 @@ import { createAdminRouter } from './routes/admin.js';
 import {
   initJobScheduler,
   scheduleNewsCollection,
+  scheduleNewsCollectionForTier,
   registerNewsCollectionHandler,
+  registerTierNewsHandlers,
   registerBatchNewsHandler,
   submitBatchNewsJob,
   stopJobScheduler
@@ -1468,11 +1470,16 @@ async function start() {
   try {
     await initJobScheduler(connectionString);
 
-    // Register scheduled news collection handler (daily at 6 AM)
-    await registerNewsCollectionHandler(async () => {
-      console.log('Running scheduled news collection...');
-      const result = await runNewsCollection(pool);
-      console.log(`News collection completed: ${result.newsFound} news items, ${result.eventsFound} events found`);
+    // Register tier-based news collection handlers
+    await registerTierNewsHandlers(async (jobData) => {
+      const tier = jobData.tier;
+      console.log(`Running tier ${tier} news collection...`);
+      const result = await runNewsCollection(pool, null, tier);
+      if (result.totalPois > 0) {
+        console.log(`Tier ${tier} news collection completed: ${result.newsFound} news items, ${result.eventsFound} events found`);
+      } else {
+        console.log(`Tier ${tier}: No POIs due for collection`);
+      }
     });
 
     // Register batch news collection handler (for admin-triggered jobs via pg-boss)
@@ -1483,8 +1490,18 @@ async function start() {
       await processNewsCollectionJob(pool, null, pgBossJobId, jobData);
     });
 
-    // Schedule daily news collection at 6 AM Eastern
-    await scheduleNewsCollection('0 6 * * *');
+    // Schedule tier-based news collection jobs
+    // Tier 1: Daily at 6 AM (Organizations & Parks)
+    await scheduleNewsCollectionForTier(1, '0 6 * * *');
+
+    // Tier 2: Every 2 days at 6 AM (Trails & Hiking POIs)
+    await scheduleNewsCollectionForTier(2, '0 6 */2 * *');
+
+    // Tier 3: Weekly on Sunday at 6 AM (Historic Sites & POIs)
+    await scheduleNewsCollectionForTier(3, '0 6 * * 0');
+
+    // Note: Tier 4 has 0 POIs currently, so not scheduling
+    // await scheduleNewsCollectionForTier(4, '0 6 1,15 * *');
 
     // Resume any incomplete jobs from before restart
     const incompleteJobs = await findIncompleteJobs(pool);

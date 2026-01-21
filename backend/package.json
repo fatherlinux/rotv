@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
+    "@perplexity-ai/perplexity_ai": "^0.18.4",
     "connect-pg-simple": "^9.0.1",
     "cors": "^2.8.5",
     "csv-parse": "^5.5.3",

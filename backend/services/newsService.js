@@ -1,16 +1,16 @@
 /**
  * News Collection Service
- * Uses Gemini with Google Search grounding to find and summarize news/events for POIs
+ * Uses Perplexity with web search grounding to find and summarize news/events for POIs
  *
  * Job execution is managed by pg-boss for crash recovery and resumability.
  * Progress is checkpointed after each batch so jobs can resume after container restarts.
  */
 
-import { generateTextWithCustomPrompt, createGeminiClient } from './geminiService.js';
+import { generateTextWithCustomPrompt } from './perplexityService.js';
 import { pushNewsToSheets, pushEventsToSheets } from './sheetsSync.js';
 import { renderJavaScriptPage, isJavaScriptHeavySite, extractEventContent } from './jsRenderer.js';
 
-// Concurrency for parallel processing (requires paid tier Gemini API)
+// Concurrency for parallel processing (Perplexity API)
 const CONCURRENCY = 15;
 
 // In-memory progress tracking for active collections
@@ -512,11 +512,11 @@ Extract ALL news from this rendered content using these relaxed criteria.`;
   try {
     updateProgress(poi.id, {
       phase: 'ai_search',
-      message: 'Searching with AI (Google Search grounding)...',
+      message: 'Searching with AI (Perplexity web search)...',
       steps: ['Initialized', 'Rendered pages', 'Searching with AI']
     });
 
-    console.log(`[AI Research] Sending prompt to Gemini (${prompt.length} chars)...`);
+    console.log(`[AI Research] Sending prompt to Perplexity (${prompt.length} chars)...`);
     const response = await generateTextWithCustomPrompt(pool, prompt, sheets);
     console.log(`[AI Research] Received response (${response.length} chars)`);
 
@@ -858,7 +858,7 @@ function normalizeNewsTitle(title) {
  * Save news items to database
  * @param {Pool} pool - Database connection pool
  * @param {number} poiId - POI ID
- * @param {Array} newsItems - Array of news items from Gemini
+ * @param {Array} newsItems - Array of news items from Perplexity
  * @param {Object} options - Optional settings
  * @param {boolean} options.skipDateFilter - If true, allow news items older than 365 days
  */
@@ -950,7 +950,7 @@ export async function saveNewsItems(pool, poiId, newsItems, options = {}) {
  * Save events to database
  * @param {Pool} pool - Database connection pool
  * @param {number} poiId - POI ID
- * @param {Array} eventItems - Array of events from Gemini
+ * @param {Array} eventItems - Array of events from Perplexity
  */
 export async function saveEventItems(pool, poiId, eventItems) {
   let savedCount = 0;
@@ -1085,9 +1085,10 @@ async function processPoiBatch(pool, pois, sheets, concurrency = 3, timezone = '
  * @param {Pool} pool - Database connection pool
  * @param {Array} poiIds - Array of POI IDs to process
  * @param {string} source - Source of the job ('manual', 'batch', 'scheduled')
+ * @param {number|null} tier - Priority tier for the job (1-4) or null for all
  * @returns {Object} - Job info with jobId and totalPois
  */
-export async function createNewsCollectionJob(pool, poiIds, source = 'batch') {
+export async function createNewsCollectionJob(pool, poiIds, source = 'batch', tier = null) {
   const startTime = new Date();
 
   // Get POI details to validate they exist
@@ -1106,20 +1107,22 @@ export async function createNewsCollectionJob(pool, poiIds, source = 'batch') {
   const jobResult = await pool.query(`
     INSERT INTO news_job_status (
       job_type, status, started_at, total_pois, pois_processed,
-      news_found, events_found, poi_ids, processed_poi_ids
+      news_found, events_found, poi_ids, processed_poi_ids, priority_tier
     )
-    VALUES ($1, 'queued', $2, $3, 0, 0, 0, $4, $5)
+    VALUES ($1, 'queued', $2, $3, 0, 0, 0, $4, $5, $6)
     RETURNING id
   `, [
     source === 'scheduled' ? 'scheduled_collection' : 'batch_collection',
     startTime,
     totalPois,
     JSON.stringify(validPoiIds),
-    JSON.stringify([])
+    JSON.stringify([]),
+    tier
   ]);
   const jobId = jobResult.rows[0].id;
 
-  console.log(`[Job ${jobId}] Created news collection job for ${totalPois} POIs`);
+  const tierMsg = tier ? ` (tier ${tier})` : '';
+  console.log(`[Job ${jobId}] Created news collection job for ${totalPois} POIs${tierMsg}`);
 
   return { jobId, totalPois, poiIds: validPoiIds };
 }
@@ -1234,6 +1237,16 @@ export async function processNewsCollectionJob(pool, sheets, pgBossJobId, jobDat
         WHERE id = $5
       `, [processed, newsFound, eventsFound, JSON.stringify(newlyProcessedIds), jobId]);
 
+      // Update last_news_collection timestamp for processed POIs
+      const batchPoiIds = batchResults.map(r => r.poiId).filter(id => id);
+      if (batchPoiIds.length > 0) {
+        await pool.query(`
+          UPDATE pois
+          SET last_news_collection = CURRENT_TIMESTAMP
+          WHERE id = ANY($1)
+        `, [batchPoiIds]);
+      }
+
       // Small delay between batches
       if (i + CONCURRENCY < pois.length) {
         await new Promise(resolve => setTimeout(resolve, 500));
@@ -1294,8 +1307,8 @@ export async function processNewsCollectionJob(pool, sheets, pgBossJobId, jobDat
  * Creates and immediately processes a news collection job (non-pg-boss path)
  * @deprecated Use createNewsCollectionJob + pg-boss for new code
  */
-export async function runBatchNewsCollection(pool, poiIds, sheets = null, source = 'batch') {
-  const { jobId, totalPois, poiIds: validPoiIds } = await createNewsCollectionJob(pool, poiIds, source);
+export async function runBatchNewsCollection(pool, poiIds, sheets = null, source = 'batch', tier = null) {
+  const { jobId, totalPois, poiIds: validPoiIds } = await createNewsCollectionJob(pool, poiIds, source, tier);
 
   // Process in background using setImmediate for backward compatibility
   setImmediate(async () => {
@@ -1310,16 +1323,51 @@ export async function runBatchNewsCollection(pool, poiIds, sheets = null, source
 }
 
 /**
- * Run news collection for all POIs
+ * Get POIs due for collection based on priority tier
  * @param {Pool} pool - Database connection pool
- * @param {Object} sheets - Optional sheets client
- * @returns {Object} - Job status summary
+ * @param {number|null} tier - Priority tier (1-4), or null for all POIs
+ * @returns {Array<number>} - Array of POI IDs due for collection
  */
-export async function runNewsCollection(pool, sheets = null) {
-  // Get all active POIs (no limit - process everything)
-  const poisResult = await pool.query(`
+export async function getPoiDueForCollection(pool, tier = null) {
+  if (tier === null) {
+    // Return all active POIs for manual runs (admin-initiated)
+    const result = await pool.query(`
+      SELECT id FROM pois
+      WHERE (deleted IS NULL OR deleted = FALSE)
+        AND collection_priority IS NOT NULL
+      ORDER BY
+        CASE poi_type
+          WHEN 'point' THEN 1
+          WHEN 'boundary' THEN 2
+          ELSE 3
+        END,
+        name
+    `);
+    return result.rows.map(r => r.id);
+  }
+
+  // Thresholds for each tier (how long since last collection)
+  const thresholds = {
+    1: '1 day',    // Daily
+    2: '2 days',   // Every 2 days
+    3: '7 days',   // Weekly
+    4: '14 days'   // Bi-weekly
+  };
+
+  const threshold = thresholds[tier];
+  if (!threshold) {
+    throw new Error(`Invalid priority tier: ${tier}. Must be 1-4 or null.`);
+  }
+
+  // Get POIs for this tier that haven't been collected recently
+  const result = await pool.query(`
     SELECT id FROM pois
     WHERE (deleted IS NULL OR deleted = FALSE)
+      AND collection_priority = $1
+      AND (
+        last_news_collection IS NULL
+        OR last_news_collection < CURRENT_TIMESTAMP - INTERVAL '${threshold}'
+      )
     ORDER BY
       CASE poi_type
         WHEN 'point' THEN 1
@@ -1327,10 +1375,33 @@ export async function runNewsCollection(pool, sheets = null) {
         ELSE 3
       END,
       name
-  `);
+  `, [tier]);
 
-  const poiIds = poisResult.rows.map(p => p.id);
-  return runBatchNewsCollection(pool, poiIds, sheets, 'scheduled');
+  return result.rows.map(r => r.id);
+}
+
+/**
+ * Run news collection for all POIs or a specific priority tier
+ * @param {Pool} pool - Database connection pool
+ * @param {Object} sheets - Optional sheets client
+ * @param {number|null} tier - Optional priority tier (1-4), or null for all POIs
+ * @returns {Object} - Job status summary
+ */
+export async function runNewsCollection(pool, sheets = null, tier = null) {
+  // Get POIs due for collection based on tier
+  const poiIds = await getPoiDueForCollection(pool, tier);
+
+  if (poiIds.length === 0) {
+    console.log(`No POIs due for collection (tier: ${tier || 'all'})`);
+    return {
+      jobId: null,
+      totalPois: 0,
+      message: 'No POIs due for collection'
+    };
+  }
+
+  console.log(`Starting news collection for ${poiIds.length} POIs (tier: ${tier || 'all'})`);
+  return runBatchNewsCollection(pool, poiIds, sheets, 'scheduled', tier);
 }
 
 /**
