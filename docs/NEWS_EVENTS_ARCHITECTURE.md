@@ -1,344 +1,720 @@
-# News & Events Collection System Architecture
+# News & Events Collection Architecture
+
+## Introduction: How It Works
+
+The News & Events collection system automatically discovers, extracts, and organizes relevant news articles and upcoming events for every destination in the Roots of The Valley application. This intelligent system combines multiple cutting-edge technologies to deliver accurate, up-to-date information while eliminating duplicates and ensuring data quality.
+
+### The Problem We're Solving
+
+Traditional web scraping struggles with modern websites that rely heavily on JavaScript frameworks (like Wix, Squarespace, and WordPress). Simply fetching HTML often returns empty pages or loading spinners because the content is generated client-side after page load. Additionally, manually maintaining news and events for hundreds of destinations is impractical and error-prone.
+
+### Our Multi-Layered Solution
+
+**1. Intelligent JavaScript Rendering**
+When the system encounters a website that uses JavaScript frameworks, it automatically launches a headless Chromium browser using Playwright. This real browser renders the page exactly as users see it, waits for all JavaScript to execute, and extracts the fully-rendered content. This works seamlessly with Wix, Squarespace, and other dynamic platforms that would otherwise be invisible to traditional scrapers.
+
+**2. AI-Powered Content Discovery**
+The system uses Google Gemini AI with Google Search grounding to intelligently search for and extract relevant content. For news collection, it employs a two-pass strategy:
+- **First pass**: Analyzes the organization's dedicated news page (if available) using relaxed filtering criteria (75% confidence threshold)
+- **Second pass**: Searches Google News, PR Newswire, and news outlets for external coverage using strict filtering (95% confidence threshold)
+
+This dual approach ensures comprehensive coverage - catching both the organization's own announcements and third-party media coverage.
+
+**3. Smart URL Resolution**
+Google Search results initially return redirect URLs (like `vertexaisearch.cloud.google.com/grounding-api-redirect/...`) rather than direct links. Our system automatically resolves these redirects to extract the real destination URLs. This provides two major benefits:
+- **Faster user experience**: Users click directly to articles without intermediate redirects
+- **Better deduplication**: The same article found through different search queries resolves to the same final URL, making it easy to detect duplicates
+
+**4. Dual-Check Deduplication**
+The system prevents duplicates using two complementary strategies:
+- **URL matching**: Same resolved URL = same article (catches articles found via different search queries)
+- **Normalized title matching**: Strips date suffixes like "| January 30" or "| 2026-01-30" before comparing (catches same content with different title formatting)
+
+This robust deduplication allows admins to refresh news multiple times without creating duplicates, even when the AI finds the same articles through different search paths.
+
+**5. Timezone-Aware Date Parsing**
+All dates are interpreted in the user's configured timezone (defaults to Eastern Time for Cuyahoga Valley). The AI extracts dates in ISO 8601 format (YYYY-MM-DD), ensuring consistency across all sources and preventing timezone-related bugs. This is especially important for event start dates and news publication dates.
+
+**6. Real-Time Progress Tracking**
+The UI displays a scrollable status widget that moves through distinct phases:
+- Rendering JavaScript-heavy pages
+- AI search with Google Search grounding
+- Matching deep links to extracted items
+- Searching Google News for external coverage
+- Saving items to database
+
+Admins can scroll down to see newly added items while the collection is still running, providing immediate feedback and transparency into what the system is finding.
+
+**7. Quality Filters and Validation**
+- **Date filtering**: News older than 365 days is automatically excluded (unless from a dedicated news page)
+- **Past event filtering**: Events with end dates in the past are skipped
+- **Failed URL resolution**: Items with unresolvable redirect URLs are discarded to maintain data quality
+- **Confidence thresholds**: Dedicated pages use relaxed filtering (75%), while general searches use strict filtering (95%)
+
+### Key Benefits
+
+**For End Users:**
+- **Fresh, relevant content**: Automatic updates ensure news and events stay current
+- **Fast navigation**: Direct URLs mean instant access to articles (no redirect delays)
+- **Comprehensive coverage**: Captures both organizational announcements and media coverage
+- **Accurate dates**: Timezone-aware parsing ensures event times are correct
+
+**For Administrators:**
+- **Zero maintenance**: No manual updates required - just click "Refresh News" or "Refresh Events"
+- **No duplicates**: Multiple refreshes don't create duplicate entries thanks to dual-check deduplication
+- **Transparent process**: Real-time progress tracking shows exactly what the system is finding
+- **Scalable**: Works for hundreds of destinations without performance degradation
+- **Flexible**: Handles any website type - static HTML, Wix, Squarespace, WordPress, etc.
+
+**For Developers:**
+- **Modular architecture**: Clear separation between rendering, AI search, and data persistence
+- **Crash-recoverable**: Uses pg-boss job queue for batch processing that survives container restarts
+- **Comprehensive logging**: Detailed logs show URL resolution, duplicate detection, and filtering decisions
+- **Extensible**: Easy to add new event types, news categories, or content sources
+
+### Technology Stack
+
+- **Playwright**: Headless browser automation for JavaScript rendering
+- **Google Gemini 1.5 Flash**: AI-powered content extraction with search grounding
+- **PostgreSQL**: Structured storage for news, events, and deduplication
+- **Node.js/Express**: Backend API and orchestration
+- **React**: Real-time progress tracking UI
 
 ## Overview
 
-The News & Events system automatically collects and displays current news articles and upcoming events for Points of Interest (POIs) in the Roots of The Valley application. It uses Google Gemini AI with web search grounding to find accurate, relevant information for each location.
+The News & Events collection system uses AI-powered research combined with headless browser rendering to automatically discover and extract relevant news articles and upcoming events for Points of Interest (POIs) in the Cuyahoga Valley National Park region.
 
 **Key Features:**
-- **Crash Recovery**: All jobs are managed by pg-boss and will resume after container restarts
-- **Checkpointing**: Progress is saved after each batch, allowing jobs to continue from where they left off
-- **Parallel Processing**: 15 concurrent API calls (requires paid tier Gemini API)
+- Automatic detection and rendering of JavaScript-heavy websites (Wix, Squarespace, etc.)
+- Playwright-based headless browser for dynamic content extraction
+- Google Gemini AI with Google Search grounding for intelligent content discovery
+- Relaxed filtering for dedicated events/news URLs vs. strict filtering for general web searches
+- Per-POI refresh capability with progress tracking
+- Batch processing for multiple POIs
 
-## System Components
+## System Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                          Frontend (React)                            │
-├─────────────────────────────────────────────────────────────────────┤
-│  Map.jsx                    │  NewsSettings.jsx                      │
-│  - "Update News & Events"   │  - "Start Collection" button           │
-│    button (Edit mode)       │  - Live progress display               │
-│  - Polls job status         │  - Job history display                 │
-│  - Shows real-time progress │  - Cleanup controls                    │
-└──────────────┬──────────────┴────────────────┬──────────────────────┘
-               │                               │
-               ▼                               ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                       Backend API (Express.js)                       │
-├─────────────────────────────────────────────────────────────────────┤
-│  routes/admin.js                                                     │
-│  ├─ POST /api/admin/news/collect-batch  (batch POIs, returns jobId)│
-│  ├─ POST /api/admin/news/collect        (all POIs, returns jobId)  │
-│  ├─ GET  /api/admin/news/job/:jobId     (poll job status)          │
-│  ├─ GET  /api/admin/news/status         (latest job status)        │
-│  ├─ POST /api/admin/news/cleanup        (delete old data)          │
-│  └─ DELETE /api/admin/news/:id          (delete specific item)     │
-└──────────────┬──────────────────────────────────────────────────────┘
-               │
-               ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                    Job Scheduler (jobScheduler.js)                   │
-├─────────────────────────────────────────────────────────────────────┤
-│  pg-boss PostgreSQL-based job queue                                  │
-│  ├─ submitBatchNewsJob()    - Submit job for processing             │
-│  ├─ registerBatchNewsHandler() - Worker that processes jobs         │
-│  ├─ Scheduled job: Daily at 6:00 AM Eastern Time                    │
-│  ├─ Auto-resume: Incomplete jobs resubmitted on server start        │
-│  └─ Retry logic: Failed jobs retry up to 2 times                    │
-└──────────────┬──────────────────────────────────────────────────────┘
-               │
-               ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                    News Service (newsService.js)                     │
-├─────────────────────────────────────────────────────────────────────┤
-│  createNewsCollectionJob()  - Creates job record with POI list      │
-│  processNewsCollectionJob() - pg-boss handler with checkpointing    │
-│  ├─ Loads job state from database                                   │
-│  ├─ Skips already-processed POIs (resumability)                     │
-│  ├─ Processes POIs in parallel (15 concurrent)                      │
-│  ├─ Checkpoints progress after each batch                           │
-│  └─ Marks job complete/failed when done                             │
-│                                                                      │
-│  collectNewsForPoi()        - Calls Gemini AI for single POI        │
-│  saveNewsItems()            - Persists news to database             │
-│  saveEventItems()           - Persists events to database           │
-└──────────────┬──────────────────────────────────────────────────────┘
-               │
-               ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                    Gemini Service (geminiService.js)                 │
-├─────────────────────────────────────────────────────────────────────┤
-│  - Calls Google Gemini API with search grounding enabled            │
-│  - Uses structured prompts to ensure accuracy                        │
-│  - Returns JSON with news[] and events[] arrays                      │
-└─────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                         Frontend UI                             │
+│  - Refresh News/Events buttons (per-POI, edit mode)             │
+│  - "Update News & Events" batch button (map, edit mode)         │
+│  - Event/News counters and scrollable lists                     │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      Backend API Routes                         │
+│  POST /api/admin/pois/:id/news/collect  - Single POI            │
+│  POST /api/admin/pois/:id/events/collect - Single POI (alias)   │
+│  POST /api/admin/news/batch-collect - Batch multiple POIs       │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    News Service Layer                           │
+│  (backend/services/newsService.js)                              │
+│                                                                 │
+│  1. collectNewsForPoi(poi) - Main collection logic              │
+│     ├─ Check events_url & news_url for JS-heavy sites          │
+│     ├─ Render with Playwright if needed                        │
+│     ├─ Build AI prompt with rendered content                   │
+│     └─ Parse and return {news[], events[]}                     │
+│                                                                 │
+│  2. saveNewsItems(poiId, news[]) - Dedupe & save               │
+│  3. saveEventItems(poiId, events[]) - Dedupe & save            │
+│  4. batchCollectNews(poiIds[], jobId) - Parallel processing    │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                 JavaScript Renderer Service                     │
+│  (backend/services/jsRenderer.js)                               │
+│                                                                 │
+│  1. isJavaScriptHeavySite(url)                                  │
+│     ├─ Check domain patterns (wix.com, squarespace.com, etc.)  │
+│     ├─ Check HTTP headers (x-wix-request-id, server: Pepyaka)  │
+│     └─ Check HTML signatures (wixstatic, parastorage, etc.)    │
+│                                                                 │
+│  2. renderJavaScriptPage(url, options)                          │
+│     ├─ Launch headless Chromium via Playwright                 │
+│     ├─ Navigate to URL, wait for networkidle                   │
+│     ├─ Wait additional time for JS execution (default 3s)      │
+│     ├─ Extract: document.body.innerText, innerHTML, title      │
+│     └─ Return {text, html, title, success}                     │
+│                                                                 │
+│  3. extractEventContent(text) - [DEPRECATED]                    │
+│     └─ Originally filtered content, now using full text        │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    Playwright / Chromium                        │
+│  - Headless browser execution                                   │
+│  - JavaScript rendering engine                                  │
+│  - DOM manipulation and content extraction                      │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│                  Google Gemini 1.5 Flash                        │
+│  (backend/services/geminiService.js)                            │
+│                                                                 │
+│  - Google Search grounding enabled                              │
+│  - Custom prompts with POI context                              │
+│  - Structured JSON output parsing                               │
+│  - Temperature: 0.1 (deterministic)                             │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    PostgreSQL Database                          │
+│                                                                 │
+│  pois table:                                                    │
+│    - events_url: Dedicated events page URL                      │
+│    - news_url: Dedicated news page URL                          │
+│                                                                 │
+│  poi_news table:                                                │
+│    - poi_id, title, summary, source_url, published_at          │
+│    - news_type: general|closure|seasonal|maintenance|wildlife   │
+│                                                                 │
+│  poi_events table:                                              │
+│    - poi_id, title, description, start_date, end_date          │
+│    - event_type: guided-tour|program|festival|volunteer|etc    │
+│    - location_details, source_url                               │
+│                                                                 │
+│  news_job_status table:                                         │
+│    - job_id, status, progress tracking, resumability            │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## JavaScript Rendering System
+
+### Detection Logic
+
+The system automatically detects JavaScript-heavy websites using multiple strategies:
+
+**1. Domain Pattern Matching**
+```javascript
+const jsHeavyDomains = [
+  'wix.com', 'wixsite.com', 'wixstatic.com',
+  'squarespace.com', 'webflow.io', 'webflow.com',
+  'carrd.co', 'weebly.com', 'wordpress.com',
+  'sites.google.com'
+];
+```
+
+**2. HTTP Header Detection**
+- `server: Pepyaka` (Wix platform)
+- `x-wix-request-id` (Wix-specific header)
+
+**3. HTML Content Signatures**
+```javascript
+const signatures = [
+  'wix.com', 'wixstatic.com', 'parastorage.com',
+  'thunderbolt', 'window.wixSite', '__NEXT_DATA__'
+];
+```
+
+### Rendering Process
+
+When a JavaScript-heavy site is detected:
+
+1. **Launch Browser**: Chromium headless instance via Playwright
+2. **Navigate**: Load URL with `waitUntil: 'networkidle'` (network quiet for 500ms)
+3. **Wait**: Additional configurable wait (default 3-4 seconds) for lazy-loaded content
+4. **Extract**: Capture `document.body.innerText` and `innerHTML`
+5. **Cleanup**: Close browser gracefully
+6. **Limits**: Extract up to 15,000 characters for AI processing
+
+**Configuration Options:**
+```javascript
+renderJavaScriptPage(url, {
+  timeout: 20000,        // Max page load time (20s)
+  waitTime: 4000,        // Additional JS execution wait (4s)
+  waitForSelector: null  // Optional specific element to wait for
+})
+```
+
+## AI Collection Prompt System
+
+### Dual-Tier Filtering Strategy
+
+**Tier 1: Strict Filtering (General Web Search)**
+- **Confidence**: 95% that content is specifically about the POI
+- **Name Matching**: Must explicitly mention POI by name
+- **Context**: "It is better to return empty arrays than false positives"
+
+**Tier 2: Relaxed Filtering (Dedicated URLs Only)**
+- **Confidence**: 75% that content is relevant
+- **Assumption**: Content on official events/news pages is inherently relevant
+- **Directive**: "Include ALL events that appear to be listed on this page"
+
+### Prompt Components
+
+**1. POI Context**
+```
+Search for recent news and upcoming events SPECIFICALLY about: "{{name}}"
+Location type: {{poi_type}}
+Activities: {{activities}}
+
+Official website: {{website}}
+Dedicated events page: {{eventsUrl}}
+Dedicated news page: {{newsUrl}}
+```
+
+**2. Priority Sources**
+- National Park Service (NPS)
+- Ohio Department of Transportation (ODOT)
+- Summit Metro Parks
+- Cleveland Metroparks
+- Local news outlets
+
+**3. Alternative Search Strategies** (for JS-heavy sites)
+- Facebook Events (most reliable for organizations)
+- Eventbrite, Meetup
+- Instagram announcements
+- Google Business Profile
+- Local event aggregators
+
+**4. Rendered Content Injection**
+```
+RENDERED EVENTS PAGE CONTENT:
+We rendered the JavaScript-heavy events page and extracted this content:
+
+[15,000 chars of rendered text]
+
+**SPECIAL INSTRUCTIONS FOR RENDERED EVENTS PAGE:**
+Since this content comes directly from the organization's dedicated events page,
+use RELAXED requirements:
+- You only need 75% confidence (not 95%) that an event is relevant
+- Events listed on this official page can be assumed to be associated with
+  "Open Trail Collective" even if the name isn't explicitly mentioned
+- Include ALL events that appear to be listed on this page
+```
+
+### Response Format
+
+The AI returns structured JSON:
+
+```json
+{
+  "news": [
+    {
+      "title": "Trail Closure on Blue Hen Falls Path",
+      "summary": "Blue Hen Falls trail temporarily closed for bridge repair...",
+      "source_name": "NPS.gov",
+      "source_url": "https://www.nps.gov/cuva/...",
+      "published_date": "2026-01-15",
+      "news_type": "closure"
+    }
+  ],
+  "events": [
+    {
+      "title": "Guided Hike: Winter Bird Watching",
+      "description": "Join naturalists for a winter bird watching hike...",
+      "start_date": "2026-02-10",
+      "end_date": null,
+      "event_type": "guided-tour",
+      "location_details": "Meets at Blue Hen Falls Trailhead",
+      "source_url": "https://example.org/events/winter-birds"
+    }
+  ]
+}
 ```
 
 ## Database Schema
 
-### poi_news
-Stores news articles related to POIs.
+### POI Extensions
+
+```sql
+ALTER TABLE pois ADD COLUMN events_url VARCHAR(500);
+ALTER TABLE pois ADD COLUMN news_url VARCHAR(500);
+```
+
+### News Table
 
 ```sql
 CREATE TABLE poi_news (
   id SERIAL PRIMARY KEY,
-  poi_id INTEGER REFERENCES pois(id),
+  poi_id INTEGER NOT NULL REFERENCES pois(id) ON DELETE CASCADE,
   title VARCHAR(500) NOT NULL,
   summary TEXT,
-  source_url TEXT,
   source_name VARCHAR(200),
-  news_type VARCHAR(50),        -- general, closure, seasonal, maintenance, wildlife
+  source_url VARCHAR(1000),
   published_at TIMESTAMP,
-  ai_generated BOOLEAN DEFAULT TRUE,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  news_type VARCHAR(50), -- general|closure|seasonal|maintenance|wildlife
+  created_at TIMESTAMP DEFAULT NOW()
 );
+
+CREATE INDEX idx_poi_news_poi_id ON poi_news(poi_id);
+CREATE INDEX idx_poi_news_published ON poi_news(published_at DESC);
 ```
 
-### poi_events
-Stores upcoming events at POIs.
+### Events Table
 
 ```sql
 CREATE TABLE poi_events (
   id SERIAL PRIMARY KEY,
-  poi_id INTEGER REFERENCES pois(id),
+  poi_id INTEGER NOT NULL REFERENCES pois(id) ON DELETE CASCADE,
   title VARCHAR(500) NOT NULL,
   description TEXT,
   start_date DATE NOT NULL,
   end_date DATE,
-  event_type VARCHAR(50),       -- guided-tour, program, festival, volunteer, educational
-  location_details TEXT,
-  source_url TEXT,
-  ai_generated BOOLEAN DEFAULT TRUE,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  event_type VARCHAR(50), -- guided-tour|program|festival|volunteer|educational|concert
+  location_details VARCHAR(500),
+  source_url VARCHAR(1000),
+  created_at TIMESTAMP DEFAULT NOW()
 );
+
+CREATE INDEX idx_poi_events_poi_id ON poi_events(poi_id);
+CREATE INDEX idx_poi_events_start_date ON poi_events(start_date);
 ```
 
-### news_job_status
-Tracks job execution history, progress, and checkpoint data for resumability.
+### Deduplication Logic
 
+**News Items:**
 ```sql
-CREATE TABLE news_job_status (
-  id SERIAL PRIMARY KEY,
-  job_type VARCHAR(50) NOT NULL,  -- batch_collection, scheduled_collection
-  status VARCHAR(50),              -- queued, running, completed, failed
-  started_at TIMESTAMP,
-  completed_at TIMESTAMP,
-  total_pois INTEGER DEFAULT 0,
-  pois_processed INTEGER DEFAULT 0,
-  news_found INTEGER DEFAULT 0,
-  events_found INTEGER DEFAULT 0,
-  error_message TEXT,
-  -- Checkpoint columns for pg-boss resumability
-  poi_ids TEXT,                    -- JSON array of all POI IDs to process
-  processed_poi_ids TEXT,          -- JSON array of already-processed POI IDs
-  pg_boss_job_id VARCHAR(100),     -- pg-boss job ID for correlation
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+SELECT id FROM poi_news
+WHERE poi_id = $1
+  AND title = $2
+  AND published_at = $3
+LIMIT 1
 ```
 
-## Data Flow
-
-### 1. Manual Collection (Edit Page)
-```
-User clicks "Update News & Events" button
-    │
-    ▼
-POST /api/admin/news/collect-batch { poiIds: [...] }
-    │
-    ▼
-Backend creates job record, returns jobId immediately
-    │
-    ▼
-Backend processes POIs asynchronously (3 concurrent)
-    │
-    ▼
-Frontend polls GET /api/admin/news/job/:jobId every 1.5s
-    │
-    ▼
-Progress displayed: "Processing 5/10 POIs - Found 2 news, 1 event"
-    │
-    ▼
-Job completes → Frontend shows final results
+**Events:**
+```sql
+SELECT id FROM poi_events
+WHERE poi_id = $1
+  AND title = $2
+  AND start_date = $3
+LIMIT 1
 ```
 
-### 2. Manual Collection (Settings Page)
-Same flow as above, but:
-- Processes ALL active POIs (up to 100)
-- POST /api/admin/news/collect
-- Polls every 2 seconds
-- Shows progress bar with percentage
+## API Endpoints
 
-### 3. Scheduled Collection
-```
-pg-boss triggers job at 6 AM ET
-    │
-    ▼
-runNewsCollection() called
-    │
-    ▼
-Fetches all active POIs (limit 100)
-    │
-    ▼
-Processes in parallel batches
-    │
-    ▼
-Updates news_job_status table
-    │
-    ▼
-Job completes (viewable in Settings page)
+### Single POI Collection
+
+**POST /api/admin/pois/:id/news/collect**
+
+Collects news and events for a single POI.
+
+**Request:**
+```bash
+curl -X POST http://localhost:3001/api/admin/pois/123/news/collect \
+  -H "Cookie: session=..." \
+  --cookie-jar cookies.txt
 ```
 
-## Parallelization & Checkpointing
-
-The system processes POIs in parallel with checkpointing for crash recovery:
-
-```javascript
-// Process 15 POIs concurrently (requires paid tier Gemini API)
-const CONCURRENCY = 15;
-
-for (let i = 0; i < pois.length; i += CONCURRENCY) {
-  const chunk = pois.slice(i, i + CONCURRENCY);
-
-  const results = await Promise.all(
-    chunk.map(poi => collectNewsForPoi(pool, poi))
-  );
-
-  // Checkpoint: Save progress and processed POI IDs to database
-  // This allows the job to resume from this point after a restart
-  await pool.query(`
-    UPDATE news_job_status
-    SET pois_processed = $1, news_found = $2, events_found = $3, processed_poi_ids = $4
-    WHERE id = $5
-  `, [processed, newsFound, eventsFound, JSON.stringify(processedPoiIds), jobId]);
-
-  // Small delay between batches (500ms)
+**Response:**
+```json
+{
+  "success": true,
+  "message": "News collection completed for Open Trail Collective",
+  "newsFound": 5,
+  "newsSaved": 3,
+  "eventsFound": 8,
+  "eventsSaved": 6
 }
 ```
 
-**Crash Recovery Flow:**
-1. Server restarts (intentional or crash)
-2. On startup, `findIncompleteJobs()` queries for jobs with status 'queued' or 'running'
-3. Each incomplete job is resubmitted to pg-boss
-4. pg-boss handler loads `processed_poi_ids` from database
-5. Handler skips already-processed POIs and continues from checkpoint
+**Process:**
+1. Fetch POI from database (id, name, events_url, news_url, etc.)
+2. Call `collectNewsForPoi(pool, poi)`
+3. Save results with deduplication
+4. Return counts
 
-## AI Prompt Engineering
+### Batch Collection
 
-The Gemini prompt includes strict requirements:
+**POST /api/admin/news/batch-collect**
 
-1. **95%+ Confidence Requirement**: Only include items explicitly mentioning the POI name
-2. **Source Priority**: NPS, ODOT, local parks, local news sources
-3. **Recency Rules**:
-   - News: Last 60 days only
-   - Events: Future dates only
-4. **Deduplication**: Skips items already in database (by title match)
-5. **Structured Output**: Returns JSON with specific fields
+Collects news/events for multiple POIs in parallel.
+
+**Request:**
+```json
+{
+  "poiIds": [1, 2, 3, 4, 5]
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "News collection started for 5 POIs",
+  "jobId": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+**Process:**
+1. Create job record in `news_job_status` table
+2. Launch pg-boss background job
+3. Process POIs in parallel (concurrency: 15)
+4. Update job progress as POIs complete
+5. Mark job complete when done
+
+**Job Status Tracking:**
+```sql
+SELECT status, processed_count, total_count, error_message
+FROM news_job_status
+WHERE job_id = $1
+```
+
+### Read Endpoints
+
+**GET /api/pois/:id/news?limit=20**
+
+Returns news items for a POI, newest first.
+
+**GET /api/pois/:id/events**
+
+Returns upcoming events for a POI, sorted by start_date.
+
+**GET /api/admin/news/job-status/:jobId**
+
+Returns batch job status and progress.
+
+## Frontend Components
+
+### Sidebar News/Events Tabs
+
+**File:** `frontend/src/components/Sidebar.jsx`
+
+**Components:**
+- `PoiNews({ poiId, isAdmin, editMode, onCountChange })`
+- `PoiEvents({ poiId, isAdmin, editMode, onCountChange })`
+
+**Features:**
+- Scrollable lists with hidden scrollbars
+- Sticky refresh buttons (edit mode only)
+- Event/News counters on buttons
+- Delete functionality (edit mode only)
+- Real-time collection feedback
+
+**UI States:**
+- **View Mode**: Tab shows count (e.g., "News (6)"), no refresh button
+- **Edit Mode**: Refresh button shows count (e.g., "🔍 Refresh News (6)")
+
+**Refresh Button (Edit Mode):**
+```javascript
+<button className="refresh-content-btn" onClick={handleCollectNews}>
+  {collecting ? '🔄 Searching...' : `🔍 Refresh News${news.length > 0 ? ` (${news.length})` : ''}`}
+</button>
+```
+
+**CSS Styling:**
+```css
+.poi-tab-actions {
+  position: sticky;
+  top: 0;
+  padding: 1rem;
+  background: #f8f9fa;
+  border-bottom: 1px solid #dee2e6;
+  z-index: 10;
+}
+
+.poi-news-list, .poi-events-list {
+  max-height: calc(100vh - 300px);
+  overflow-y: auto;
+  scrollbar-width: none; /* Firefox */
+}
+```
+
+### Map Batch Collection Button
+
+**File:** `frontend/src/App.jsx`
+
+**Feature:** "Update News & Events" button on map (edit mode only)
+
+**Process:**
+1. Collect visible POI IDs from current map viewport
+2. POST to `/api/admin/news/batch-collect` with poiIds
+3. Display progress notification
+4. Poll job status until complete
+
+## Configuration
+
+### Environment Variables
+
+```bash
+# Gemini API
+GEMINI_API_KEY=your_gemini_api_key_here
+
+# Playwright
+PLAYWRIGHT_BROWSERS_PATH=/path/to/browsers  # Optional
+
+# Database
+POSTGRES_USER=rotv
+POSTGRES_PASSWORD=rotv
+POSTGRES_DB=rotv
+```
+
+### Dependencies
+
+**Backend:**
+```json
+{
+  "playwright": "^1.40.0",
+  "@google/generative-ai": "^0.2.0"
+}
+```
+
+**Installation:**
+```bash
+cd backend
+npm install playwright
+node node_modules/playwright/cli.js install chromium
+```
+
+## Performance Considerations
+
+### Rendering Timeouts
+
+- **Page Load**: 20 seconds max (configurable)
+- **JS Execution Wait**: 3-4 seconds (configurable)
+- **Network Idle**: 500ms of no network activity
+
+### Parallel Processing
+
+- **Batch Jobs**: 15 concurrent POIs
+- **Character Limits**: 15,000 chars per rendered page
+- **AI Request Rate**: Controlled by Gemini API limits
+
+### Caching Strategy
+
+**No caching currently implemented.** Future considerations:
+- Cache rendered pages for 1 hour
+- Cache AI responses for 24 hours
+- Invalidate on manual refresh
+
+## Error Handling
+
+### Playwright Failures
+
+```javascript
+if (rendered.success) {
+  // Use rendered content
+} else {
+  console.log(`Failed to render: ${rendered.error}`);
+  // Fall back to standard web search without rendered content
+}
+```
+
+### AI Parsing Failures
+
+```javascript
+const jsonMatch = response.match(/\{[\s\S]*\}/);
+if (!jsonMatch) {
+  console.log('No JSON found in AI response');
+  return { news: [], events: [] };
+}
+```
+
+### Database Errors
+
+- Duplicate insertions are silently skipped (deduplication)
+- Foreign key violations logged but don't fail batch jobs
+- Transaction rollbacks on critical errors
+
+## Testing
+
+### Test Script
+
+**File:** `backend/test-playwright.js`
+
+```bash
+cd backend
+node test-playwright.js
+```
+
+**What it tests:**
+1. `isJavaScriptHeavySite()` - Detection accuracy
+2. `renderJavaScriptPage()` - Full rendering pipeline
+3. `extractEventContent()` - Content extraction (deprecated)
+4. Output preview - First 1000 chars of rendered content
+
+### Manual Testing
+
+1. **Single POI**: Navigate to POI in edit mode, click "🔍 Refresh Events"
+2. **Batch Collection**: Click "Update News & Events" on map
+3. **Verify Results**: Check News/Events tabs for new content
+
+### Expected Results
+
+**Open Trail Collective (Wix site):**
+- Should detect as JS-heavy: ✓
+- Should render with Playwright: ✓
+- Should extract 8 events: ✓
+- Should save deduplicated events: ✓
+
+## Future Enhancements
+
+### Planned Improvements
+
+1. **Incremental Updates**: Only fetch new content since last collection
+2. **Event Expiration**: Auto-delete past events after 30 days
+3. **News Archival**: Move old news to archive table
+4. **Image Extraction**: Pull event images from rendered pages
+5. **Calendar Export**: iCal/Google Calendar integration
+6. **Webhooks**: Notify on new events/news
+7. **RSS Feeds**: Generate feeds per POI
+
+### Optimization Opportunities
+
+1. **Browser Pooling**: Reuse Playwright browser instances
+2. **Selective Rendering**: Only render if content changed (ETag/Last-Modified)
+3. **Smart Scheduling**: Auto-refresh high-traffic POIs more frequently
+4. **AI Model Tuning**: Fine-tune prompts based on success rates
+5. **Response Caching**: Cache AI responses with TTL
 
 ## Troubleshooting
 
 ### Common Issues
 
-**1. Job appears stuck (status: "running" for a long time)**
-- Check server logs: `./run.sh logs | grep "Job"`
-- Possible causes: API rate limiting, network issues
-- Resolution: Jobs have 5-minute safety timeout on frontend
+**1. "No events found" despite visible events on page**
+- Check if character limit (15,000) is truncating content
+- Verify AI confidence threshold (should be 75% for dedicated URLs)
+- Increase `waitTime` if lazy-loaded content not appearing
 
-**2. No news/events being found**
-- Check Gemini API key is configured: `settings` table, key `gemini_api_key`
-- Verify POI names are specific enough for search
-- Check server logs for API errors
+**2. Playwright browser fails to launch**
+- Ensure Chromium is installed: `node node_modules/playwright/cli.js install chromium`
+- Check system dependencies on Linux (libx11, libgbm, etc.)
+- Verify no file permission issues
 
-**3. Jobs not running on schedule**
-- Verify pg-boss initialized: Look for "pg-boss started" in logs
-- Check PostgreSQL permissions for pg-boss schema
-- Manual trigger works → scheduled trigger issue
+**3. Events duplicating on refresh**
+- Check deduplication query (title + start_date match)
+- Verify event titles are consistent across refreshes
 
-**4. Duplicate news/events appearing**
-- Database has unique check on (poi_id, title) for news
-- Database has unique check on (poi_id, title, start_date) for events
-- May see similar items with slightly different titles
+**4. Slow collection times**
+- Reduce `waitTime` from 4s to 2s if acceptable
+- Lower concurrency from 15 to 10
+- Check Gemini API rate limits
 
-### Log Messages
+### Debug Logging
 
-```bash
-# Successful job start
-[Job 42] Starting batch news collection for 10 POIs
-
-# Per-POI processing
-[Job 42] Collecting news for: Brandywine Falls
-
-# Job completion
-[Job 42] Completed: 10 POIs, 3 news, 2 events
-
-# Errors
-[Job 42] Error processing POI Brandywine Falls: API rate limit exceeded
-[Job 42] Failed: Network error
+Enable verbose logging:
+```javascript
+console.log(`[AI Research] Starting search for: ${poi.name}`);
+console.log(`[AI Research] Events URL: ${eventsUrl}`);
+console.log(`[JS Renderer] Detected JS-heavy site: ${url}`);
+console.log(`[JS Renderer] Rendered ${content.text.length} chars`);
 ```
 
-### Database Queries for Debugging
+## Changelog
 
-```sql
--- Check recent jobs
-SELECT id, job_type, status, total_pois, pois_processed,
-       news_found, events_found, error_message
-FROM news_job_status
-ORDER BY created_at DESC
-LIMIT 10;
+**Version 1.3.0 (2026-01-20)**
+- ✨ Added Playwright JavaScript rendering for Wix/Squarespace sites
+- ✨ Implemented dual-tier filtering (strict vs. relaxed)
+- ✨ Added sticky refresh buttons in sidebar
+- ✨ Added event/news counters on UI buttons
+- 🐛 Fixed missing events from JS-heavy pages (6→8 events)
+- 📝 Created comprehensive architecture documentation
 
--- Check news for a specific POI
-SELECT n.*, p.name as poi_name
-FROM poi_news n
-JOIN pois p ON n.poi_id = p.id
-WHERE p.name ILIKE '%brandywine%'
-ORDER BY n.created_at DESC;
+**Version 1.2.0 (2025-12)**
+- Added `events_url` and `news_url` fields to POI schema
+- Created dedicated refresh buttons per POI
+- Separated batch collection from individual POI refresh
 
--- Count news/events by POI
-SELECT p.name,
-       COUNT(DISTINCT n.id) as news_count,
-       COUNT(DISTINCT e.id) as event_count
-FROM pois p
-LEFT JOIN poi_news n ON p.id = n.poi_id
-LEFT JOIN poi_events e ON p.id = e.poi_id
-GROUP BY p.id, p.name
-ORDER BY (COUNT(DISTINCT n.id) + COUNT(DISTINCT e.id)) DESC;
-
--- Check for running jobs
-SELECT * FROM news_job_status WHERE status = 'running';
-```
-
-## Configuration
-
-### Environment Variables
-- `GEMINI_API_KEY`: Google Gemini API key (or stored in database settings)
-
-### Database Settings
-```sql
--- Check API key
-SELECT * FROM settings WHERE key = 'gemini_api_key';
-
--- Update API key
-UPDATE settings SET value = 'your-key' WHERE key = 'gemini_api_key';
-```
-
-### Tuning Parameters
-
-| Parameter | Location | Default | Description |
-|-----------|----------|---------|-------------|
-| CONCURRENCY | newsService.js | 15 | Parallel POI processing (requires paid tier API) |
-| Batch delay | newsService.js | 500ms | Delay between batches |
-| Poll interval (Edit) | Map.jsx | 1500ms | Status polling rate |
-| Poll interval (Settings) | NewsSettings.jsx | 2000ms | Status polling rate |
-| Max POIs (batch) | admin.js | 50 | Max POIs per batch request |
-| Max POIs (scheduled) | newsService.js | unlimited | Processes all active POIs |
-| News retention | cleanup | 90 days | Auto-delete old news |
-| Event retention | cleanup | 30 days | Auto-delete past events |
-| Job retry limit | jobScheduler.js | 2 | Max retries for failed jobs |
-| Job retry delay | jobScheduler.js | 30s | Wait time before retry |
-| Job expiration | jobScheduler.js | 60 min | Job expires if not completed |
-
-## Security Considerations
-
-1. **Admin-only access**: All news collection endpoints require admin authentication
-2. **Rate limiting**: Built-in delays prevent API abuse
-3. **Input validation**: POI IDs validated before processing
-4. **No user content**: All content is AI-generated from public sources
+**Version 1.0.0 (2025-11)**
+- Initial News & Events collection system
+- Google Gemini integration with search grounding
+- Basic web search without JS rendering

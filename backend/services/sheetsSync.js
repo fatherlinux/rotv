@@ -64,18 +64,20 @@ const COLUMNS = {
   pets: 10,
   cell_signal: 11,
   more_info_link: 12,
-  length_miles: 13,
-  difficulty: 14,
-  image_drive_file_id: 15,
-  geometry_drive_file_id: 16,
-  boundary_color: 17
+  events_url: 13,
+  news_url: 14,
+  length_miles: 15,
+  difficulty: 16,
+  image_drive_file_id: 17,
+  geometry_drive_file_id: 18,
+  boundary_color: 19
 };
 
 // Headers for the unified POIs spreadsheet
 const HEADERS = [
   'Name', 'POI Type', 'Latitude', 'Longitude', 'Property Owner', 'Brief Description',
   'Era', 'Historical Description', 'Primary Activities', 'Surface',
-  'Pets', 'Cell Signal', 'More Info Link', 'Length (miles)', 'Difficulty',
+  'Pets', 'Cell Signal', 'More Info Link', 'Events URL', 'News URL', 'Length (miles)', 'Difficulty',
   'Image Drive File ID', 'Geometry Drive File ID', 'Boundary Color'
 ];
 
@@ -715,6 +717,8 @@ function rowToPOI(row) {
     pets: row[COLUMNS.pets] || null,
     cell_signal: parseCellSignal(row[COLUMNS.cell_signal]),
     more_info_link: row[COLUMNS.more_info_link] || null,
+    events_url: row[COLUMNS.events_url] || null,
+    news_url: row[COLUMNS.news_url] || null,
     length_miles: row[COLUMNS.length_miles] ? parseFloat(row[COLUMNS.length_miles]) : null,
     difficulty: row[COLUMNS.difficulty] || null,
     image_drive_file_id: row[COLUMNS.image_drive_file_id] || null,
@@ -745,6 +749,8 @@ function poiToRow(poi) {
     poi.pets || '',
     formatCellSignal(poi.cell_signal),
     poi.more_info_link || '',
+    poi.events_url || '',
+    poi.news_url || '',
     poi.length_miles || '',
     poi.difficulty || '',
     poi.image_drive_file_id || '',
@@ -759,7 +765,7 @@ function poiToRow(poi) {
 export async function readPOIs(sheets, spreadsheetId, sheetName) {
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId,
-    range: `'${sheetName}'!A2:R`,  // Extended range for new columns
+    range: `'${sheetName}'!A2:T`,  // Extended range for events_url and news_url columns
   });
 
   const rows = response.data.values || [];
@@ -957,7 +963,7 @@ export async function pushAllToSheets(sheets, pool, drive = null) {
   // Clear existing data (keep header)
   await sheets.spreadsheets.values.clear({
     spreadsheetId,
-    range: `'${APP_SHEET_NAME}'!A2:R`,
+    range: `'${APP_SHEET_NAME}'!A2:T`,
   });
 
   // Write all POIs
@@ -965,7 +971,7 @@ export async function pushAllToSheets(sheets, pool, drive = null) {
     const rows = pois.map(poiToRow);
     await sheets.spreadsheets.values.update({
       spreadsheetId,
-      range: `'${APP_SHEET_NAME}'!A2:R`,
+      range: `'${APP_SHEET_NAME}'!A2:T`,
       valueInputOption: 'USER_ENTERED',
       requestBody: {
         values: rows
@@ -1028,9 +1034,9 @@ export async function pullAllFromSheets(sheets, pool, drive = null) {
       INSERT INTO pois (
         name, poi_type, latitude, longitude, property_owner, brief_description,
         era, historical_description, primary_activities, surface,
-        pets, cell_signal, more_info_link, image_drive_file_id,
+        pets, cell_signal, more_info_link, events_url, news_url, image_drive_file_id,
         synced, locally_modified, deleted, created_at, updated_at
-      ) VALUES ($1, 'point', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, TRUE, FALSE, FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      ) VALUES ($1, 'point', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, TRUE, FALSE, FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       ON CONFLICT (name, poi_type) DO UPDATE SET
         latitude = EXCLUDED.latitude,
         longitude = EXCLUDED.longitude,
@@ -1043,6 +1049,8 @@ export async function pullAllFromSheets(sheets, pool, drive = null) {
         pets = EXCLUDED.pets,
         cell_signal = EXCLUDED.cell_signal,
         more_info_link = EXCLUDED.more_info_link,
+        events_url = EXCLUDED.events_url,
+        news_url = EXCLUDED.news_url,
         image_drive_file_id = EXCLUDED.image_drive_file_id,
         synced = TRUE,
         locally_modified = FALSE,
@@ -1053,7 +1061,7 @@ export async function pullAllFromSheets(sheets, pool, drive = null) {
       poi.name, poi.latitude, poi.longitude, poi.property_owner,
       poi.brief_description, poi.era, poi.historical_description,
       poi.primary_activities, poi.surface, poi.pets, poi.cell_signal,
-      poi.more_info_link, poi.image_drive_file_id
+      poi.more_info_link, poi.events_url, poi.news_url, poi.image_drive_file_id
     ]);
 
     if (poi.image_drive_file_id) {
@@ -1093,15 +1101,17 @@ export async function pullAllFromSheets(sheets, pool, drive = null) {
     const result = await pool.query(`
       INSERT INTO pois (
         name, poi_type, property_owner, brief_description,
-        era, historical_description, more_info_link, image_drive_file_id,
+        era, historical_description, more_info_link, events_url, news_url, image_drive_file_id,
         synced, locally_modified, deleted, created_at, updated_at
-      ) VALUES ($1, 'virtual', $2, $3, $4, $5, $6, $7, TRUE, FALSE, FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      ) VALUES ($1, 'virtual', $2, $3, $4, $5, $6, $7, $8, $9, TRUE, FALSE, FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       ON CONFLICT (name, poi_type) DO UPDATE SET
         property_owner = EXCLUDED.property_owner,
         brief_description = EXCLUDED.brief_description,
         era = EXCLUDED.era,
         historical_description = EXCLUDED.historical_description,
         more_info_link = EXCLUDED.more_info_link,
+        events_url = EXCLUDED.events_url,
+        news_url = EXCLUDED.news_url,
         image_drive_file_id = EXCLUDED.image_drive_file_id,
         synced = TRUE,
         locally_modified = FALSE,
@@ -1110,7 +1120,7 @@ export async function pullAllFromSheets(sheets, pool, drive = null) {
       RETURNING id
     `, [
       poi.name, poi.property_owner, poi.brief_description, poi.era,
-      poi.historical_description, poi.more_info_link, poi.image_drive_file_id
+      poi.historical_description, poi.more_info_link, poi.events_url, poi.news_url, poi.image_drive_file_id
     ]);
 
     if (poi.image_drive_file_id) {
@@ -1175,14 +1185,16 @@ export async function pullAllFromSheets(sheets, pool, drive = null) {
               property_owner = $1, brief_description = $2, era = $3,
               historical_description = $4, primary_activities = $5, surface = $6,
               pets = $7, cell_signal = $8, more_info_link = $9,
-              length_miles = $10, difficulty = $11, image_drive_file_id = $12,
-              geometry_drive_file_id = $13, boundary_color = $14, updated_at = CURRENT_TIMESTAMP,
+              events_url = $10, news_url = $11,
+              length_miles = $12, difficulty = $13, image_drive_file_id = $14,
+              geometry_drive_file_id = $15, boundary_color = $16, updated_at = CURRENT_TIMESTAMP,
               synced = TRUE, locally_modified = FALSE
-            WHERE id = $15
+            WHERE id = $17
           `, [
             poi.property_owner, poi.brief_description, poi.era,
             poi.historical_description, poi.primary_activities, poi.surface,
             poi.pets, poi.cell_signal, poi.more_info_link,
+            poi.events_url, poi.news_url,
             poi.length_miles, poi.difficulty, poi.image_drive_file_id,
             poi.geometry_drive_file_id, poi.boundary_color, existingId
           ]);
@@ -1210,14 +1222,16 @@ export async function pullAllFromSheets(sheets, pool, drive = null) {
               property_owner = $1, brief_description = $2, era = $3,
               historical_description = $4, primary_activities = $5, surface = $6,
               pets = $7, cell_signal = $8, more_info_link = $9,
-              length_miles = $10, difficulty = $11, image_drive_file_id = $12,
-              geometry_drive_file_id = $13, geometry = $14, boundary_color = $15,
+              events_url = $10, news_url = $11,
+              length_miles = $12, difficulty = $13, image_drive_file_id = $14,
+              geometry_drive_file_id = $15, geometry = $16, boundary_color = $17,
               updated_at = CURRENT_TIMESTAMP, synced = TRUE, locally_modified = FALSE
-            WHERE id = $16
+            WHERE id = $18
           `, [
             item.poi.property_owner, item.poi.brief_description, item.poi.era,
             item.poi.historical_description, item.poi.primary_activities, item.poi.surface,
             item.poi.pets, item.poi.cell_signal, item.poi.more_info_link,
+            item.poi.events_url, item.poi.news_url,
             item.poi.length_miles, item.poi.difficulty, item.poi.image_drive_file_id,
             item.poi.geometry_drive_file_id, JSON.stringify(geojson.geometry), item.poi.boundary_color, item.id
           ]);
@@ -1237,16 +1251,16 @@ export async function pullAllFromSheets(sheets, pool, drive = null) {
             INSERT INTO pois (
               name, poi_type, geometry, geometry_drive_file_id, property_owner, brief_description,
               era, historical_description, primary_activities, surface,
-              pets, cell_signal, more_info_link, length_miles, difficulty,
+              pets, cell_signal, more_info_link, events_url, news_url, length_miles, difficulty,
               image_drive_file_id, boundary_color, synced, locally_modified, deleted,
               created_at, updated_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, TRUE, FALSE, FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, TRUE, FALSE, FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             RETURNING id
           `, [
             poi.name, poi.poi_type, JSON.stringify(geojson.geometry), poi.geometry_drive_file_id,
             poi.property_owner, poi.brief_description, poi.era, poi.historical_description,
             poi.primary_activities, poi.surface, poi.pets, poi.cell_signal,
-            poi.more_info_link, poi.length_miles, poi.difficulty, poi.image_drive_file_id,
+            poi.more_info_link, poi.events_url, poi.news_url, poi.length_miles, poi.difficulty, poi.image_drive_file_id,
             poi.boundary_color
           ]);
 
@@ -1299,14 +1313,16 @@ export async function pullAllFromSheets(sheets, pool, drive = null) {
             property_owner = $1, brief_description = $2, era = $3,
             historical_description = $4, primary_activities = $5, surface = $6,
             pets = $7, cell_signal = $8, more_info_link = $9,
-            length_miles = $10, difficulty = $11, image_drive_file_id = $12,
-            geometry_drive_file_id = $13, updated_at = CURRENT_TIMESTAMP,
+            events_url = $10, news_url = $11,
+            length_miles = $12, difficulty = $13, image_drive_file_id = $14,
+            geometry_drive_file_id = $15, updated_at = CURRENT_TIMESTAMP,
             synced = TRUE, locally_modified = FALSE
-          WHERE id = $14
+          WHERE id = $16
         `, [
           poi.property_owner, poi.brief_description, poi.era,
           poi.historical_description, poi.primary_activities, poi.surface,
           poi.pets, poi.cell_signal, poi.more_info_link,
+          poi.events_url, poi.news_url,
           poi.length_miles, poi.difficulty, poi.image_drive_file_id,
           poi.geometry_drive_file_id, existing.rows[0].id
         ]);

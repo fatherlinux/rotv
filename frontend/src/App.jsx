@@ -5,6 +5,7 @@ import Map from './components/Map';
 import Sidebar from './components/Sidebar';
 import SyncSettings from './components/SyncSettings';
 import AISettings from './components/AISettings';
+import GeneralSettings from './components/GeneralSettings';
 import ActivitiesSettings from './components/ActivitiesSettings';
 import ErasSettings from './components/ErasSettings';
 import SurfacesSettings from './components/SurfacesSettings';
@@ -126,8 +127,8 @@ function AppContent() {
   // Tab state for admin interface: 'view', 'edit', 'settings'
   const [activeTab, setActiveTab] = useState('view');
 
-  // Settings sub-tab state: 'activities', 'news', 'google'
-  const [settingsTab, setSettingsTab] = useState('activities');
+  // Settings sub-tab state: 'general', 'activities', 'news', 'google'
+  const [settingsTab, setSettingsTab] = useState('general');
 
   // News refresh trigger - increments when news collection completes
   const [newsRefreshTrigger, setNewsRefreshTrigger] = useState(0);
@@ -535,7 +536,9 @@ function AppContent() {
       surface: '',
       pets: '',
       cell_signal: null,
-      more_info_link: ''
+      more_info_link: '',
+      events_url: '',
+      news_url: ''
     });
     setPreviewCoords(coords);
   };
@@ -561,6 +564,8 @@ function AppContent() {
       brief_description: '',
       property_owner: '',
       more_info_link: '',
+      events_url: '',
+      news_url: '',
       poi_type: 'virtual',
       _poisInBounds: poisInBounds,
       _selectedPoiIds: new Set(poisInBounds.map(p => p.id))
@@ -911,6 +916,12 @@ function AppContent() {
           <div className="settings-panel">
             <nav className="settings-tabs">
               <button
+                className={`settings-tab-btn ${settingsTab === 'general' ? 'active' : ''}`}
+                onClick={() => setSettingsTab('general')}
+              >
+                General
+              </button>
+              <button
                 className={`settings-tab-btn ${settingsTab === 'activities' ? 'active' : ''}`}
                 onClick={() => setSettingsTab('activities')}
               >
@@ -949,6 +960,7 @@ function AppContent() {
             </nav>
 
             <div className="settings-tab-content">
+              {settingsTab === 'general' && <GeneralSettings />}
               {settingsTab === 'activities' && <ActivitiesSettings />}
               {settingsTab === 'eras' && <ErasSettings />}
               {settingsTab === 'surfaces' && <SurfacesSettings />}

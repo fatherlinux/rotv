@@ -66,7 +66,9 @@ import {
   cleanupPastEvents,
   collectNewsForPoi,
   saveNewsItems,
-  saveEventItems
+  saveEventItems,
+  getCollectionProgress,
+  updateProgress
 } from '../services/newsService.js';
 import { submitBatchNewsJob } from '../services/jobScheduler.js';
 
@@ -218,6 +220,7 @@ export function createAdminRouter(pool, clearThumbnailCache) {
       'name', 'poi_type', 'latitude', 'longitude', 'geometry', 'geometry_drive_file_id',
       'property_owner', 'brief_description', 'era', 'historical_description',
       'primary_activities', 'surface', 'pets', 'cell_signal', 'more_info_link',
+      'events_url', 'news_url',
       'length_miles', 'difficulty', 'boundary_type', 'boundary_color'
     ];
     const updates = {};
@@ -275,7 +278,7 @@ export function createAdminRouter(pool, clearThumbnailCache) {
     const allowedFields = [
       'name', 'latitude', 'longitude', 'property_owner', 'brief_description',
       'era', 'historical_description', 'primary_activities', 'surface',
-      'pets', 'cell_signal', 'more_info_link'
+      'pets', 'cell_signal', 'more_info_link', 'events_url', 'news_url'
     ];
     const updates = {};
     const values = [];
@@ -347,7 +350,8 @@ export function createAdminRouter(pool, clearThumbnailCache) {
 
     const allowedFields = [
       'property_owner', 'brief_description', 'era', 'historical_description',
-      'primary_activities', 'surface', 'pets', 'cell_signal', 'more_info_link'
+      'primary_activities', 'surface', 'pets', 'cell_signal', 'more_info_link',
+      'events_url', 'news_url'
     ];
 
     const fields = ['name', 'latitude', 'longitude'];
@@ -416,7 +420,8 @@ export function createAdminRouter(pool, clearThumbnailCache) {
 
     const allowedFields = [
       'poi_type', 'property_owner', 'brief_description', 'era', 'historical_description',
-      'primary_activities', 'surface', 'pets', 'cell_signal', 'more_info_link', 'image_drive_file_id'
+      'primary_activities', 'surface', 'pets', 'cell_signal', 'more_info_link',
+      'events_url', 'news_url', 'image_drive_file_id'
     ];
 
     const fields = ['name'];
@@ -3217,14 +3222,31 @@ export function createAdminRouter(pool, clearThumbnailCache) {
     }
   });
 
-  // Collect news for a single POI
+  // Get collection progress for a POI
+  router.get('/pois/:id/collection-progress', isAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const progress = getCollectionProgress(parseInt(id));
+
+      if (!progress) {
+        return res.json({ phase: 'idle', message: 'No collection in progress' });
+      }
+
+      res.json(progress);
+    } catch (error) {
+      console.error('Error getting collection progress:', error);
+      res.status(500).json({ error: 'Failed to get collection progress' });
+    }
+  });
+
+  // Collect news for a single POI (NEWS ONLY)
   router.post('/pois/:id/news/collect', isAdmin, async (req, res) => {
     try {
       const { id } = req.params;
 
       // Get POI details
       const poiResult = await pool.query(
-        'SELECT id, name, poi_type, primary_activities, more_info_link FROM pois WHERE id = $1',
+        'SELECT id, name, poi_type, primary_activities, more_info_link, events_url, news_url FROM pois WHERE id = $1',
         [id]
       );
 
@@ -3233,26 +3255,115 @@ export function createAdminRouter(pool, clearThumbnailCache) {
       }
 
       const poi = poiResult.rows[0];
-      console.log(`Admin ${req.user.email} triggered news collection for POI: ${poi.name}`);
+
+      // Check if collection is already running for this POI
+      const existingProgress = getCollectionProgress(parseInt(id));
+      if (existingProgress && !existingProgress.completed) {
+        console.log(`Admin ${req.user.email} attempted to start NEWS collection, but one is already running for POI: ${poi.name}`);
+        return res.status(200).json({
+          success: true,
+          alreadyRunning: true,
+          message: 'Collection already in progress',
+          progress: existingProgress
+        });
+      }
+
+      console.log(`Admin ${req.user.email} triggered NEWS ONLY collection for POI: ${poi.name}`);
+
+      // Get timezone from request body (defaults to America/New_York)
+      const timezone = req.body.timezone || 'America/New_York';
+      console.log(`Using timezone: ${timezone}`);
 
       // Collect news and events for this POI
-      const { news, events } = await collectNewsForPoi(pool, poi);
+      const { news, events, metadata } = await collectNewsForPoi(pool, poi, null, timezone, 'news');
 
-      // Save to database
-      const savedNews = await saveNewsItems(pool, poi.id, news);
-      const savedEvents = await saveEventItems(pool, poi.id, events);
+      // Save ONLY NEWS to database
+      const savedNews = await saveNewsItems(pool, poi.id, news, { skipDateFilter: metadata.usedDedicatedNewsUrl });
+
+      // Update final progress with save statistics
+      updateProgress(poi.id, {
+        phase: 'complete',
+        message: `Complete! Found ${news.length} • Saved ${savedNews} • Skipped ${news.length - savedNews}`,
+        newsFound: news.length,
+        newsSaved: savedNews,
+        newsDuplicate: news.length - savedNews,
+        completed: true
+      });
 
       res.json({
         success: true,
         message: `News collection completed for ${poi.name}`,
         newsFound: news.length,
         newsSaved: savedNews,
-        eventsFound: events.length,
-        eventsSaved: savedEvents
+        newsDuplicate: news.length - savedNews
       });
     } catch (error) {
       console.error('Error collecting news for POI:', error);
       res.status(500).json({ error: 'Failed to collect news for POI' });
+    }
+  });
+
+  // Collect events for a single POI (EVENTS ONLY)
+  router.post('/pois/:id/events/collect', isAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      // Get POI details
+      const poiResult = await pool.query(
+        'SELECT id, name, poi_type, primary_activities, more_info_link, events_url, news_url FROM pois WHERE id = $1',
+        [id]
+      );
+
+      if (poiResult.rows.length === 0) {
+        return res.status(404).json({ error: 'POI not found' });
+      }
+
+      const poi = poiResult.rows[0];
+
+      // Check if collection is already running for this POI
+      const existingProgress = getCollectionProgress(parseInt(id));
+      if (existingProgress && !existingProgress.completed) {
+        console.log(`Admin ${req.user.email} attempted to start EVENTS collection, but one is already running for POI: ${poi.name}`);
+        return res.status(200).json({
+          success: true,
+          alreadyRunning: true,
+          message: 'Collection already in progress',
+          progress: existingProgress
+        });
+      }
+
+      console.log(`Admin ${req.user.email} triggered EVENTS ONLY collection for POI: ${poi.name}`);
+
+      // Get timezone from request body (defaults to America/New_York)
+      const timezone = req.body.timezone || 'America/New_York';
+      console.log(`Using timezone: ${timezone}`);
+
+      // Collect news and events for this POI
+      const { news, events, metadata } = await collectNewsForPoi(pool, poi, null, timezone, 'events');
+
+      // Save ONLY EVENTS to database
+      const savedEvents = await saveEventItems(pool, poi.id, events);
+
+      // Update final progress with save statistics
+      updateProgress(poi.id, {
+        phase: 'complete',
+        message: `Complete! Found ${events.length} • Saved ${savedEvents} • Skipped ${events.length - savedEvents}`,
+        eventsFound: events.length,
+        eventsSaved: savedEvents,
+        eventsDuplicate: events.length - savedEvents,
+        completed: true
+      });
+
+      res.json({
+        success: true,
+        message: `Events collection completed for ${poi.name}`,
+        eventsFound: events.length,
+        eventsSaved: savedEvents,
+        eventsDuplicate: events.length - savedEvents
+      });
+    } catch (error) {
+      console.error('Error collecting events for POI:', error);
+      res.status(500).json({ error: 'Failed to collect events for POI' });
     }
   });
 

@@ -268,54 +268,7 @@ function Legend({
           ))}
         </div>
 
-        {/* Edit tab - show admin tools */}
-        {isEditTab && (
-          <>
-            <div className="legend-divider"></div>
-            <h4>Import Spatial Data</h4>
-            <p className="edit-mode-hint">Import trails, rivers, or boundaries from GeoJSON files:</p>
-            <div className="spatial-import-form">
-              <input
-                type="file"
-                accept=".geojson,.json"
-                onChange={onFileSelect}
-                className="file-input-visible"
-              />
-              <select
-                className="import-type-select"
-                value={importType}
-                onChange={(e) => onImportTypeChange(e.target.value)}
-              >
-                <option value="trail">Trail</option>
-                <option value="river">River</option>
-                <option value="boundary">Boundary</option>
-              </select>
-              <button
-                className="admin-btn import-btn"
-                onClick={onImportFile}
-                disabled={importingFile || !selectedFileName}
-              >
-                {importingFile ? 'Importing...' : 'Import'}
-              </button>
-            </div>
-            {importMessage && (
-              <div className={`import-message import-${importMessage.type}`}>
-                <span>{importMessage.text}</span>
-                {importMessage.type === 'warning' && (
-                  <button className="admin-btn" onClick={() => window.location.reload()}>
-                    Refresh
-                  </button>
-                )}
-                <button className="dismiss-btn" onClick={onDismissMessage}>×</button>
-              </div>
-            )}
-            <div className="legend-divider"></div>
-            <h4>Map Alignment</h4>
-            <button className="admin-btn" onClick={onOpenAdmin}>
-              Align NPS Overlay
-            </button>
-          </>
-        )}
+        {/* Edit tab - admin tools moved to General Settings */}
       </div>
     </div>
   );
@@ -1690,28 +1643,7 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
         {visiblePoiCount} Result{visiblePoiCount !== 1 ? 's' : ''}
       </button>
 
-      {/* Admin refresh news & events chip - only in edit mode */}
-      {isAdmin && editMode && (
-        <button
-          className={`map-refresh-news ${refreshingNews ? 'refreshing' : ''} ${(selectedDestination || selectedLinearFeature || newPOI || newOrganization) ? 'sidebar-open' : ''}`}
-          onClick={handleRefreshNews}
-          disabled={refreshingNews || visiblePoiIds.length === 0}
-          title={visiblePoiIds.length === 0 ? 'No destinations visible to update' : `Update news & events for ${visiblePoiIds.length} visible destinations`}
-        >
-          {refreshingNews ? 'Updating...' : 'Update News & Events'}
-        </button>
-      )}
-
-      {/* Admin create organization button - only in edit mode and not while creating */}
-      {isAdmin && editMode && !isCreatingVirtualPoi && !newOrganization && (
-        <button
-          className={`map-create-organization ${(selectedDestination || selectedLinearFeature || newPOI || newOrganization) ? 'sidebar-open' : ''}`}
-          onClick={() => setIsCreatingVirtualPoi(true)}
-          title="Create a new organization by drawing a rectangle around locations"
-        >
-          + Create Organization
-        </button>
-      )}
+      {/* Admin controls moved to General Settings for cleaner map interface */}
 
       {/* Refresh result message */}
       {refreshResult && (
