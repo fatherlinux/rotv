@@ -68,6 +68,7 @@ import {
   saveNewsItems,
   saveEventItems,
   getCollectionProgress,
+  clearProgress,
   updateProgress
 } from '../services/newsService.js';
 import { submitBatchNewsJob } from '../services/jobScheduler.js';
@@ -3268,6 +3269,9 @@ export function createAdminRouter(pool, clearThumbnailCache) {
         });
       }
 
+      // Clear any old completed progress before starting new collection
+      clearProgress(parseInt(id));
+
       console.log(`Admin ${req.user.email} triggered NEWS ONLY collection for POI: ${poi.name}`);
 
       // Get timezone from request body (defaults to America/New_York)
@@ -3331,6 +3335,9 @@ export function createAdminRouter(pool, clearThumbnailCache) {
           progress: existingProgress
         });
       }
+
+      // Clear any old completed progress before starting new collection
+      clearProgress(parseInt(id));
 
       console.log(`Admin ${req.user.email} triggered EVENTS ONLY collection for POI: ${poi.name}`);
 

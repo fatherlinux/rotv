@@ -54,7 +54,7 @@ export function getCollectionProgress(poiId) {
 /**
  * Clear collection progress for a POI
  */
-function clearProgress(poiId) {
+export function clearProgress(poiId) {
   collectionProgress.delete(poiId);
 }
 
