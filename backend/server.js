@@ -509,7 +509,7 @@ async function initDatabase() {
         source_url TEXT,
         source_name VARCHAR(255),
         news_type VARCHAR(50) DEFAULT 'general',
-        published_at TIMESTAMP,
+        published_at DATE,
         ai_generated BOOLEAN DEFAULT TRUE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -525,8 +525,8 @@ async function initDatabase() {
         poi_id INTEGER REFERENCES pois(id) ON DELETE CASCADE,
         title VARCHAR(500) NOT NULL,
         description TEXT,
-        start_date TIMESTAMP NOT NULL,
-        end_date TIMESTAMP,
+        start_date DATE NOT NULL,
+        end_date DATE,
         event_type VARCHAR(100),
         location_details TEXT,
         source_url TEXT,
@@ -588,6 +588,14 @@ async function initDatabase() {
     // Set default boundary_type for existing boundaries
     await client.query(`
       UPDATE pois SET boundary_type = 'cvnp' WHERE poi_type = 'boundary' AND boundary_type IS NULL
+    `);
+
+    // Add events_url and news_url columns for targeted AI Research
+    await client.query(`
+      ALTER TABLE pois ADD COLUMN IF NOT EXISTS events_url TEXT
+    `);
+    await client.query(`
+      ALTER TABLE pois ADD COLUMN IF NOT EXISTS news_url TEXT
     `);
 
     // Note: linear_features table is deprecated - data migrated to pois table above
@@ -659,7 +667,7 @@ app.get('/api/pois', async (req, res) => {
              property_owner, brief_description, era, historical_description,
              primary_activities, surface, pets, cell_signal, more_info_link,
              length_miles, difficulty, image_mime_type, image_drive_file_id,
-             boundary_type, boundary_color,
+             boundary_type, boundary_color, news_url, events_url,
              locally_modified, deleted, synced, created_at, updated_at
       FROM pois
       WHERE (deleted IS NULL OR deleted = FALSE)
@@ -688,7 +696,7 @@ app.get('/api/pois/:id', async (req, res) => {
              property_owner, brief_description, era, historical_description,
              primary_activities, surface, pets, cell_signal, more_info_link,
              length_miles, difficulty, image_mime_type, image_drive_file_id,
-             boundary_type, boundary_color,
+             boundary_type, boundary_color, news_url, events_url,
              locally_modified, deleted, synced, created_at, updated_at
       FROM pois WHERE id = $1`,
       [req.params.id]
@@ -961,7 +969,7 @@ app.get('/api/destinations', async (req, res) => {
       SELECT id, name, poi_type, latitude, longitude,
              property_owner, brief_description, era, historical_description,
              primary_activities, surface, pets, cell_signal, more_info_link,
-             image_mime_type, image_drive_file_id,
+             image_mime_type, image_drive_file_id, news_url, events_url,
              locally_modified, deleted, synced, created_at, updated_at
       FROM pois
       WHERE poi_type = 'point'
@@ -982,7 +990,7 @@ app.get('/api/destinations/:id', async (req, res) => {
       SELECT id, name, poi_type, latitude, longitude,
              property_owner, brief_description, era, historical_description,
              primary_activities, surface, pets, cell_signal, more_info_link,
-             image_mime_type, image_drive_file_id,
+             image_mime_type, image_drive_file_id, news_url, events_url,
              locally_modified, deleted, synced, created_at, updated_at
       FROM pois WHERE id = $1`,
       [req.params.id]
@@ -1029,7 +1037,7 @@ app.get('/api/linear-features', async (req, res) => {
              property_owner, brief_description, era, historical_description,
              primary_activities, surface, pets, cell_signal, more_info_link,
              length_miles, difficulty, image_mime_type, image_drive_file_id,
-             boundary_type, boundary_color,
+             boundary_type, boundary_color, news_url, events_url,
              locally_modified, deleted, synced, created_at, updated_at
       FROM pois
       WHERE poi_type IN ('trail', 'river', 'boundary')
@@ -1096,12 +1104,15 @@ app.get('/api/health', (req, res) => {
 app.get('/api/pois/:id/news', async (req, res) => {
   try {
     const { id } = req.params;
-    const limit = parseInt(req.query.limit) || 10;
+    const limit = parseInt(req.query.limit) || 50;
     const result = await pool.query(`
       SELECT id, title, summary, source_url, source_name, news_type, published_at, created_at
       FROM poi_news
       WHERE poi_id = $1
-      ORDER BY COALESCE(published_at, created_at) DESC
+      ORDER BY
+        CASE WHEN published_at IS NULL THEN 1 ELSE 0 END,
+        published_at DESC NULLS LAST,
+        created_at DESC
       LIMIT $2
     `, [id, limit]);
     res.json(result.rows);
@@ -1115,6 +1126,7 @@ app.get('/api/pois/:id/events', async (req, res) => {
   try {
     const { id } = req.params;
     const upcomingOnly = req.query.upcoming !== 'false';
+    const limit = parseInt(req.query.limit) || 50;
     let query = `
       SELECT id, title, description, start_date, end_date, event_type, location_details, source_url, created_at
       FROM poi_events
@@ -1123,9 +1135,9 @@ app.get('/api/pois/:id/events', async (req, res) => {
     if (upcomingOnly) {
       query += ` AND start_date >= CURRENT_DATE`;
     }
-    query += ` ORDER BY start_date ASC`;
+    query += ` ORDER BY start_date ASC LIMIT $2`;
 
-    const result = await pool.query(query, [id]);
+    const result = await pool.query(query, [id, limit]);
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching POI events:', error);

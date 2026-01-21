@@ -38,6 +38,24 @@
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+### Quick Restart Script
+
+**After making code changes, use this script to restart dev servers:**
+
+```bash
+./restart-dev.sh          # Restart both backend and frontend
+./restart-dev.sh backend  # Restart backend only
+./restart-dev.sh frontend # Restart frontend only
+```
+
+The script:
+- Kills existing dev servers
+- Starts them in the background
+- Logs output to `/tmp/rotv-backend.log` and `/tmp/rotv-frontend.log`
+- Verifies servers started successfully
+
+**Important:** Always use this script after modifying `server.js`, routes, or other backend code that requires a restart.
+
 ### Start Local Development
 
 1. **Start PostgreSQL container**:
@@ -110,3 +128,26 @@ The app uses a unified `pois` table with `poi_type` to distinguish:
 - `boundary` - Municipal boundaries (9 entries)
 
 The `/api/destinations` endpoint returns `pois WHERE poi_type = 'point'`.
+
+## Documentation Standards
+
+### Architecture Documents
+
+For all major features or significant refactors, create an architecture document in the `docs/` directory following the pattern of `NEWS_EVENTS_ARCHITECTURE.md`.
+
+**When to create an architecture document:**
+- New feature that introduces a multi-step workflow or complex system
+- Significant refactor that changes how a major part of the application works
+- Integration of new third-party services or APIs
+- Implementation of new data collection or processing pipelines
+- Any feature that future developers would benefit from understanding holistically
+
+**What to include:**
+1. **Plain English Introduction**: Explain what problem the feature solves, how it works, and the benefits for users, admins, and developers
+2. **Architecture Overview**: High-level diagram or description of components and data flow
+3. **Key Technologies**: List technologies, libraries, and APIs used
+4. **Implementation Details**: Code structure, key functions, error handling
+5. **Testing & Validation**: How to verify the feature works correctly
+6. **Future Improvements**: Known limitations or planned enhancements
+
+**Example:** See `docs/NEWS_EVENTS_ARCHITECTURE.md` for a comprehensive example of an architecture document.

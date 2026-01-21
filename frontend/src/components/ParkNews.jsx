@@ -22,11 +22,19 @@ function NewsTypeIcon({ type }) {
   return <span className={`news-type-icon ${type || 'general'}`}>{icons[type] || 'N'}</span>;
 }
 
-function ParkNews({ isAdmin, onSelectPoi, filteredDestinations, filteredLinearFeatures, mapState, onMapClick, refreshTrigger }) {
+function ParkNews({ isAdmin, onSelectPoi, filteredDestinations, filteredLinearFeatures, filteredVirtualPois, mapState, onMapClick, refreshTrigger }) {
   const [news, setNews] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [deleting, setDeleting] = useState(null);
+  const [searchText, setSearchText] = useState('');
+  const [typeFilters, setTypeFilters] = useState({
+    closure: true,
+    seasonal: true,
+    maintenance: true,
+    wildlife: true,
+    general: true
+  });
 
   useEffect(() => {
     fetchNews();
@@ -51,30 +59,45 @@ function ParkNews({ isAdmin, onSelectPoi, filteredDestinations, filteredLinearFe
     }
   };
 
-  // Filter news based on visible POIs (both point destinations and linear features)
+  // Filter news based on visible POIs (destinations, linear features, and organizations)
   const filteredNews = React.useMemo(() => {
     const hasDestinations = Array.isArray(filteredDestinations);
     const hasLinearFeatures = Array.isArray(filteredLinearFeatures);
+    const hasVirtualPois = Array.isArray(filteredVirtualPois);
 
-    // If both filters are explicitly empty arrays, show no news (all filters deselected)
+    // Start with all news or filter by visible POIs
+    let filtered = news;
+
+    // If all filters are explicitly empty arrays, show no news (all filters deselected)
     if (hasDestinations && filteredDestinations.length === 0 &&
-        hasLinearFeatures && filteredLinearFeatures.length === 0) {
-      return [];
+        hasLinearFeatures && filteredLinearFeatures.length === 0 &&
+        hasVirtualPois && filteredVirtualPois.length === 0) {
+      filtered = [];
+    } else if (filteredDestinations || filteredLinearFeatures || filteredVirtualPois) {
+      // Combine visible IDs from point destinations, linear features, and virtual POIs (organizations)
+      const visiblePoiIds = new Set([
+        ...(filteredDestinations || []).map(d => d.id),
+        ...(filteredLinearFeatures || []).map(f => f.id),
+        ...(filteredVirtualPois || []).map(v => v.id)
+      ]);
+      filtered = filtered.filter(item => visiblePoiIds.has(item.poi_id));
     }
 
-    // If no filters applied yet, show all news
-    if (!filteredDestinations && !filteredLinearFeatures) {
-      return news;
+    // Apply text search filter
+    if (searchText.trim()) {
+      const search = searchText.toLowerCase();
+      filtered = filtered.filter(item =>
+        (item.title || '').toLowerCase().includes(search) ||
+        (item.summary || '').toLowerCase().includes(search) ||
+        (item.poi_name || '').toLowerCase().includes(search)
+      );
     }
 
-    // Combine visible IDs from both point destinations and linear features
-    const visiblePoiIds = new Set([
-      ...(filteredDestinations || []).map(d => d.id),
-      ...(filteredLinearFeatures || []).map(f => f.id)
-    ]);
+    // Apply type filter
+    filtered = filtered.filter(item => typeFilters[item.news_type || 'general']);
 
-    return news.filter(item => visiblePoiIds.has(item.poi_id));
-  }, [news, filteredDestinations, filteredLinearFeatures]);
+    return filtered;
+  }, [news, filteredDestinations, filteredLinearFeatures, filteredVirtualPois, searchText, typeFilters]);
 
   const handleDelete = async (newsId) => {
     if (!confirm('Delete this news item?')) return;
@@ -140,7 +163,7 @@ function ParkNews({ isAdmin, onSelectPoi, filteredDestinations, filteredLinearFe
                 aspectRatio={mapState.aspectRatio || 1.5}
                 visibleDestinations={filteredDestinations}
                 onClick={onMapClick}
-                poiCount={(filteredDestinations?.length || 0) + (filteredLinearFeatures?.length || 0)}
+                poiCount={(filteredDestinations?.length || 0) + (filteredLinearFeatures?.length || 0) + (filteredVirtualPois?.length || 0)}
               />
             </div>
           )}
@@ -155,6 +178,57 @@ function ParkNews({ isAdmin, onSelectPoi, filteredDestinations, filteredLinearFe
         <h2>Park News</h2>
         <p className="tab-subtitle">Recent news from across Cuyahoga Valley National Park</p>
       </div>
+
+      <div className="results-filters">
+        <input
+          type="text"
+          className="results-search-input"
+          placeholder="Search news by title, summary, or location..."
+          value={searchText}
+          onChange={(e) => setSearchText(e.target.value)}
+        />
+        <div className="results-type-filters">
+          <div
+            className={`type-filter-chip closure ${typeFilters.closure ? 'active' : 'inactive'}`}
+            onClick={() => setTypeFilters(prev => ({ ...prev, closure: !prev.closure }))}
+          >
+            <span className="type-filter-icon">X</span>
+            Closure
+          </div>
+          <div
+            className={`type-filter-chip seasonal ${typeFilters.seasonal ? 'active' : 'inactive'}`}
+            onClick={() => setTypeFilters(prev => ({ ...prev, seasonal: !prev.seasonal }))}
+          >
+            <span className="type-filter-icon">S</span>
+            Seasonal
+          </div>
+          <div
+            className={`type-filter-chip maintenance ${typeFilters.maintenance ? 'active' : 'inactive'}`}
+            onClick={() => setTypeFilters(prev => ({ ...prev, maintenance: !prev.maintenance }))}
+          >
+            <span className="type-filter-icon">W</span>
+            Maintenance
+          </div>
+          <div
+            className={`type-filter-chip wildlife ${typeFilters.wildlife ? 'active' : 'inactive'}`}
+            onClick={() => setTypeFilters(prev => ({ ...prev, wildlife: !prev.wildlife }))}
+          >
+            <span className="type-filter-icon">A</span>
+            Wildlife
+          </div>
+          <div
+            className={`type-filter-chip general ${typeFilters.general ? 'active' : 'inactive'}`}
+            onClick={() => setTypeFilters(prev => ({ ...prev, general: !prev.general }))}
+          >
+            <span className="type-filter-icon">N</span>
+            General
+          </div>
+        </div>
+        <div className="results-count">
+          Showing {filteredNews.length} of {news.length} news items
+        </div>
+      </div>
+
       <div className="news-events-layout">
         <div className="news-events-content">
           <div className="park-news-list">
@@ -172,16 +246,6 @@ function ParkNews({ isAdmin, onSelectPoi, filteredDestinations, filteredLinearFe
                   {item.poi_name}
                 </button>
               </div>
-              {isAdmin && (
-                <button
-                  className="news-delete-btn"
-                  onClick={() => handleDelete(item.id)}
-                  disabled={deleting === item.id}
-                  title="Delete this news item"
-                >
-                  {deleting === item.id ? '...' : '×'}
-                </button>
-              )}
             </div>
             {item.summary && <p className="park-news-summary">{item.summary}</p>}
             <div className="park-news-meta">
@@ -212,16 +276,6 @@ function ParkNews({ isAdmin, onSelectPoi, filteredDestinations, filteredLinearFe
               onClick={onMapClick}
               poiCount={(filteredDestinations?.length || 0) + (filteredLinearFeatures?.length || 0)}
             />
-            <div className="event-legend">
-              <div className="event-legend-title">News Types</div>
-              <div className="event-legend-items">
-                <span className="event-legend-item"><span className="news-type-icon closure">X</span> Closure</span>
-                <span className="event-legend-item"><span className="news-type-icon seasonal">S</span> Seasonal</span>
-                <span className="event-legend-item"><span className="news-type-icon maintenance">W</span> Maintenance</span>
-                <span className="event-legend-item"><span className="news-type-icon wildlife">A</span> Wildlife</span>
-                <span className="event-legend-item"><span className="news-type-icon general">N</span> General</span>
-              </div>
-            </div>
           </div>
         )}
       </div>

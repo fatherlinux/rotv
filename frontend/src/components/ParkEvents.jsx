@@ -24,16 +24,26 @@ function EventTypeIcon({ type }) {
     'program': 'P',
     'festival': 'F',
     'volunteer': 'V',
-    'educational': 'E'
+    'educational': 'E',
+    'concert': 'C'
   };
   return <span className={`event-type-icon ${type || 'program'}`}>{icons[type] || 'E'}</span>;
 }
 
-function ParkEvents({ isAdmin, onSelectPoi, filteredDestinations, filteredLinearFeatures, mapState, onMapClick, refreshTrigger }) {
+function ParkEvents({ isAdmin, onSelectPoi, filteredDestinations, filteredLinearFeatures, filteredVirtualPois, mapState, onMapClick, refreshTrigger }) {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [deleting, setDeleting] = useState(null);
+  const [searchText, setSearchText] = useState('');
+  const [typeFilters, setTypeFilters] = useState({
+    'guided-tour': true,
+    'program': true,
+    'festival': true,
+    'volunteer': true,
+    'educational': true,
+    'concert': true
+  });
 
   useEffect(() => {
     fetchEvents();
@@ -58,30 +68,46 @@ function ParkEvents({ isAdmin, onSelectPoi, filteredDestinations, filteredLinear
     }
   };
 
-  // Filter events based on visible POIs (both point destinations and linear features)
+  // Filter events based on visible POIs (destinations, linear features, and organizations)
   const filteredEvents = React.useMemo(() => {
     const hasDestinations = Array.isArray(filteredDestinations);
     const hasLinearFeatures = Array.isArray(filteredLinearFeatures);
+    const hasVirtualPois = Array.isArray(filteredVirtualPois);
 
-    // If both filters are explicitly empty arrays, show no events (all filters deselected)
+    // Start with all events or filter by visible POIs
+    let filtered = events;
+
+    // If all filters are explicitly empty arrays, show no events (all filters deselected)
     if (hasDestinations && filteredDestinations.length === 0 &&
-        hasLinearFeatures && filteredLinearFeatures.length === 0) {
-      return [];
+        hasLinearFeatures && filteredLinearFeatures.length === 0 &&
+        hasVirtualPois && filteredVirtualPois.length === 0) {
+      filtered = [];
+    } else if (filteredDestinations || filteredLinearFeatures || filteredVirtualPois) {
+      // Combine visible IDs from point destinations, linear features, and virtual POIs (organizations)
+      const visiblePoiIds = new Set([
+        ...(filteredDestinations || []).map(d => d.id),
+        ...(filteredLinearFeatures || []).map(f => f.id),
+        ...(filteredVirtualPois || []).map(v => v.id)
+      ]);
+      filtered = filtered.filter(item => visiblePoiIds.has(item.poi_id));
     }
 
-    // If no filters applied yet, show all events
-    if (!filteredDestinations && !filteredLinearFeatures) {
-      return events;
+    // Apply text search filter
+    if (searchText.trim()) {
+      const search = searchText.toLowerCase();
+      filtered = filtered.filter(item =>
+        (item.title || '').toLowerCase().includes(search) ||
+        (item.description || '').toLowerCase().includes(search) ||
+        (item.poi_name || '').toLowerCase().includes(search) ||
+        (item.location_details || '').toLowerCase().includes(search)
+      );
     }
 
-    // Combine visible IDs from both point destinations and linear features
-    const visiblePoiIds = new Set([
-      ...(filteredDestinations || []).map(d => d.id),
-      ...(filteredLinearFeatures || []).map(f => f.id)
-    ]);
+    // Apply type filter
+    filtered = filtered.filter(item => typeFilters[item.event_type || 'program']);
 
-    return events.filter(item => visiblePoiIds.has(item.poi_id));
-  }, [events, filteredDestinations, filteredLinearFeatures]);
+    return filtered;
+  }, [events, filteredDestinations, filteredLinearFeatures, filteredVirtualPois, searchText, typeFilters]);
 
   const handleDelete = async (eventId) => {
     if (!confirm('Delete this event?')) return;
@@ -196,7 +222,7 @@ END:VCALENDAR`;
                 aspectRatio={mapState.aspectRatio || 1.5}
                 visibleDestinations={filteredDestinations}
                 onClick={onMapClick}
-                poiCount={(filteredDestinations?.length || 0) + (filteredLinearFeatures?.length || 0)}
+                poiCount={(filteredDestinations?.length || 0) + (filteredLinearFeatures?.length || 0) + (filteredVirtualPois?.length || 0)}
               />
             </div>
           )}
@@ -211,6 +237,64 @@ END:VCALENDAR`;
         <h2>Upcoming Events</h2>
         <p className="tab-subtitle">Events across Cuyahoga Valley National Park</p>
       </div>
+
+      <div className="results-filters">
+        <input
+          type="text"
+          className="results-search-input"
+          placeholder="Search events by title, description, or location..."
+          value={searchText}
+          onChange={(e) => setSearchText(e.target.value)}
+        />
+        <div className="results-type-filters">
+          <div
+            className={`type-filter-chip guided-tour ${typeFilters['guided-tour'] ? 'active' : 'inactive'}`}
+            onClick={() => setTypeFilters(prev => ({ ...prev, 'guided-tour': !prev['guided-tour'] }))}
+          >
+            <span className="type-filter-icon">T</span>
+            Tour
+          </div>
+          <div
+            className={`type-filter-chip program ${typeFilters['program'] ? 'active' : 'inactive'}`}
+            onClick={() => setTypeFilters(prev => ({ ...prev, 'program': !prev['program'] }))}
+          >
+            <span className="type-filter-icon">P</span>
+            Program
+          </div>
+          <div
+            className={`type-filter-chip festival ${typeFilters['festival'] ? 'active' : 'inactive'}`}
+            onClick={() => setTypeFilters(prev => ({ ...prev, 'festival': !prev['festival'] }))}
+          >
+            <span className="type-filter-icon">F</span>
+            Festival
+          </div>
+          <div
+            className={`type-filter-chip volunteer ${typeFilters['volunteer'] ? 'active' : 'inactive'}`}
+            onClick={() => setTypeFilters(prev => ({ ...prev, 'volunteer': !prev['volunteer'] }))}
+          >
+            <span className="type-filter-icon">V</span>
+            Volunteer
+          </div>
+          <div
+            className={`type-filter-chip educational ${typeFilters['educational'] ? 'active' : 'inactive'}`}
+            onClick={() => setTypeFilters(prev => ({ ...prev, 'educational': !prev['educational'] }))}
+          >
+            <span className="type-filter-icon">E</span>
+            Educational
+          </div>
+          <div
+            className={`type-filter-chip concert ${typeFilters['concert'] ? 'active' : 'inactive'}`}
+            onClick={() => setTypeFilters(prev => ({ ...prev, 'concert': !prev['concert'] }))}
+          >
+            <span className="type-filter-icon">C</span>
+            Concert
+          </div>
+        </div>
+        <div className="results-count">
+          Showing {filteredEvents.length} of {events.length} events
+        </div>
+      </div>
+
       <div className="news-events-layout">
         <div className="news-events-content">
           <div className="park-events-list">
@@ -228,16 +312,6 @@ END:VCALENDAR`;
                   {item.poi_name}
                 </button>
               </div>
-              {isAdmin && (
-                <button
-                  className="news-delete-btn"
-                  onClick={() => handleDelete(item.id)}
-                  disabled={deleting === item.id}
-                  title="Delete this event"
-                >
-                  {deleting === item.id ? '...' : '×'}
-                </button>
-              )}
             </div>
 
             <div className="park-event-date">
@@ -299,16 +373,6 @@ END:VCALENDAR`;
               onClick={onMapClick}
               poiCount={(filteredDestinations?.length || 0) + (filteredLinearFeatures?.length || 0)}
             />
-            <div className="event-legend">
-              <div className="event-legend-title">Event Types</div>
-              <div className="event-legend-items">
-                <span className="event-legend-item"><span className="event-type-icon guided-tour">T</span> Tour</span>
-                <span className="event-legend-item"><span className="event-type-icon program">P</span> Program</span>
-                <span className="event-legend-item"><span className="event-type-icon festival">F</span> Festival</span>
-                <span className="event-legend-item"><span className="event-type-icon volunteer">V</span> Volunteer</span>
-                <span className="event-legend-item"><span className="event-type-icon educational">E</span> Educational</span>
-              </div>
-            </div>
           </div>
         )}
       </div>

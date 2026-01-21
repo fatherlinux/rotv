@@ -1,4 +1,4 @@
-import React, { useMemo, useCallback, memo } from 'react';
+import React, { useMemo, useCallback, memo, useState } from 'react';
 import ResultsTile from './ResultsTile';
 import MapThumbnail from './MapThumbnail';
 
@@ -14,24 +14,55 @@ const ResultsTab = memo(function ResultsTab({
   mapState,
   onMapClick
 }) {
+  const [searchText, setSearchText] = useState('');
+  const [typeFilters, setTypeFilters] = useState({
+    destination: true,
+    trail: true,
+    river: true,
+    boundary: true,
+    organization: true
+  });
   // Combine and sort POIs alphabetically - also create a lookup map
-  const { sortedPois, poiMap } = useMemo(() => {
+  const { sortedPois, poiMap, totalCount } = useMemo(() => {
     const dests = (viewportFilteredDestinations || []).map(d => ({
       ...d,
       _isLinear: false,
-      _isVirtual: false
+      _isVirtual: false,
+      _poiType: 'destination'
     }));
     const linear = (viewportFilteredLinearFeatures || []).map(f => ({
       ...f,
       _isLinear: true,
-      _isVirtual: false
+      _isVirtual: false,
+      _poiType: f.feature_type || 'trail'
     }));
     const virtual = (viewportFilteredVirtualPois || []).map(v => ({
       ...v,
       _isLinear: false,
-      _isVirtual: true
+      _isVirtual: true,
+      _poiType: 'organization'
     }));
-    const sorted = [...dests, ...linear, ...virtual].sort((a, b) =>
+
+    const allPois = [...dests, ...linear, ...virtual];
+    const total = allPois.length;
+
+    // Apply filters
+    let filtered = allPois;
+
+    // Text search filter
+    if (searchText.trim()) {
+      const search = searchText.toLowerCase();
+      filtered = filtered.filter(poi =>
+        (poi.name || '').toLowerCase().includes(search) ||
+        (poi.brief_description || '').toLowerCase().includes(search)
+      );
+    }
+
+    // Type filter
+    filtered = filtered.filter(poi => typeFilters[poi._poiType]);
+
+    // Sort alphabetically
+    const sorted = filtered.sort((a, b) =>
       (a.name || '').localeCompare(b.name || '')
     );
 
@@ -43,8 +74,8 @@ const ResultsTab = memo(function ResultsTab({
       map.set(key, poi);
     });
 
-    return { sortedPois: sorted, poiMap: map };
-  }, [viewportFilteredDestinations, viewportFilteredLinearFeatures, viewportFilteredVirtualPois]);
+    return { sortedPois: sorted, poiMap: map, totalCount: total };
+  }, [viewportFilteredDestinations, viewportFilteredLinearFeatures, viewportFilteredVirtualPois, searchText, typeFilters]);
 
   // Event delegation handler - single handler for all tiles
   const handleListClick = useCallback((e) => {
@@ -110,6 +141,56 @@ const ResultsTab = memo(function ResultsTab({
         <p className="tab-subtitle">Points of interest visible in the current map area</p>
       </div>
 
+      <div className="results-filters">
+        <input
+          type="text"
+          className="results-search-input"
+          placeholder="Search by name or description..."
+          value={searchText}
+          onChange={(e) => setSearchText(e.target.value)}
+        />
+        <div className="results-type-filters">
+          <div
+            className={`type-filter-chip destination ${typeFilters.destination ? 'active' : 'inactive'}`}
+            onClick={() => setTypeFilters(prev => ({ ...prev, destination: !prev.destination }))}
+          >
+            <span className="type-filter-icon">D</span>
+            Destination
+          </div>
+          <div
+            className={`type-filter-chip trail ${typeFilters.trail ? 'active' : 'inactive'}`}
+            onClick={() => setTypeFilters(prev => ({ ...prev, trail: !prev.trail }))}
+          >
+            <span className="type-filter-icon">T</span>
+            Trail
+          </div>
+          <div
+            className={`type-filter-chip river ${typeFilters.river ? 'active' : 'inactive'}`}
+            onClick={() => setTypeFilters(prev => ({ ...prev, river: !prev.river }))}
+          >
+            <span className="type-filter-icon">R</span>
+            River
+          </div>
+          <div
+            className={`type-filter-chip boundary ${typeFilters.boundary ? 'active' : 'inactive'}`}
+            onClick={() => setTypeFilters(prev => ({ ...prev, boundary: !prev.boundary }))}
+          >
+            <span className="type-filter-icon">B</span>
+            Boundary
+          </div>
+          <div
+            className={`type-filter-chip organization ${typeFilters.organization ? 'active' : 'inactive'}`}
+            onClick={() => setTypeFilters(prev => ({ ...prev, organization: !prev.organization }))}
+          >
+            <span className="type-filter-icon">O</span>
+            Organization
+          </div>
+        </div>
+        <div className="results-count">
+          Showing {poiCount} of {totalCount} POIs
+        </div>
+      </div>
+
       <div className="news-events-layout">
         <div className="news-events-content">
           <div className="results-tab-list" onClick={handleListClick}>
@@ -141,16 +222,6 @@ const ResultsTab = memo(function ResultsTab({
               onClick={onMapClick}
               poiCount={poiCount}
             />
-            <div className="poi-type-legend">
-              <div className="poi-type-legend-title">POI Types</div>
-              <div className="poi-type-legend-items">
-                <span className="poi-type-legend-item"><span className="poi-type-icon destination">D</span> Destination</span>
-                <span className="poi-type-legend-item"><span className="poi-type-icon trail">T</span> Trail</span>
-                <span className="poi-type-legend-item"><span className="poi-type-icon river">R</span> River</span>
-                <span className="poi-type-legend-item"><span className="poi-type-icon boundary">B</span> Boundary</span>
-                <span className="poi-type-legend-item"><span className="poi-type-icon virtual">O</span> Organization</span>
-              </div>
-            </div>
           </div>
         )}
       </div>

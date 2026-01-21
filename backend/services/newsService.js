@@ -8,9 +8,164 @@
 
 import { generateTextWithCustomPrompt, createGeminiClient } from './geminiService.js';
 import { pushNewsToSheets, pushEventsToSheets } from './sheetsSync.js';
+import { renderJavaScriptPage, isJavaScriptHeavySite, extractEventContent } from './jsRenderer.js';
 
 // Concurrency for parallel processing (requires paid tier Gemini API)
 const CONCURRENCY = 15;
+
+// In-memory progress tracking for active collections
+const collectionProgress = new Map();
+
+/**
+ * Update collection progress for a POI
+ */
+export function updateProgress(poiId, updates) {
+  const current = collectionProgress.get(poiId) || {
+    phase: 'starting',
+    message: 'Initializing...',
+    newsFound: 0,
+    eventsFound: 0,
+    startTime: Date.now(),
+    steps: [],
+    phaseHistory: []
+  };
+
+  // Track phase transitions - add previous phase to history when phase changes
+  if (updates.phase && updates.phase !== current.phase && current.phase !== 'starting') {
+    const phaseHistory = [...(current.phaseHistory || [])];
+    if (!phaseHistory.includes(current.phase)) {
+      phaseHistory.push(current.phase);
+    }
+    updates.phaseHistory = phaseHistory;
+  }
+
+  const updated = { ...current, ...updates, lastUpdate: Date.now() };
+  collectionProgress.set(poiId, updated);
+  return updated;
+}
+
+/**
+ * Get collection progress for a POI
+ */
+export function getCollectionProgress(poiId) {
+  return collectionProgress.get(poiId) || null;
+}
+
+/**
+ * Clear collection progress for a POI
+ */
+function clearProgress(poiId) {
+  collectionProgress.delete(poiId);
+}
+
+/**
+ * Calculate simple string similarity (0-1) using word overlap
+ * @param {string} str1 - First string
+ * @param {string} str2 - Second string
+ * @returns {number} - Similarity score 0-1
+ */
+function calculateSimilarity(str1, str2) {
+  if (!str1 || !str2) return 0;
+
+  const normalize = (str) => str.toLowerCase().replace(/[^\w\s]/g, '').trim();
+  const s1 = normalize(str1);
+  const s2 = normalize(str2);
+
+  if (s1 === s2) return 1;
+
+  const words1 = new Set(s1.split(/\s+/));
+  const words2 = new Set(s2.split(/\s+/));
+
+  const intersection = new Set([...words1].filter(x => words2.has(x)));
+  const union = new Set([...words1, ...words2]);
+
+  return union.size > 0 ? intersection.size / union.size : 0;
+}
+
+/**
+ * Match an event or news item to extracted links from the page
+ * @param {Object} item - Event or news item with title, description, start_date/published_date
+ * @param {Array} links - Array of link objects from jsRenderer
+ * @param {string} type - 'event' or 'news'
+ * @returns {string|null} - Matched URL or null
+ */
+function matchItemToLink(item, links, type = 'event') {
+  if (!links || links.length === 0) return null;
+  if (!item.title) return null;
+
+  let bestMatch = null;
+  let bestScore = 0;
+  const THRESHOLD = 2.0; // Minimum similarity to consider a match (increased to filter poor matches)
+
+  // Debug: log first attempt for this item
+  let isFirstLog = true;
+
+  for (const link of links) {
+    let score = 0;
+
+    // 1. Check title similarity to link text
+    const titleToLinkText = calculateSimilarity(item.title, link.text);
+    score += titleToLinkText * 3; // Title match is most important
+
+    // 2. Check if title appears in link context
+    const titleInContext = calculateSimilarity(item.title, link.context);
+    score += titleInContext * 2;
+
+    // 3. Check description similarity to context (if available)
+    if (item.description) {
+      const descInContext = calculateSimilarity(item.description, link.context);
+      score += descInContext;
+    }
+
+    if (item.summary) {
+      const summaryInContext = calculateSimilarity(item.summary, link.context);
+      score += summaryInContext;
+    }
+
+    // 4. Check for date in link text/context (for events)
+    if (type === 'event' && item.start_date) {
+      const dateStr = item.start_date;
+      const dateFormats = [
+        dateStr, // YYYY-MM-DD
+        new Date(dateStr).toLocaleDateString('en-US'), // M/D/YYYY
+        new Date(dateStr).toLocaleDateString('en-US', { month: 'long', day: 'numeric' }) // Month Day
+      ];
+
+      if (dateFormats.some(df => link.text.includes(df) || link.context.includes(df))) {
+        score += 1;
+      }
+    }
+
+    // 5. Bonus for event/news keywords in className
+    if (type === 'event' && (link.className.includes('event') || link.parentClassName.includes('event'))) {
+      score += 0.5;
+    }
+    if (type === 'news' && (link.className.includes('news') || link.className.includes('article') ||
+                             link.parentClassName.includes('news') || link.parentClassName.includes('article'))) {
+      score += 0.5;
+    }
+
+    // Debug: log the best scoring link for first item
+    if (isFirstLog && score > 0.5) {
+      console.log(`[Link Matcher DEBUG] Item: "${item.title.substring(0, 50)}..."`);
+      console.log(`[Link Matcher DEBUG] Link text: "${link.text.substring(0, 50)}..." | Score: ${score.toFixed(2)} (threshold: ${THRESHOLD})`);
+      isFirstLog = false;
+    }
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestMatch = link.url;
+    }
+  }
+
+  if (bestMatch && bestScore >= THRESHOLD) {
+    console.log(`[Link Matcher] ✓ Matched "${item.title}" to ${bestMatch} (score: ${bestScore.toFixed(2)})`);
+    return bestMatch;
+  } else {
+    console.log(`[Link Matcher] ✗ No match for "${item.title}" (best score: ${bestScore.toFixed(2)}, threshold: ${THRESHOLD})`);
+    return null;
+  }
+}
 
 /**
  * Ensure the news_job_status table has checkpoint columns for resumability
@@ -59,6 +214,14 @@ export async function findIncompleteJobs(pool) {
 // Prompt template for news collection
 const NEWS_COLLECTION_PROMPT = `You are a precise news researcher for Cuyahoga Valley National Park and surrounding areas in Northeast Ohio.
 
+TIMEZONE CONTEXT:
+- The current timezone is: {{timezone}}
+- When you see dates in articles, news, or events, interpret them as being in {{timezone}}
+- Return ALL dates in ISO 8601 format: YYYY-MM-DD
+- CRITICAL: Copy dates EXACTLY as they appear on the source. Do NOT add or subtract days.
+- Example: If you see "October 9, 2024" in an article, return "2024-10-09" (not 2024-10-08 or 2024-10-10)
+- Example: If you see "January 30" in 2026, return "2026-01-30" (not 2026-01-29 or 2026-01-31)
+
 Search for recent news and upcoming events SPECIFICALLY about: "{{name}}"
 Location type: {{poi_type}}
 
@@ -79,11 +242,82 @@ CRITICAL REQUIREMENTS - BE EXTREMELY STRICT:
 - Do NOT include news about similarly-named places in other locations
 - Do NOT include news about the general Cuyahoga Valley area unless it specifically names "{{name}}"
 
+OFFICIAL WEBSITE:
+{{website}}
+
+DEDICATED EVENT PAGE:
+{{eventsUrl}}
+
+DEDICATED NEWS PAGE:
+{{newsUrl}}
+
 Search for:
 1. Recent news articles (last 30 days) that specifically mention "{{name}}"
 2. Upcoming events happening AT "{{name}}" specifically
 3. Closures, road work, or maintenance specifically affecting "{{name}}"
 4. Trail conditions, seasonal updates, or access changes for "{{name}}"
+
+IMPORTANT - MULTI-STRATEGY EVENT & NEWS SEARCH:
+HIGHEST PRIORITY - Use Dedicated URLs if provided:
+- If a dedicated event page URL is provided above, START THERE FIRST
+- If a dedicated news page URL is provided above, START THERE FIRST
+- These are the most direct sources - prioritize them over general searches
+- Look for event listings, dates, descriptions on these specific pages
+- CRITICAL: Many sites use JavaScript frameworks (Wix, Squarespace, React) that don't show content in basic HTML
+- For JavaScript-heavy pages, you MUST use alternative search strategies below
+
+WARNING - JavaScript-Heavy Websites (Wix, Squarespace, React sites):
+- If the dedicated URL or official website appears to be JavaScript-rendered (minimal HTML content, lots of <script> tags)
+- DO NOT rely solely on that URL - it won't show events/news in search results
+- IMMEDIATELY pivot to alternative sources listed below
+- Signs of JavaScript-heavy sites: Wix.com, Squarespace, modern single-page apps
+- These sites require EXTERNAL sources to find their content
+
+MANDATORY ALTERNATIVE SEARCH STRATEGIES (use ALL of these, especially for JS-heavy sites):
+
+PRIMARY ALTERNATIVE - Social Media & Event Platforms (MOST RELIABLE for JS sites):
+- **Facebook Events** (BEST SOURCE): Search "{{name}} Facebook events" or "{{name}} Facebook page"
+  - Most organizations post all events on Facebook even if their website fails
+  - Search: "site:facebook.com {{name}} events 2026"
+  - Look for their official page and Events tab
+- **Eventbrite**: Search "{{name}} Eventbrite" or "site:eventbrite.com {{name}}"
+- **Meetup**: Search "{{name}} Meetup" or "site:meetup.com {{name}}"
+- **Instagram**: Many orgs announce events on Instagram - search "{{name}} Instagram"
+- **Google Business Profile**: Events often listed on Google Maps/Business listings
+
+SECONDARY ALTERNATIVE - Local Event Aggregators:
+- Cuyahoga Valley National Park calendar (might list partner events)
+- Regional tourism sites: visitakron.com, destinationcleveland.com
+- Local news event calendars: Cleveland.com events, Akron Beacon Journal events
+- Chamber of Commerce event listings
+- Trail and outdoor recreation event calendars
+
+TERTIARY ALTERNATIVE - Web Search Queries (cast a wide net):
+- "{{name}} events 2026" (general web search)
+- "{{name}} upcoming programs 2026"
+- "{{name}} adventures 2026" OR "{{name}} activities 2026"
+- "things to do at {{name}}" OR "visit {{name}}"
+- "{{name}} calendar" OR "{{name}} schedule"
+- Look for mentions in blog posts, news articles, press releases
+
+SEARCH THOROUGHNESS - BE AGGRESSIVE:
+- For JavaScript-heavy sites, assume the official website WON'T work
+- You MUST try ALL alternative sources above, not just one or two
+- Organizations often post events ONLY on Facebook/social media, not their website
+- Cast a wide net - search multiple platforms and sources
+- Cross-reference: if you find an event on Facebook, check if it's also on Eventbrite
+- Be especially thorough for small organizations - they may have rich calendars on social platforms
+- Don't give up if the official site fails - that's where alternative sources become critical
+
+ACTIVITY-BASED EVENT TYPE GUIDANCE:
+The primary activities at this location are: {{activities}}
+Use these activities to prioritize event types:
+- If activities include "Music" or "Concert": prioritize looking for concert events
+- If activities include "Hiking" or "Walking": prioritize guided-tour and educational events
+- If activities include "History" or "Historical": prioritize educational and program events
+- If activities include "Volunteer": prioritize volunteer events
+- If activities include "Festival" or "Events": prioritize festival events
+When categorizing events, match the event type to the most relevant activity.
 
 Return a JSON object with this exact structure:
 {
@@ -93,7 +327,7 @@ Return a JSON object with this exact structure:
       "summary": "2-3 sentence summary - must explain how this relates to {{name}} specifically",
       "source_name": "Source name (e.g., NPS.gov, Cleveland.com)",
       "source_url": "URL if available, or null",
-      "published_date": "YYYY-MM-DD or null if unknown",
+      "published_date": "YYYY-MM-DD in ISO 8601 format, or null if unknown",
       "news_type": "general|closure|seasonal|maintenance|wildlife"
     }
   ],
@@ -101,9 +335,9 @@ Return a JSON object with this exact structure:
     {
       "title": "Event name",
       "description": "Brief description - must specify this event is at {{name}}",
-      "start_date": "YYYY-MM-DD",
-      "end_date": "YYYY-MM-DD or null if single day",
-      "event_type": "guided-tour|program|festival|volunteer|educational",
+      "start_date": "YYYY-MM-DD in ISO 8601 format",
+      "end_date": "YYYY-MM-DD in ISO 8601 format, or null if single day",
+      "event_type": "guided-tour|program|festival|volunteer|educational|concert",
       "location_details": "Must be at or near {{name}} specifically",
       "source_url": "Registration or info URL if available"
     }
@@ -115,41 +349,505 @@ IMPORTANT:
 - It is better to return empty arrays than to include false positives
 - If no news or events found specifically for "{{name}}", return: {"news": [], "events": []}
 - Include the exact JSON structure above, no additional text
-- Dates must be in YYYY-MM-DD format
-- NEWS must be from the last 60 days only - do NOT include old news
+- All dates must be in ISO 8601 format (YYYY-MM-DD), interpreted in {{timezone}}
+- NEWS should be from the last 365 days only - do NOT include older news
 - EVENTS must be upcoming (future dates) or currently happening - do NOT include past events`;
 
 /**
  * Collect news and events for a specific POI
  * @param {Pool} pool - Database connection pool
- * @param {Object} poi - POI object with id, name, poi_type
+ * @param {Object} poi - POI object with id, name, poi_type, primary_activities, more_info_link, events_url, news_url
  * @param {Object} sheets - Optional sheets client for API key restore
+ * @param {string} timezone - IANA timezone string (e.g., 'America/New_York')
+ * @param {string} collectionType - 'news', 'events', or 'both' to indicate what's being collected
  * @returns {Object} - { news: [], events: [] }
  */
-export async function collectNewsForPoi(pool, poi, sheets = null) {
-  const prompt = NEWS_COLLECTION_PROMPT
+export async function collectNewsForPoi(pool, poi, sheets = null, timezone = 'America/New_York', collectionType = 'both') {
+  console.log(`[AI Research] Collection type: ${collectionType}`);
+  const activities = poi.primary_activities || 'None specified';
+  const website = poi.more_info_link || 'No website available';
+  const eventsUrl = poi.events_url || 'No dedicated events page';
+  const newsUrl = poi.news_url || 'No dedicated news page';
+
+  // Clear any old progress data for this POI before starting
+  collectionProgress.delete(poi.id);
+
+  // Initialize progress tracking with fresh data
+  const typeLabel = collectionType === 'news' ? 'news' : collectionType === 'events' ? 'events' : 'news & events';
+  updateProgress(poi.id, {
+    phase: 'initializing',
+    message: `Starting ${typeLabel} search for ${poi.name}...`,
+    newsFound: 0,
+    eventsFound: 0,
+    newsSaved: undefined,
+    eventsSaved: undefined,
+    newsDuplicate: undefined,
+    eventsDuplicate: undefined,
+    steps: ['Initialized'],
+    collectionType,
+    startTime: Date.now(),
+    phaseHistory: [],
+    completed: false
+  });
+
+  console.log(`[AI Research] Starting search for: ${poi.name}`);
+  console.log(`[AI Research]   - Website: ${website}`);
+  console.log(`[AI Research]   - Events URL: ${eventsUrl}`);
+  console.log(`[AI Research]   - News URL: ${newsUrl}`);
+  console.log(`[AI Research]   - Activities: ${activities}`);
+
+  // Check if we need to render JavaScript-heavy pages
+  let renderedEventsContent = '';
+  let renderedNewsContent = '';
+  let usedDedicatedNewsUrl = false;
+  let eventsLinks = [];
+  let newsLinks = [];
+
+  // Only render events page if we're collecting events
+  if (collectionType !== 'news' && await isJavaScriptHeavySite(eventsUrl)) {
+    console.log(`[AI Research] Rendering events page (collectionType: ${collectionType})`);
+    updateProgress(poi.id, {
+      phase: 'rendering_events',
+      message: 'Rendering JavaScript-heavy Events page with browser...',
+      steps: ['Initialized', 'Rendering events page']
+    });
+
+    console.log(`[AI Research] 🌐 Detected JS-heavy events page, rendering with Playwright...`);
+    const rendered = await renderJavaScriptPage(eventsUrl, {
+      waitTime: 4000,
+      timeout: 20000
+    });
+
+    if (rendered.success) {
+      // Use full rendered text, not just extracted keywords
+      // This ensures we don't filter out important event details
+      renderedEventsContent = rendered.text.substring(0, 15000); // Increased limit
+      eventsLinks = rendered.links || []; // Store extracted links
+      console.log(`[AI Research] ✓ Rendered events page: ${renderedEventsContent.length} chars (from ${rendered.text.length} total)`);
+
+      updateProgress(poi.id, {
+        message: `Rendered events page (${eventsLinks.length} links found)`,
+        steps: ['Initialized', 'Rendered events page']
+      });
+    } else {
+      console.log(`[AI Research] ❌ Failed to render events page: ${rendered.error}`);
+    }
+  }
+
+  // Only render news page if we're collecting news
+  if (collectionType !== 'events' && await isJavaScriptHeavySite(newsUrl)) {
+    console.log(`[AI Research] Rendering news page (collectionType: ${collectionType})`);
+    updateProgress(poi.id, {
+      phase: 'rendering_news',
+      message: 'Rendering JavaScript-heavy News page with browser...',
+      steps: ['Initialized', 'Rendering news page']
+    });
+
+    console.log(`[AI Research] 🌐 Detected JS-heavy news page, rendering with Playwright...`);
+    const rendered = await renderJavaScriptPage(newsUrl, {
+      waitTime: 4000,
+      timeout: 20000
+    });
+
+    if (rendered.success) {
+      // Use full rendered text for news as well
+      renderedNewsContent = rendered.text.substring(0, 15000); // Increased limit
+      newsLinks = rendered.links || []; // Store extracted links
+      usedDedicatedNewsUrl = true; // Mark that we used dedicated news URL
+      console.log(`[AI Research] ✓ Rendered news page: ${renderedNewsContent.length} chars (from ${rendered.text.length} total)`);
+
+      updateProgress(poi.id, {
+        message: `Rendered news page (${newsLinks.length} links found)`,
+        steps: ['Initialized', 'Rendered news page']
+      });
+    } else {
+      console.log(`[AI Research] ❌ Failed to render news page: ${rendered.error}`);
+    }
+  }
+
+  // Build prompt with rendered content if available
+  let prompt = NEWS_COLLECTION_PROMPT
+    .replace(/\{\{timezone\}\}/g, timezone)
     .replace('{{name}}', poi.name)
-    .replace('{{poi_type}}', poi.poi_type);
+    .replace('{{poi_type}}', poi.poi_type)
+    .replace('{{activities}}', activities)
+    .replace('{{website}}', website)
+    .replace('{{eventsUrl}}', eventsUrl)
+    .replace('{{newsUrl}}', newsUrl);
+
+  // Add rendered content to prompt if we have it
+  if (renderedEventsContent) {
+    prompt += `\n\nRENDERED EVENTS PAGE CONTENT:\nWe rendered the JavaScript-heavy events page and extracted this content:\n\n${renderedEventsContent}\n\n**SPECIAL INSTRUCTIONS FOR RENDERED EVENTS PAGE:**
+Since this content comes directly from the organization's dedicated events page, use RELAXED requirements:
+- You only need 75% confidence (not 95%) that an event is relevant
+- Events listed on this official page can be assumed to be associated with "${poi.name}" even if the name isn't explicitly mentioned in every listing
+- Include ALL events that appear to be listed on this page, as long as they're reasonably related to the organization
+- Still exclude past events - only include upcoming/current events
+- Still require proper date formatting (YYYY-MM-DD) - interpret all dates in ${timezone} timezone
+
+Extract ALL events from this rendered content using these relaxed criteria.`;
+  }
+
+  if (renderedNewsContent) {
+    prompt += `\n\nRENDERED NEWS PAGE CONTENT:\nWe rendered the JavaScript-heavy news page and extracted this content:\n\n${renderedNewsContent}\n\n**SPECIAL INSTRUCTIONS FOR RENDERED NEWS PAGE:**
+Since this content comes directly from the organization's dedicated news page, use RELAXED requirements:
+- You only need 75% confidence (not 95%) that a news item is relevant
+- News items on this official page can be assumed to be associated with "${poi.name}" even if not explicitly mentioned
+- Include ALL news items from this page, regardless of age (don't apply the 365-day filter)
+- **IMPORTANT FOR DATES**: Try hard to extract dates from news titles and content:
+  - Look for month names, dates, or year references in the title (e.g., "April 2025 Newsletter", "July Newsletter", "May 9", "October 9")
+  - If the title has a month name, try to infer the year (use current year 2026 if recent, or 2025 if it seems past)
+  - If you find a partial date like "May 9" or "October Newsletter", estimate the full date in ISO 8601 format (YYYY-MM-DD)
+  - Remember: interpret all dates in ${timezone} timezone
+  - Only use "published_date": null if absolutely no date information can be extracted
+- Prefer to include items even if dates are uncertain
+
+Extract ALL news from this rendered content using these relaxed criteria.`;
+  }
 
   try {
+    updateProgress(poi.id, {
+      phase: 'ai_search',
+      message: 'Searching with AI (Google Search grounding)...',
+      steps: ['Initialized', 'Rendered pages', 'Searching with AI']
+    });
+
+    console.log(`[AI Research] Sending prompt to Gemini (${prompt.length} chars)...`);
     const response = await generateTextWithCustomPrompt(pool, prompt, sheets);
+    console.log(`[AI Research] Received response (${response.length} chars)`);
 
     // Parse JSON response
     const jsonMatch = response.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      console.log(`No JSON found in response for ${poi.name}`);
+      console.log(`[AI Research] ❌ No JSON found in response for ${poi.name}`);
+      console.log(`[AI Research] Raw response preview: ${response.substring(0, 500)}...`);
       return { news: [], events: [] };
     }
 
     const result = JSON.parse(jsonMatch[0]);
+    console.log(`[AI Research] ✓ Found ${result.news?.length || 0} news, ${result.events?.length || 0} events for ${poi.name}`);
+
+    // Date correction removed - now using timezone-aware AI prompt with explicit ISO 8601 format
+    console.log(`[AI Research] Using timezone: ${timezone} for date interpretation`);
+
+    // Update progress with counts based on collection type
+    let processingMessage;
+    let processingUpdate = {
+      phase: 'processing_results',
+      steps: ['Initialized', 'Rendered pages', 'AI search complete']
+    };
+
+    if (collectionType === 'news') {
+      processingMessage = `Found ${result.news?.length || 0} news`;
+      processingUpdate.newsFound = result.news?.length || 0;
+      processingUpdate.eventsFound = 0;
+    } else if (collectionType === 'events') {
+      processingMessage = `Found ${result.events?.length || 0} events`;
+      processingUpdate.eventsFound = result.events?.length || 0;
+      processingUpdate.newsFound = 0;
+    } else {
+      processingMessage = `Found ${result.news?.length || 0} news, ${result.events?.length || 0} events`;
+      processingUpdate.newsFound = result.news?.length || 0;
+      processingUpdate.eventsFound = result.events?.length || 0;
+    }
+
+    processingUpdate.message = processingMessage;
+    updateProgress(poi.id, processingUpdate);
+
+    if (result.events && result.events.length > 0) {
+      console.log(`[AI Research] Events found:`);
+      result.events.forEach((event, idx) => {
+        console.log(`[AI Research]   ${idx + 1}. ${event.title} (${event.start_date})`);
+        console.log(`[AI Research]      Source: ${event.source_url || 'N/A'}`);
+      });
+    }
+
+    if (result.news && result.news.length > 0) {
+      console.log(`[AI Research] News found:`);
+      result.news.forEach((item, idx) => {
+        console.log(`[AI Research]   ${idx + 1}. ${item.title} (${item.published_date})`);
+      });
+    }
+
+    // Match events/news to extracted links for deep linking
+    // Only override source_url if it's missing/null (don't override URLs from Google Search)
+    console.log(`[Link Matcher] Checking conditions - events: ${result.events?.length || 0}, eventsLinks: ${eventsLinks.length}`);
+    if (result.events && result.events.length > 0 && eventsLinks.length > 0) {
+      updateProgress(poi.id, {
+        phase: 'matching_links',
+        message: `Matching ${result.events.length} events to deep links...`,
+        steps: ['Initialized', 'Rendered pages', 'AI search complete', 'Matching deep links']
+      });
+
+      console.log(`[Link Matcher] Attempting to match ${result.events.length} events to ${eventsLinks.length} links...`);
+      let matchCount = 0;
+      let overrideCount = 0;
+      result.events.forEach(event => {
+        // Override if no URL, or if URL is just an index/list page (ends with / or /news or /events)
+        const hasIndexUrl = event.source_url && (
+          event.source_url.endsWith('/news/') ||
+          event.source_url.endsWith('/news') ||
+          event.source_url.endsWith('/events/') ||
+          event.source_url.endsWith('/events') ||
+          event.source_url === eventsUrl  // Exactly matches the events page URL
+        );
+
+        if (!event.source_url || event.source_url === 'N/A' || hasIndexUrl) {
+          if (hasIndexUrl) {
+            console.log(`[Link Matcher] Overriding index URL for "${event.title.substring(0, 40)}..."`);
+            overrideCount++;
+          }
+          const matchedUrl = matchItemToLink(event, eventsLinks, 'event');
+          if (matchedUrl) {
+            event.source_url = matchedUrl;
+            matchCount++;
+          }
+        }
+      });
+      console.log(`[Link Matcher] Matched ${matchCount} events to deep links (${overrideCount} index URLs overridden)`);
+    } else {
+      console.log(`[Link Matcher] Skipping event link matching - conditions not met`);
+    }
+
+    console.log(`[Link Matcher] Checking conditions - news: ${result.news?.length || 0}, newsLinks: ${newsLinks.length}`);
+    if (result.news && result.news.length > 0 && newsLinks.length > 0) {
+      updateProgress(poi.id, {
+        phase: 'matching_links',
+        message: `Matching ${result.news.length} news items to deep links...`,
+        steps: ['Initialized', 'Rendered pages', 'AI search complete', 'Matching deep links']
+      });
+
+      console.log(`[Link Matcher] Attempting to match ${result.news.length} news items to ${newsLinks.length} links...`);
+      let matchCount = 0;
+      let overrideCount = 0;
+      result.news.forEach(newsItem => {
+        // Override if no URL, or if URL is just an index/list page (ends with / or /news or /events)
+        const hasIndexUrl = newsItem.source_url && (
+          newsItem.source_url.endsWith('/news/') ||
+          newsItem.source_url.endsWith('/news') ||
+          newsItem.source_url.endsWith('/events/') ||
+          newsItem.source_url.endsWith('/events') ||
+          newsItem.source_url === newsUrl  // Exactly matches the news page URL
+        );
+
+        if (!newsItem.source_url || newsItem.source_url === 'N/A' || hasIndexUrl) {
+          if (hasIndexUrl) {
+            console.log(`[Link Matcher] Overriding index URL for "${newsItem.title.substring(0, 40)}..."`);
+            overrideCount++;
+          }
+          const matchedUrl = matchItemToLink(newsItem, newsLinks, 'news');
+          if (matchedUrl) {
+            newsItem.source_url = matchedUrl;
+            matchCount++;
+          }
+        }
+      });
+      console.log(`[Link Matcher] Matched ${matchCount} news items to deep links (${overrideCount} index URLs overridden)`);
+    } else {
+      console.log(`[Link Matcher] Skipping news link matching - conditions not met`);
+    }
+
+    let allNews = result.news || [];
+
+    // SECOND PASS: If we used a dedicated news URL, also search Google News for external coverage
+    if (usedDedicatedNewsUrl) {
+      try {
+        updateProgress(poi.id, {
+          phase: 'google_news',
+          message: 'Searching Google News for external coverage...',
+          steps: ['Initialized', 'Rendered pages', 'AI search complete', 'Matching deep links', 'Searching Google News']
+        });
+
+        console.log(`[AI Research] 🔍 Second pass: Searching Google News for external coverage...`);
+
+        const googleNewsPrompt = `Search Google News, PR Newswire, and other news sources for press releases, news articles, and media coverage about "${poi.name}" from the last 365 days.
+
+TIMEZONE CONTEXT:
+- The current timezone is: ${timezone}
+- When you see dates in articles, interpret them as being in ${timezone}
+- Return ALL dates in ISO 8601 format: YYYY-MM-DD
+- CRITICAL: Copy dates EXACTLY as they appear. Do NOT add or subtract days.
+- Example: "August 26, 2024" → "2024-08-26" (not 2024-08-25 or 2024-08-27)
+
+Focus on:
+- Press releases from the organization
+- News articles from local/regional media
+- Industry publication coverage
+- Award announcements
+- Major initiatives or programs
+
+Return ONLY news from external sources (not from ${poi.name}'s own website).
+
+Use this exact JSON structure:
+{
+  "news": [
+    {
+      "title": "News headline",
+      "summary": "2-3 sentence summary",
+      "source_name": "Source name (e.g., PR Newswire, Cleveland.com)",
+      "source_url": "URL from Google Search results",
+      "published_date": "YYYY-MM-DD in ISO 8601 format",
+      "news_type": "general|closure|seasonal|maintenance|wildlife"
+    }
+  ]
+}
+
+IMPORTANT:
+- Only include news from the last 365 days
+- Only include items that are 95%+ certain to be about "${poi.name}"
+- Include the source_url from the Google Search result
+- Return {"news": []} if no relevant external news found
+- All dates must be in ISO 8601 format (YYYY-MM-DD)`;
+
+        const googleNewsResponse = await generateTextWithCustomPrompt(pool, googleNewsPrompt, sheets);
+        console.log(`[AI Research] Received Google News response (${googleNewsResponse.length} chars)`);
+
+        const googleJsonMatch = googleNewsResponse.match(/\{[\s\S]*\}/);
+        if (googleJsonMatch) {
+          const googleResult = JSON.parse(googleJsonMatch[0]);
+          const googleNews = googleResult.news || [];
+
+          if (googleNews.length > 0) {
+            console.log(`[AI Research] ✓ Found ${googleNews.length} news items from Google News`);
+            googleNews.forEach((item, idx) => {
+              console.log(`[AI Research]   ${idx + 1}. ${item.title} (${item.published_date}) - ${item.source_name}`);
+            });
+
+            // Merge with existing news, avoiding duplicates by title
+            const existingTitles = new Set(allNews.map(n => n.title.toLowerCase().trim()));
+            const newItems = googleNews.filter(item => {
+              const titleLower = item.title.toLowerCase().trim();
+              return !existingTitles.has(titleLower);
+            });
+
+            if (newItems.length > 0) {
+              console.log(`[AI Research] Adding ${newItems.length} unique items from Google News`);
+              allNews = [...allNews, ...newItems];
+            } else {
+              console.log(`[AI Research] All Google News items were duplicates, skipped`);
+            }
+          } else {
+            console.log(`[AI Research] No external news found in Google News`);
+          }
+        }
+      } catch (googleError) {
+        console.error(`[AI Research] ⚠️ Google News search failed: ${googleError.message}`);
+        // Continue with first pass results even if second pass fails
+      }
+    }
+
+    // Build completion message and stats based on collection type
+    let completionMessage;
+    let progressUpdate = {
+      phase: 'complete',
+      steps: ['Initialized', 'Rendered pages', 'AI search complete', 'Deep links matched', 'Complete'],
+      completed: true
+    };
+
+    if (collectionType === 'news') {
+      completionMessage = `Complete! Found ${allNews.length} news`;
+      progressUpdate.newsFound = allNews.length;
+      progressUpdate.eventsFound = 0; // Don't show events when collecting news
+    } else if (collectionType === 'events') {
+      completionMessage = `Complete! Found ${result.events?.length || 0} events`;
+      progressUpdate.eventsFound = result.events?.length || 0;
+      progressUpdate.newsFound = 0; // Don't show news when collecting events
+    } else {
+      completionMessage = `Complete! Found ${allNews.length} news, ${result.events?.length || 0} events`;
+      progressUpdate.newsFound = allNews.length;
+      progressUpdate.eventsFound = result.events?.length || 0;
+    }
+
+    progressUpdate.message = completionMessage;
+    updateProgress(poi.id, progressUpdate);
+
+    // Keep progress available - frontend will clear it when appropriate
+    // Don't auto-clear - let the UI control when it goes away
+
     return {
-      news: result.news || [],
-      events: result.events || []
+      news: allNews,
+      events: result.events || [],
+      metadata: {
+        usedDedicatedNewsUrl
+      }
     };
   } catch (error) {
-    console.error(`Error collecting news for ${poi.name}:`, error.message);
-    return { news: [], events: [] };
+    console.error(`[AI Research] ❌ Error collecting news for ${poi.name}:`, error.message);
+
+    updateProgress(poi.id, {
+      phase: 'error',
+      message: `Error: ${error.message}`,
+      steps: ['Error occurred'],
+      completed: true,
+      error: error.message
+    });
+
+    // Keep error visible - frontend will clear it when appropriate
+
+    return { news: [], events: [], metadata: { usedDedicatedNewsUrl: false } };
   }
+}
+
+/**
+ * Resolve redirect URLs to their final destination
+ * Handles Google/Vertex AI Search grounding redirect URLs
+ * @param {string} url - URL that might be a redirect
+ * @returns {Promise<string>} - Final destination URL or original if resolution fails
+ */
+async function resolveRedirectUrl(url) {
+  if (!url || url === 'N/A') return null;
+
+  // Check if this is a known redirect URL pattern
+  const isRedirect = url.includes('grounding-api-redirect') ||
+                     url.includes('redirect') ||
+                     url.includes('vertexaisearch.cloud.google.com');
+
+  if (!isRedirect) {
+    return url; // Not a redirect, return direct URL as-is
+  }
+
+  try {
+    // Follow redirects to get the final URL
+    const response = await fetch(url, {
+      method: 'HEAD',
+      redirect: 'follow',
+      signal: AbortSignal.timeout(5000) // 5 second timeout
+    });
+
+    const finalUrl = response.url;
+
+    if (finalUrl && finalUrl !== url) {
+      console.log(`[URL Resolver] ✓ Resolved: ${url.substring(0, 50)}... → ${finalUrl}`);
+      return finalUrl;
+    }
+
+    // If we got back the same URL, it's not redirecting properly
+    console.log(`[URL Resolver] ✗ No redirect found for: ${url.substring(0, 60)}...`);
+    return null; // Don't save broken redirects
+  } catch (error) {
+    console.log(`[URL Resolver] ✗ Failed to resolve: ${url.substring(0, 50)}... (${error.message})`);
+    return null; // Don't save broken redirects
+  }
+}
+
+/**
+ * Normalize a news title for duplicate detection
+ * Strips date suffixes like "| January 30" or "| 2026-01-30"
+ * @param {string} title - Original title
+ * @returns {string} - Normalized title
+ */
+function normalizeNewsTitle(title) {
+  if (!title) return '';
+
+  // Remove date suffixes in format "| Month Day" or "| YYYY-MM-DD" or "| Month DD, YYYY"
+  // Examples:
+  // "Article Title | January 30" -> "Article Title"
+  // "Article Title | 2026-01-30" -> "Article Title"
+  // "Article Title | May 9" -> "Article Title"
+  return title
+    .replace(/\s*\|\s*\d{4}-\d{2}-\d{2}\s*$/i, '')  // Remove "| 2026-01-30"
+    .replace(/\s*\|\s*[A-Z][a-z]+\s+\d{1,2}(?:,\s*\d{4})?\s*$/i, '')  // Remove "| January 30" or "| May 9, 2025"
+    .trim();
 }
 
 /**
@@ -157,33 +855,72 @@ export async function collectNewsForPoi(pool, poi, sheets = null) {
  * @param {Pool} pool - Database connection pool
  * @param {number} poiId - POI ID
  * @param {Array} newsItems - Array of news items from Gemini
+ * @param {Object} options - Optional settings
+ * @param {boolean} options.skipDateFilter - If true, allow news items older than 365 days
  */
-export async function saveNewsItems(pool, poiId, newsItems) {
+export async function saveNewsItems(pool, poiId, newsItems, options = {}) {
   let savedCount = 0;
-  const sixtyDaysAgo = new Date();
-  sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
+  let duplicateCount = 0;
+  const { skipDateFilter = false } = options;
+
+  // Calculate 365 days ago as a date string (YYYY-MM-DD) to avoid timezone issues
+  const today = new Date();
+  const oneYearAgo = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 365);
+  const oneYearAgoStr = `${oneYearAgo.getFullYear()}-${String(oneYearAgo.getMonth() + 1).padStart(2, '0')}-${String(oneYearAgo.getDate()).padStart(2, '0')}`;
 
   for (const item of newsItems) {
     try {
-      // Skip news older than 60 days
-      if (item.published_date) {
-        const publishedDate = new Date(item.published_date);
-        if (publishedDate < sixtyDaysAgo) {
+      // Skip news older than 365 days (unless skipDateFilter is true)
+      // Use string comparison to avoid timezone conversion issues
+      if (!skipDateFilter && item.published_date && /^\d{4}-\d{2}-\d{2}$/.test(item.published_date)) {
+        if (item.published_date < oneYearAgoStr) {
           console.log(`Skipping old news item: ${item.title} (${item.published_date})`);
           continue;
         }
       }
 
-      // Check if similar news already exists (by title similarity)
+      // Resolve redirect URLs to final destination URLs
+      const resolvedUrl = item.source_url ? await resolveRedirectUrl(item.source_url) : null;
+
+      // Skip items where redirect resolution failed
+      // We keep items with no URL (null), but skip items where we tried to resolve a redirect and failed
+      const isRedirectUrl = item.source_url && (
+        item.source_url.includes('grounding-api-redirect') ||
+        item.source_url.includes('vertexaisearch.cloud.google.com')
+      );
+
+      if (isRedirectUrl && !resolvedUrl) {
+        console.log(`Skipping news item with failed URL resolution: "${item.title}"`);
+        continue;
+      }
+
+      // Normalize the title for duplicate checking
+      const normalizedTitle = normalizeNewsTitle(item.title);
+
+      // Check if duplicate exists using BOTH URL and normalized title
+      // This catches:
+      // 1. Exact URL matches (same article from rendered page)
+      // 2. Resolved URL matches (same article from Google Search after redirect resolution)
+      // 3. Title variants like "Article | January 30" vs "Article | 2026-01-30"
       const existing = await pool.query(
-        `SELECT id FROM poi_news WHERE poi_id = $1 AND title = $2`,
-        [poiId, item.title]
+        `SELECT id, title, source_url FROM poi_news
+         WHERE poi_id = $1
+         AND (
+           ($2::text IS NOT NULL AND source_url = $2::text)
+           OR title = $3
+           OR REGEXP_REPLACE(title, '\\s*\\|\\s*(\\d{4}-\\d{2}-\\d{2}|[A-Z][a-z]+\\s+\\d{1,2}(,\\s*\\d{4})?)\\s*$', '', 'i') = $4
+         )`,
+        [poiId, resolvedUrl, item.title, normalizedTitle]
       );
 
       if (existing.rows.length > 0) {
+        duplicateCount++;
+        const reason = existing.rows[0].source_url === resolvedUrl ? 'same URL' : 'similar title';
+        console.log(`Skipping duplicate (${reason}): "${item.title}"`);
         continue; // Skip duplicate
       }
 
+      // Save the news item with the RESOLVED URL (not the redirect)
       await pool.query(`
         INSERT INTO poi_news (poi_id, title, summary, source_url, source_name, news_type, published_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -191,10 +928,10 @@ export async function saveNewsItems(pool, poiId, newsItems) {
         poiId,
         item.title,
         item.summary,
-        item.source_url,
+        resolvedUrl, // Use resolved URL, not the original redirect
         item.source_name,
         item.news_type || 'general',
-        item.published_date ? new Date(item.published_date) : null
+        item.published_date || null
       ]);
       savedCount++;
     } catch (error) {
@@ -213,31 +950,60 @@ export async function saveNewsItems(pool, poiId, newsItems) {
  */
 export async function saveEventItems(pool, poiId, eventItems) {
   let savedCount = 0;
+  let duplicateCount = 0;
+
+  // Get today's date as a string (YYYY-MM-DD) to avoid timezone issues
   const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
   for (const item of eventItems) {
     try {
-      // Skip past events
-      if (item.start_date) {
-        const startDate = new Date(item.start_date);
-        const endDate = item.end_date ? new Date(item.end_date) : startDate;
-        if (endDate < today) {
+      // Skip past events using string comparison to avoid timezone issues
+      if (item.start_date && /^\d{4}-\d{2}-\d{2}$/.test(item.start_date)) {
+        const endDateStr = item.end_date || item.start_date;
+        if (endDateStr < todayStr) {
           console.log(`Skipping past event: ${item.title} (${item.start_date})`);
           continue;
         }
       }
 
-      // Check if similar event already exists
+      // Resolve redirect URLs to final destination URLs
+      const resolvedUrl = item.source_url ? await resolveRedirectUrl(item.source_url) : null;
+
+      // Skip items where redirect resolution failed
+      const isRedirectUrl = item.source_url && (
+        item.source_url.includes('grounding-api-redirect') ||
+        item.source_url.includes('vertexaisearch.cloud.google.com')
+      );
+
+      if (isRedirectUrl && !resolvedUrl) {
+        console.log(`Skipping event with failed URL resolution: "${item.title}"`);
+        continue;
+      }
+
+      // Check if duplicate exists using BOTH URL and title+date
+      // This catches:
+      // 1. Exact URL matches (same event from rendered page)
+      // 2. Resolved URL matches (same event from Google Search after redirect resolution)
+      // 3. Same title + start_date (existing logic)
       const existing = await pool.query(
-        `SELECT id FROM poi_events WHERE poi_id = $1 AND title = $2 AND start_date = $3`,
-        [poiId, item.title, new Date(item.start_date)]
+        `SELECT id, title, source_url FROM poi_events
+         WHERE poi_id = $1
+         AND (
+           ($2::text IS NOT NULL AND source_url = $2::text)
+           OR (title = $3 AND start_date = $4)
+         )`,
+        [poiId, resolvedUrl, item.title, item.start_date]
       );
 
       if (existing.rows.length > 0) {
+        duplicateCount++;
+        const reason = existing.rows[0].source_url === resolvedUrl ? 'same URL' : 'same title+date';
+        console.log(`Skipping duplicate event (${reason}): "${item.title}"`);
         continue; // Skip duplicate
       }
 
+      // Save the event with the RESOLVED URL (not the redirect)
       await pool.query(`
         INSERT INTO poi_events (poi_id, title, description, start_date, end_date, event_type, location_details, source_url)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -245,11 +1011,11 @@ export async function saveEventItems(pool, poiId, eventItems) {
         poiId,
         item.title,
         item.description,
-        new Date(item.start_date),
-        item.end_date ? new Date(item.end_date) : null,
+        item.start_date,
+        item.end_date || null,
         item.event_type,
         item.location_details,
-        item.source_url
+        resolvedUrl // Use resolved URL, not the original redirect
       ]);
       savedCount++;
     } catch (error) {
@@ -266,9 +1032,10 @@ export async function saveEventItems(pool, poiId, eventItems) {
  * @param {Array} pois - Array of POI objects
  * @param {Object} sheets - Optional sheets client
  * @param {number} concurrency - Number of concurrent requests
+ * @param {string} timezone - IANA timezone string
  * @returns {Object} - { newsFound, eventsFound, processed }
  */
-async function processPoiBatch(pool, pois, sheets, concurrency = 3) {
+async function processPoiBatch(pool, pois, sheets, concurrency = 3, timezone = 'America/New_York') {
   let newsFound = 0;
   let eventsFound = 0;
   let processed = 0;
@@ -282,8 +1049,8 @@ async function processPoiBatch(pool, pois, sheets, concurrency = 3) {
       chunk.map(async (poi) => {
         try {
           console.log(`Collecting news for: ${poi.name}`);
-          const { news, events } = await collectNewsForPoi(pool, poi, sheets);
-          const savedNews = await saveNewsItems(pool, poi.id, news);
+          const { news, events, metadata } = await collectNewsForPoi(pool, poi, sheets, timezone);
+          const savedNews = await saveNewsItems(pool, poi.id, news, { skipDateFilter: metadata.usedDedicatedNewsUrl });
           const savedEvents = await saveEventItems(pool, poi.id, events);
           return { newsFound: savedNews, eventsFound: savedEvents, success: true };
         } catch (error) {
@@ -410,7 +1177,7 @@ export async function processNewsCollectionJob(pool, sheets, pgBossJobId, jobDat
 
   // Get POI details for remaining POIs
   const poisResult = await pool.query(
-    'SELECT id, name, poi_type FROM pois WHERE id = ANY($1)',
+    'SELECT id, name, poi_type, primary_activities, more_info_link, events_url, news_url FROM pois WHERE id = ANY($1)',
     [remainingPoiIds]
   );
   const pois = poisResult.rows;
@@ -421,6 +1188,9 @@ export async function processNewsCollectionJob(pool, sheets, pgBossJobId, jobDat
   let processed = processedPoiIds.length;
   const newlyProcessedIds = [...processedPoiIds];
 
+  // Track all results for summary
+  const allResults = [];
+
   try {
     // Process in batches with checkpointing
     for (let i = 0; i < pois.length; i += CONCURRENCY) {
@@ -430,13 +1200,15 @@ export async function processNewsCollectionJob(pool, sheets, pgBossJobId, jobDat
         chunk.map(async (poi) => {
           try {
             console.log(`[Job ${jobId}] Collecting news for: ${poi.name}`);
-            const { news, events } = await collectNewsForPoi(pool, poi, sheets);
-            const savedNews = await saveNewsItems(pool, poi.id, news);
+            // Use default timezone for batch jobs (could be enhanced to store timezone in job data)
+            const { news, events, metadata } = await collectNewsForPoi(pool, poi, sheets, 'America/New_York');
+            const savedNews = await saveNewsItems(pool, poi.id, news, { skipDateFilter: metadata.usedDedicatedNewsUrl });
             const savedEvents = await saveEventItems(pool, poi.id, events);
-            return { poiId: poi.id, newsFound: savedNews, eventsFound: savedEvents, success: true };
+            console.log(`[Job ${jobId}] ✓ ${poi.name}: saved ${savedNews} news, ${savedEvents} events`);
+            return { poiId: poi.id, poiName: poi.name, newsFound: savedNews, eventsFound: savedEvents, success: true };
           } catch (error) {
-            console.error(`[Job ${jobId}] Error processing POI ${poi.name}:`, error.message);
-            return { poiId: poi.id, newsFound: 0, eventsFound: 0, success: false };
+            console.error(`[Job ${jobId}] ❌ Error processing POI ${poi.name}:`, error.message);
+            return { poiId: poi.id, poiName: poi.name, newsFound: 0, eventsFound: 0, success: false };
           }
         })
       );
@@ -447,6 +1219,7 @@ export async function processNewsCollectionJob(pool, sheets, pgBossJobId, jobDat
         eventsFound += result.eventsFound;
         processed++;
         newlyProcessedIds.push(result.poiId);
+        allResults.push(result);
       }
 
       // Checkpoint: Update progress and processed POIs in database
@@ -471,6 +1244,24 @@ export async function processNewsCollectionJob(pool, sheets, pgBossJobId, jobDat
     `, [new Date(), jobId]);
 
     console.log(`[Job ${jobId}] Completed: ${processed} POIs, ${newsFound} news, ${eventsFound} events`);
+
+    // Log summary of results
+    const poisWithResults = allResults.filter(r => r.newsFound > 0 || r.eventsFound > 0);
+    const poisWithoutResults = allResults.filter(r => r.newsFound === 0 && r.eventsFound === 0);
+
+    if (poisWithResults.length > 0) {
+      console.log(`[Job ${jobId}] POIs with results (${poisWithResults.length}):`);
+      poisWithResults.forEach(r => {
+        console.log(`[Job ${jobId}]   - ${r.poiName}: ${r.newsFound} news, ${r.eventsFound} events`);
+      });
+    }
+
+    if (poisWithoutResults.length > 0) {
+      console.log(`[Job ${jobId}] POIs with no results (${poisWithoutResults.length}):`);
+      poisWithoutResults.forEach(r => {
+        console.log(`[Job ${jobId}]   - ${r.poiName}`);
+      });
+    }
 
     // Sync to Google Sheets if available
     if (sheets && (newsFound > 0 || eventsFound > 0)) {

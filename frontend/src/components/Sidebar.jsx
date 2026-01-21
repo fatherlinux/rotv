@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import ImageUploader from './ImageUploader';
 import NewsEvents from './NewsEvents';
+import CollectionStatus from './CollectionStatus';
 
 // Sidebar component with tabs: Info, News, Events, History
 // Share Modal Component
@@ -960,6 +961,26 @@ function EditView({ destination, editedData, setEditedData, onSave, onCancel, on
         />
       </div>
 
+      <div className="edit-section">
+        <label>Events Page URL (for AI Research)</label>
+        <input
+          type="text"
+          value={editedData.events_url || ''}
+          onChange={(e) => handleChange('events_url', e.target.value)}
+          placeholder="https://example.com/events or /adventures"
+        />
+      </div>
+
+      <div className="edit-section">
+        <label>News Page URL (for AI Research)</label>
+        <input
+          type="text"
+          value={editedData.news_url || ''}
+          onChange={(e) => handleChange('news_url', e.target.value)}
+          placeholder="https://example.com/news or /blog"
+        />
+      </div>
+
 
       </div>
 
@@ -1068,61 +1089,131 @@ function EditView({ destination, editedData, setEditedData, onSave, onCancel, on
 }
 
 // POI-specific News component
-function PoiNews({ poiId, isAdmin, editMode }) {
+function PoiNews({ poiId, isAdmin, editMode, onCountChange }) {
   const [news, setNews] = useState([]);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(null);
-  const [collecting, setCollecting] = useState(false);
+  const [collecting, setCollecting] = useState(() => {
+    // Check localStorage to see if collection was in progress
+    const stored = localStorage.getItem(`news-collecting-${poiId}`);
+    return stored === 'true';
+  });
   const [collectResult, setCollectResult] = useState(null);
+  const [collectionSession, setCollectionSession] = useState(0);
+  const [showCompletedStatus, setShowCompletedStatus] = useState(false);
 
   const fetchNews = async () => {
-    if (!poiId) return;
+    if (!poiId) {
+      console.log('[fetchNews] No poiId, skipping fetch');
+      return;
+    }
+    console.log(`[fetchNews] Fetching news for POI ${poiId}...`);
     setLoading(true);
     try {
-      const response = await fetch(`/api/pois/${poiId}/news?limit=20`);
+      const response = await fetch(`/api/pois/${poiId}/news?limit=50`);
+      console.log(`[fetchNews] Response status: ${response.status} ${response.statusText}`);
       if (response.ok) {
         const data = await response.json();
+        console.log(`[fetchNews] Received ${data.length} news items:`, data.map(n => n.title.substring(0, 40)));
         setNews(data);
+        if (onCountChange) onCountChange(data.length);
+      } else {
+        console.error(`[fetchNews] Request failed: ${response.status} ${response.statusText}`);
       }
     } catch (err) {
-      console.error('Error fetching POI news:', err);
+      console.error('[fetchNews] Error fetching POI news:', err);
     } finally {
       setLoading(false);
+      console.log(`[fetchNews] Loading complete, news count: ${news.length}`);
     }
   };
 
   useEffect(() => {
     fetchNews();
+    // Clean up collecting state if we're loading fresh data
+    if (collecting) {
+      // If we were collecting but now mounting fresh, the collection likely completed
+      setTimeout(() => {
+        localStorage.removeItem(`news-collecting-${poiId}`);
+        setCollecting(false);
+      }, 2000);
+    }
   }, [poiId]);
+
+  // Clear completed status when editMode changes
+  useEffect(() => {
+    if (!editMode) {
+      setShowCompletedStatus(false);
+    }
+  }, [editMode]);
 
   // Collect news for this POI and refresh
   const handleCollectNews = async () => {
     if (!poiId) return;
     setCollecting(true);
+    setShowCompletedStatus(false); // Clear previous completed status
+    setCollectionSession(prev => prev + 1); // Increment session to force timer reset
+    localStorage.setItem(`news-collecting-${poiId}`, 'true');
     setCollectResult(null);
+
+    let shouldStopCollecting = false;
+
     try {
+      // Read timezone from localStorage (defaults to America/New_York)
+      const timezone = localStorage.getItem('app-timezone') || 'America/New_York';
+
       const response = await fetch(`/api/admin/pois/${poiId}/news/collect`, {
         method: 'POST',
-        credentials: 'include'
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ timezone })
       });
       if (response.ok) {
         const result = await response.json();
-        setCollectResult({ type: 'success', news: result.newsFound, newsSaved: result.newsSaved });
+
+        // If collection is already running, just attach to it
+        if (result.alreadyRunning) {
+          console.log('Collection already running, attaching to existing job');
+          // The status widget will poll and show the current progress
+          // Don't change collecting state - keep it true to show widget
+          return;
+        }
+
+        console.log('[handleCollectNews] Collection successful, result:', result);
+        setCollectResult({
+          type: 'success',
+          newsFound: result.newsFound,
+          newsSaved: result.newsSaved,
+          newsDuplicate: result.newsDuplicate || 0
+        });
         // Refresh the news list
+        console.log('[handleCollectNews] Calling fetchNews to refresh list...');
         await fetchNews();
+        console.log('[handleCollectNews] fetchNews completed');
+        shouldStopCollecting = true;
       } else {
         const error = await response.json();
         setCollectResult({ type: 'error', message: error.error || 'Collection failed' });
+        shouldStopCollecting = true;
       }
     } catch (err) {
       setCollectResult({ type: 'error', message: err.message });
+      shouldStopCollecting = true;
     } finally {
-      setCollecting(false);
+      if (shouldStopCollecting) {
+        // Give the CollectionStatus widget time to fetch final progress before stopping polling
+        setTimeout(() => {
+          setCollecting(false);
+          setShowCompletedStatus(true); // Keep status widget visible after completion
+          localStorage.removeItem(`news-collecting-${poiId}`);
+        }, 1500); // 1.5 second delay to ensure final progress is fetched
+      }
     }
   };
 
   const handleDelete = async (newsId) => {
-    if (!confirm('Delete this news item?')) return;
     setDeleting(newsId);
     try {
       const response = await fetch(`/api/admin/news/${newsId}`, {
@@ -1141,7 +1232,10 @@ function PoiNews({ poiId, isAdmin, editMode }) {
 
   const formatDate = (dateString) => {
     if (!dateString) return '';
-    return new Date(dateString).toLocaleDateString('en-US', {
+    // Parse date as local date to avoid timezone conversion
+    const [year, month, day] = dateString.split('T')[0].split('-');
+    const date = new Date(year, month - 1, day);
+    return date.toLocaleDateString('en-US', {
       month: 'short', day: 'numeric', year: 'numeric'
     });
   };
@@ -1150,13 +1244,42 @@ function PoiNews({ poiId, isAdmin, editMode }) {
 
   return (
     <div className="poi-news-list">
-      {news.length === 0 ? (
-        <div className="sidebar-tab-empty">No news for this location.</div>
-      ) : news.map(item => (
+      {isAdmin && editMode && (
+        <div className="poi-tab-actions">
+          <button
+            className="refresh-content-btn"
+            onClick={handleCollectNews}
+            disabled={collecting}
+          >
+            {collecting ? '🔄 Searching...' : `🔍 Refresh News${news.length > 0 ? ` (${news.length})` : ''}`}
+          </button>
+        </div>
+      )}
+
+      <div className="poi-news-list-content">
+        {isAdmin && editMode && (collecting || showCompletedStatus) && (
+          <CollectionStatus
+            key={`news-${collectionSession}`}
+            poiId={poiId}
+            isCollecting={collecting}
+            onComplete={(data) => {
+              console.log('[Sidebar] Collection completed:', data);
+              // Keep showing status even after completion
+            }}
+            onClose={() => {
+              console.log('[Sidebar] User closed status widget');
+              setShowCompletedStatus(false);
+            }}
+          />
+        )}
+
+        {news.length === 0 ? (
+          <div className="sidebar-tab-empty">No news for this location.</div>
+        ) : news.map(item => (
         <div key={item.id} className={`poi-news-item ${item.news_type || 'general'}`}>
           <div className="poi-news-header">
             <span className="poi-news-title">{item.title}</span>
-            {isAdmin && (
+            {isAdmin && editMode && (
               <button
                 className="news-delete-btn"
                 onClick={() => handleDelete(item.id)}
@@ -1166,10 +1289,14 @@ function PoiNews({ poiId, isAdmin, editMode }) {
               </button>
             )}
           </div>
+          {item.published_at && (
+            <div className="poi-event-date">
+              {formatDate(item.published_at)}
+            </div>
+          )}
           {item.summary && <p className="poi-news-summary">{item.summary}</p>}
           <div className="poi-news-meta">
             {item.source_name && <span className="news-source">{item.source_name}</span>}
-            {item.published_at && <span className="news-date">{formatDate(item.published_at)}</span>}
             {item.source_url && (
               <a href={item.source_url} target="_blank" rel="noopener noreferrer" className="news-link">
                 Read more
@@ -1177,27 +1304,35 @@ function PoiNews({ poiId, isAdmin, editMode }) {
             )}
           </div>
         </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }
 
 // POI-specific Events component
-function PoiEvents({ poiId, isAdmin, editMode }) {
+function PoiEvents({ poiId, poiName, isAdmin, editMode, onCountChange }) {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(null);
-  const [collecting, setCollecting] = useState(false);
+  const [collecting, setCollecting] = useState(() => {
+    // Check localStorage to see if collection was in progress
+    const stored = localStorage.getItem(`events-collecting-${poiId}`);
+    return stored === 'true';
+  });
   const [collectResult, setCollectResult] = useState(null);
+  const [collectionSession, setCollectionSession] = useState(0);
+  const [showCompletedStatus, setShowCompletedStatus] = useState(false);
 
   const fetchEvents = async () => {
     if (!poiId) return;
     setLoading(true);
     try {
-      const response = await fetch(`/api/pois/${poiId}/events`);
+      const response = await fetch(`/api/pois/${poiId}/events?limit=50`);
       if (response.ok) {
         const data = await response.json();
         setEvents(data);
+        if (onCountChange) onCountChange(data.length);
       }
     } catch (err) {
       console.error('Error fetching POI events:', err);
@@ -1208,36 +1343,87 @@ function PoiEvents({ poiId, isAdmin, editMode }) {
 
   useEffect(() => {
     fetchEvents();
+    // Clean up collecting state if we're loading fresh data
+    if (collecting) {
+      // If we were collecting but now mounting fresh, the collection likely completed
+      setTimeout(() => {
+        localStorage.removeItem(`events-collecting-${poiId}`);
+        setCollecting(false);
+      }, 2000);
+    }
   }, [poiId]);
+
+  // Clear completed status when editMode changes
+  useEffect(() => {
+    if (!editMode) {
+      setShowCompletedStatus(false);
+    }
+  }, [editMode]);
 
   // Collect events for this POI and refresh
   const handleCollectEvents = async () => {
     if (!poiId) return;
     setCollecting(true);
+    setShowCompletedStatus(false); // Clear previous completed status
+    setCollectionSession(prev => prev + 1); // Increment session to force timer reset
+    localStorage.setItem(`events-collecting-${poiId}`, 'true');
     setCollectResult(null);
+
+    let shouldStopCollecting = false;
+
     try {
-      const response = await fetch(`/api/admin/pois/${poiId}/news/collect`, {
+      // Read timezone from localStorage (defaults to America/New_York)
+      const timezone = localStorage.getItem('app-timezone') || 'America/New_York';
+
+      const response = await fetch(`/api/admin/pois/${poiId}/events/collect`, {
         method: 'POST',
-        credentials: 'include'
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ timezone })
       });
       if (response.ok) {
         const result = await response.json();
-        setCollectResult({ type: 'success', events: result.eventsFound, eventsSaved: result.eventsSaved });
+
+        // If collection is already running, just attach to it
+        if (result.alreadyRunning) {
+          console.log('Collection already running, attaching to existing job');
+          // The status widget will poll and show the current progress
+          // Don't change collecting state - keep it true to show widget
+          return;
+        }
+
+        setCollectResult({
+          type: 'success',
+          eventsFound: result.eventsFound,
+          eventsSaved: result.eventsSaved,
+          eventsDuplicate: result.eventsDuplicate || 0
+        });
         // Refresh the events list
         await fetchEvents();
+        shouldStopCollecting = true;
       } else {
         const error = await response.json();
         setCollectResult({ type: 'error', message: error.error || 'Collection failed' });
+        shouldStopCollecting = true;
       }
     } catch (err) {
       setCollectResult({ type: 'error', message: err.message });
+      shouldStopCollecting = true;
     } finally {
-      setCollecting(false);
+      if (shouldStopCollecting) {
+        // Give the CollectionStatus widget time to fetch final progress before stopping polling
+        setTimeout(() => {
+          setCollecting(false);
+          setShowCompletedStatus(true); // Keep status widget visible after completion
+          localStorage.removeItem(`events-collecting-${poiId}`);
+        }, 1500); // 1.5 second delay to ensure final progress is fetched
+      }
     }
   };
 
   const handleDelete = async (eventId) => {
-    if (!confirm('Delete this event?')) return;
     setDeleting(eventId);
     try {
       const response = await fetch(`/api/admin/events/${eventId}`, {
@@ -1256,22 +1442,72 @@ function PoiEvents({ poiId, isAdmin, editMode }) {
 
   const formatDate = (dateString) => {
     if (!dateString) return '';
-    return new Date(dateString).toLocaleDateString('en-US', {
+    // Parse date as local date to avoid timezone conversion
+    const [year, month, day] = dateString.split('T')[0].split('-');
+    const date = new Date(year, month - 1, day);
+    return date.toLocaleDateString('en-US', {
       weekday: 'short', month: 'short', day: 'numeric', year: 'numeric'
     });
+  };
+
+  const createGoogleCalendarLink = (event, poiName) => {
+    const title = encodeURIComponent(event.title);
+    const description = encodeURIComponent(event.description || '');
+    const location = encodeURIComponent(event.location_details || poiName || '');
+
+    // Format dates for Google Calendar (YYYYMMDDTHHmmss)
+    const formatForGoogle = (dateStr) => {
+      if (!dateStr) return '';
+      const [year, month, day] = dateStr.split('T')[0].split('-');
+      return `${year}${month}${day}`;
+    };
+
+    const startDate = formatForGoogle(event.start_date);
+    const endDate = formatForGoogle(event.end_date || event.start_date);
+
+    return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${startDate}/${endDate}&details=${description}&location=${location}`;
   };
 
   if (loading) return <div className="sidebar-tab-loading">Loading events...</div>;
 
   return (
     <div className="poi-events-list">
-      {events.length === 0 ? (
-        <div className="sidebar-tab-empty">No upcoming events for this location.</div>
-      ) : events.map(item => (
+      {isAdmin && editMode && (
+        <div className="poi-tab-actions">
+          <button
+            className="refresh-content-btn"
+            onClick={handleCollectEvents}
+            disabled={collecting}
+          >
+            {collecting ? '🔄 Searching...' : `🔍 Refresh Events${events.length > 0 ? ` (${events.length})` : ''}`}
+          </button>
+        </div>
+      )}
+
+      <div className="poi-events-list-content">
+        {isAdmin && editMode && (collecting || showCompletedStatus) && (
+          <CollectionStatus
+            key={`events-${collectionSession}`}
+            poiId={poiId}
+            isCollecting={collecting}
+            onComplete={(data) => {
+              console.log('[Sidebar] Collection completed:', data);
+              // Keep showing status even after completion
+            }}
+            onClose={() => {
+              console.log('[Sidebar] User closed status widget');
+              setShowCompletedStatus(false);
+            }}
+          />
+        )}
+
+        {events.length === 0 ? (
+          <div className="sidebar-tab-empty">No upcoming events for this location.</div>
+        ) : events.map(item => (
         <div key={item.id} className={`poi-event-item ${item.event_type || 'program'}`}>
           <div className="poi-event-header">
             <span className="poi-event-title">{item.title}</span>
-            {isAdmin && (
+            {isAdmin && editMode && (
               <button
                 className="news-delete-btn"
                 onClick={() => handleDelete(item.id)}
@@ -1293,13 +1529,24 @@ function PoiEvents({ poiId, isAdmin, editMode }) {
               <strong>Location:</strong> {item.location_details}
             </div>
           )}
-          {item.source_url && (
-            <a href={item.source_url} target="_blank" rel="noopener noreferrer" className="event-link">
-              More info
+          <div className="event-links">
+            {item.source_url && (
+              <a href={item.source_url} target="_blank" rel="noopener noreferrer" className="event-link">
+                More info
+              </a>
+            )}
+            <a
+              href={createGoogleCalendarLink(item, poiName)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="event-link calendar-link"
+            >
+              + Add to Calendar
             </a>
-          )}
+          </div>
         </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }
@@ -1905,6 +2152,8 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
   const [showAssociationsModal, setShowAssociationsModal] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [pendingImage, setPendingImage] = useState(null);
+  const [newsCount, setNewsCount] = useState(0);
+  const [eventsCount, setEventsCount] = useState(0);
 
   // State for new organization creation
   const [organizationData, setOrganizationData] = useState({
@@ -2411,11 +2660,11 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
           )}
 
           {sidebarTab === 'news' && linearFeature && (
-            <PoiNews poiId={linearFeature.id} isAdmin={isAdmin} editMode={editMode} />
+            <PoiNews poiId={linearFeature.id} isAdmin={isAdmin} editMode={editMode} onCountChange={setNewsCount} />
           )}
 
           {sidebarTab === 'events' && linearFeature && (
-            <PoiEvents poiId={linearFeature.id} isAdmin={isAdmin} editMode={editMode} />
+            <PoiEvents poiId={linearFeature.id} poiName={linearFeature.name} isAdmin={isAdmin} editMode={editMode} onCountChange={setEventsCount} />
           )}
 
           {sidebarTab === 'history' && linearFeature && (
@@ -2615,11 +2864,11 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
         )}
 
         {sidebarTab === 'news' && destination && (
-          <PoiNews poiId={destination.id} isAdmin={isAdmin} editMode={editMode} />
+          <PoiNews poiId={destination.id} isAdmin={isAdmin} editMode={editMode} onCountChange={setNewsCount} />
         )}
 
         {sidebarTab === 'events' && destination && (
-          <PoiEvents poiId={destination.id} isAdmin={isAdmin} editMode={editMode} />
+          <PoiEvents poiId={destination.id} poiName={destination.name} isAdmin={isAdmin} editMode={editMode} onCountChange={setEventsCount} />
         )}
 
         {sidebarTab === 'history' && destination && (
