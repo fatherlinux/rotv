@@ -1524,7 +1524,7 @@ async function start() {
     // Continue without scheduler - manual triggers still work via admin route
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  app.listen(PORT, '::', () => {
     console.log(`Roots of The Valley API running on port ${PORT}`);
   });
 }
