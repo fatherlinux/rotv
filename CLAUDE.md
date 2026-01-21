@@ -112,21 +112,30 @@ Given a version number `MAJOR.MINOR.PATCH`, increment:
 # New feature → MINOR
 # Bug fix → PATCH
 
-# 2. Update frontend/package.json
-# Edit: "version": "1.10.0" → "1.11.0"
+# 2. Update frontend/package.json and backend/package.json
+# Frontend: "version": "1.10.0" → "1.11.0"
+# Backend:  "version": "1.5.0" → "1.6.0" (versions independently)
 
-# 3. Update Containerfile LABEL
+# 3. Update Containerfile LABEL (should match frontend version)
 # Edit: LABEL version="1.10.0" → LABEL version="1.11.0"
 
-# 4. Commit with conventional commit message
-git commit -m "feat: add new feature
-
-BREAKING CHANGE: old API removed"
+# 4. Commit version bump
+git add frontend/package.json backend/package.json Containerfile
+git commit -m "chore: bump version to 1.11.0 (frontend) and 1.6.0 (backend)"
 
 # 5. Create and push git tag
 git tag -a v1.11.0 -m "Release v1.11.0 - Description"
 git push && git push --tags
+
+# 6. GitHub Actions automatically handles production builds
+# DO NOT run ./run.sh build or ./run.sh push manually
+# The CI/CD pipeline rebuilds and pushes to quay.io/fatherlinux/rotv
 ```
+
+**Important Notes:**
+- **Frontend and backend version independently** - frontend is source of truth for release version
+- **GitHub Actions handles production builds** - pushing tags triggers automated container build and push to quay.io
+- **Never manually build production containers** - use CI/CD pipeline for consistency
 
 **Pre-release versions:**
 - Use for testing: `1.11.0-alpha.1`, `1.11.0-beta.1`, `1.11.0-rc.1`
@@ -183,7 +192,8 @@ git push && git push --tags
     - git checkout master      # Switch to master
     - git pull origin master   # Pull merged changes
     - git tag vX.Y.Z           # Tag the release (AFTER merge)
-    - git push --tags          # Push tags
+    - git push --tags          # Push tags (triggers GitHub Actions CI/CD)
+    - GitHub Actions builds    # Automated container build & push to quay.io
     - Delete feature branch    # Clean up
 ```
 
