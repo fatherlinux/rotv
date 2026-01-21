@@ -6,30 +6,90 @@
 
 **These rules are non-negotiable and must be followed for every code change:**
 
-#### 1. Test Locally Before Pushing
+#### 1. Branch-Based Development & PR Workflow
 
-🚫 **NEVER push code to GitHub without testing locally first**
+🚫 **NEVER work directly on master branch**
+🚫 **NEVER create a Pull Request without testing locally first**
 
-**Required steps before any `git push`:**
+**Branch Naming Conventions:**
 
-```bash
-# 1. Build the container locally
-./run.sh build
-
-# 2. Start the container
-./run.sh start
-
-# 3. Run all tests and verify they pass
-./run.sh test
-
-# 4. Manually verify the feature works in the browser
-# Open http://localhost:8080 and test your changes
-
-# 5. Only after ALL tests pass and manual verification succeeds:
-git push
+```
+feature/short-description   # New features
+fix/short-description       # Bug fixes
+refactor/short-description  # Code refactoring
+docs/short-description      # Documentation updates
+test/short-description      # Test additions
 ```
 
-**Why:** We experienced production failures (e.g., Playwright not installed) because code was pushed without testing in the container environment. Container builds catch dependency issues that local Node.js development misses.
+**Examples:**
+- `feature/add-supertest-integration-tests`
+- `fix/playwright-timeout-handling`
+- `refactor/simplify-run-script`
+- `docs/update-governance-rules`
+
+**Complete Branch & PR Workflow:**
+
+```bash
+# 1. Create a new branch for your work
+git checkout -b feature/my-new-feature
+
+# 2. Make your code changes
+
+# 3. Build the container locally
+./run.sh build
+
+# 4. Run all tests and verify they pass
+./run.sh test
+
+# 5. Commit your changes (can be multiple commits)
+git add .
+git commit -m "feat: add my new feature"
+
+# 6. Ask user to manually verify
+# User will test in browser at http://localhost:8080
+
+# 7. After user approves:
+# - Update version numbers (SemVer) if releasing
+# - Commit version bump
+git commit -m "chore: bump version to X.Y.Z"
+
+# 8. Push branch to GitHub
+git push -u origin feature/my-new-feature
+
+# 9. Create Pull Request in GitHub
+# Use GitHub CLI or web interface:
+gh pr create --title "Add my new feature" --body "Description..."
+
+# 10. Create git tag for releases (AFTER PR is merged)
+git tag -a vX.Y.Z -m "Release vX.Y.Z - Description"
+git push --tags
+
+# 11. Ask user if they want to merge PR
+# User reviews and merges via GitHub UI
+
+# 12. After PR is merged, clean up
+git checkout master
+git pull origin master
+git branch -d feature/my-new-feature  # Delete local branch
+git push origin --delete feature/my-new-feature  # Delete remote branch
+```
+
+**Best Practices:**
+
+✅ **One branch per feature/fix** - Keep branches focused and small
+✅ **Keep branches up to date** - Regularly `git pull origin master` and rebase if needed
+✅ **Delete branches after merge** - Keeps repository clean
+✅ **Use descriptive commit messages** - Follow conventional commits (feat:, fix:, docs:, etc.)
+✅ **PR titles match branch purpose** - Makes review easier
+✅ **Link PRs to issues** - If tracking work in GitHub Issues
+
+**Why:** Branch-based development allows for:
+- Code review before merging
+- Parallel development on multiple features
+- Easy rollback if something breaks
+- Clear history of what changed and why
+
+**Note:** Tags are only created AFTER PR is merged to master, not on feature branches.
 
 #### 2. Semantic Versioning (SemVer)
 
@@ -108,16 +168,32 @@ git push && git push --tags
 **Every code change should follow this flow:**
 
 ```
-1. Make code changes
-2. ./run.sh build          # Build container
-3. ./run.sh start          # Start container
-4. Manual test in browser  # Verify it works
-5. ./run.sh test           # Run automated tests
-6. Update version (SemVer) # If releasing
-7. git commit              # Commit changes
-8. git tag (if release)    # Tag version
-9. git push --tags         # Push to GitHub
+1. Create feature branch       # git checkout -b feature/description
+2. Make code changes
+3. ./run.sh build              # Build container (must succeed)
+4. ./run.sh test               # Run automated tests (must pass)
+5. git commit                  # Commit changes
+6. Ask user to verify          # User manually tests and approves
+7. Update version (SemVer)     # Bump version in package.json & Containerfile (if releasing)
+8. git commit                  # Commit version bump
+9. git push origin branch      # Push branch to GitHub
+10. Create Pull Request        # Create PR in GitHub (via gh CLI or web UI)
+11. Ask user to merge PR       # User reviews and merges via GitHub
+12. After merge:
+    - git checkout master      # Switch to master
+    - git pull origin master   # Pull merged changes
+    - git tag vX.Y.Z           # Tag the release (AFTER merge)
+    - git push --tags          # Push tags
+    - Delete feature branch    # Clean up
 ```
+
+**Key Points:**
+- ✅ Always work in feature branches - NEVER commit directly to master
+- ✅ Tests must pass before asking user to verify
+- ✅ User approval required before version bump and PR creation
+- ✅ User decides when to merge PR
+- ✅ Tags are created AFTER PR is merged to master
+- ✅ Clean up branches after merge
 
 **This prevents production issues and ensures quality.**
 
@@ -126,6 +202,13 @@ git push && git push --tags
 ## Container-Based Development (Recommended)
 
 **IMPORTANT:** Always develop using containers to ensure consistency with production. This prevents issues like missing dependencies (e.g., Playwright not installed).
+
+**📖 Full Development Architecture:** See `docs/DEVELOPMENT_ARCHITECTURE.md` for comprehensive details on:
+- Ephemeral storage with tmpfs vs persistent storage
+- Automatic production data seeding workflow
+- Container build optimization strategies
+- PostgreSQL startup and seed data import
+- Testing and validation procedures
 
 ### Architecture
 ```
@@ -145,8 +228,10 @@ git push && git push --tags
 │   │ PostgreSQL 17 (localhost:5432)                          │  │
 │   └─────────────────────────────────────────────────────────┘  │
 │                                                                 │
-│   Data Volume: ~/.rotv/pgdata → /data/pgdata                   │
-│   Databases: rotv (production), rotv_test (testing)            │
+│   Development: tmpfs /data/pgdata (ephemeral, 2GB in-memory)   │
+│   Production:  ~/.rotv/pgdata → /data/pgdata (persistent)      │
+│   Seed Data:   ~/.rotv/seed-data.sql → /tmp/seed-data.sql      │
+│   Databases:   rotv (main), rotv_test (testing)                │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -154,17 +239,21 @@ git push && git push --tags
 
 ```bash
 # 1. Setup environment
-cp .env.example .env  # Fill in your API keys
+cp .env.example backend/.env  # Fill in your API keys
 
 # 2. Build container
 ./run.sh build
 
-# 3. Start application
+# 3. Start application (auto-pulls production data on first start)
 ./run.sh start
+# First start: Downloads 384MB production data from server
+# Subsequent starts: Uses cached data (~10 seconds)
 
 # 4. Run tests
 ./run.sh test
 ```
+
+**Note:** Development mode uses ephemeral tmpfs storage - data is discarded on restart and reimported from cached seed data. This ensures a clean slate every time with real production data.
 
 ### Development Workflow
 
@@ -269,13 +358,14 @@ The `/api/destinations` endpoint returns `pois WHERE poi_type = 'point'`.
 
 ### Architecture Documents
 
-For all major features or significant refactors, create an architecture document in the `docs/` directory following the pattern of `NEWS_EVENTS_ARCHITECTURE.md`.
+For all major features or significant refactors, create an architecture document in the `docs/` directory following the pattern of existing architecture documents.
 
 **When to create an architecture document:**
 - New feature that introduces a multi-step workflow or complex system
 - Significant refactor that changes how a major part of the application works
 - Integration of new third-party services or APIs
 - Implementation of new data collection or processing pipelines
+- Changes to development workflow or infrastructure
 - Any feature that future developers would benefit from understanding holistically
 
 **What to include:**
@@ -286,4 +376,6 @@ For all major features or significant refactors, create an architecture document
 5. **Testing & Validation**: How to verify the feature works correctly
 6. **Future Improvements**: Known limitations or planned enhancements
 
-**Example:** See `docs/NEWS_EVENTS_ARCHITECTURE.md` for a comprehensive example of an architecture document.
+**Examples:**
+- `docs/DEVELOPMENT_ARCHITECTURE.md` - Development workflow, ephemeral storage, production seeding, container optimization
+- `docs/NEWS_EVENTS_ARCHITECTURE.md` - News & events collection system with AI-powered content discovery

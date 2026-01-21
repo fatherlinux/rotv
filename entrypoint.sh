@@ -7,18 +7,30 @@ PGRUNDIR="/tmp/pgsocket"
 echo "=== Roots of The Valley ==="
 echo "Starting up..."
 
-# Create PostgreSQL socket directory
+# Create PostgreSQL socket directory with correct ownership
 mkdir -p "$PGRUNDIR"
+chown postgres:postgres "$PGRUNDIR"
+chmod 755 "$PGRUNDIR"
+
+# Ensure data directory ownership is correct
+# Both tmpfs and bind mounts need ownership fixed since container runs as root
+PGDATA_OWNER=$(stat -c '%u' "$PGDATA" 2>/dev/null || echo "unknown")
+if [ "$PGDATA_OWNER" != "70" ]; then
+    echo "Fixing data directory permissions..."
+    chown -R postgres:postgres "$PGDATA"
+    chmod 700 "$PGDATA"
+fi
+
+# Remove stale PID file if it exists (from previous unclean shutdown)
+rm -f "$PGDATA/postmaster.pid" 2>/dev/null || true
 
 # Initialize PostgreSQL if needed
 if [ ! -f "$PGDATA/PG_VERSION" ]; then
     echo "Initializing PostgreSQL database..."
 
-    # Ensure data directory has correct permissions
-    chmod 700 "$PGDATA" 2>/dev/null || true
-
-    # Initialize as current user (works with rootless podman)
-    initdb -D "$PGDATA"
+    # Initialize as postgres user (PostgreSQL refuses to run as root)
+    # Use runuser to preserve environment variables
+    runuser -u postgres -- initdb -D "$PGDATA" -U postgres
 
     # Configure PostgreSQL for local connections
     cat >> "$PGDATA/pg_hba.conf" << 'EOF'
@@ -33,22 +45,21 @@ listen_addresses = 'localhost'
 unix_socket_directories = '$PGRUNDIR'
 EOF
 
-    # Start PostgreSQL temporarily to create user and database
-    pg_ctl -D "$PGDATA" -l /tmp/pg_init.log start -o "-k $PGRUNDIR"
+    # Start PostgreSQL temporarily to create databases (as postgres user)
+    runuser -u postgres -- pg_ctl -D "$PGDATA" -l /tmp/pg_init.log start -o "-k $PGRUNDIR"
     sleep 3
 
-    echo "Creating database and user..."
-    psql -h "$PGRUNDIR" -d postgres -c "CREATE USER rotv WITH PASSWORD 'rotv';" 2>/dev/null || true
-    psql -h "$PGRUNDIR" -d postgres -c "CREATE DATABASE rotv OWNER rotv;" 2>/dev/null || true
-    psql -h "$PGRUNDIR" -d postgres -c "GRANT ALL PRIVILEGES ON DATABASE rotv TO rotv;" 2>/dev/null || true
+    echo "Creating databases..."
+    psql -h "$PGRUNDIR" -U postgres -d postgres -c "CREATE DATABASE rotv;" 2>/dev/null || true
+    psql -h "$PGRUNDIR" -U postgres -d postgres -c "CREATE DATABASE rotv_test;" 2>/dev/null || true
 
-    pg_ctl -D "$PGDATA" stop
+    runuser -u postgres -- pg_ctl -D "$PGDATA" stop
     sleep 2
 fi
 
-# Start PostgreSQL
+# Start PostgreSQL as postgres user (container runs as root, but PostgreSQL as postgres)
 echo "Starting PostgreSQL..."
-pg_ctl -D "$PGDATA" -l "$PGDATA/postgresql.log" start -o "-k $PGRUNDIR"
+runuser -u postgres -- pg_ctl -D "$PGDATA" -l "$PGDATA/postgresql.log" start -o "-k $PGRUNDIR"
 
 # Wait for PostgreSQL to be ready
 echo "Waiting for PostgreSQL to be ready..."
@@ -59,6 +70,16 @@ for i in {1..30}; do
     fi
     sleep 1
 done
+
+# Ensure rotv_test database exists (for testing)
+psql -h "$PGRUNDIR" -U postgres -d postgres -c "CREATE DATABASE rotv_test;" 2>/dev/null || true
+
+# Import seed data if available (before app starts to avoid schema conflicts)
+if [ -f /tmp/seed-data.sql ]; then
+    echo "Importing seed data..."
+    psql -h "$PGRUNDIR" -U postgres -d rotv -f /tmp/seed-data.sql 2>&1 | grep -c "^COPY" | xargs echo "Imported rows from tables:"
+    echo "✓ Seed data imported"
+fi
 
 # Start the Node.js application
 echo "Starting Roots of The Valley application..."

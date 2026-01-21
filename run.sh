@@ -3,10 +3,15 @@ set -e
 
 IMAGE_NAME="quay.io/fatherlinux/rotv"
 CONTAINER_NAME="rotv"
-DATA_DIR="${DATA_DIR:-$HOME/.rotv/pgdata}"
 
-# Create data directory if it doesn't exist
-mkdir -p "$DATA_DIR"
+# Development uses ephemeral storage (tmpfs) - data is thrown away on restart
+# Production should set PERSISTENT_DATA=true and DATA_DIR=/path/to/storage
+USE_PERSISTENT="${PERSISTENT_DATA:-false}"
+DATA_DIR="${DATA_DIR:-$HOME/.rotv/pgdata}"
+SEED_DATA_FILE="$HOME/.rotv/seed-data.sql"
+PRODUCTION_HOST="${PRODUCTION_HOST:-sven.dc3.crunchtools.com}"
+PRODUCTION_PORT="${PRODUCTION_PORT:-22422}"
+PRODUCTION_CONTAINER="${PRODUCTION_CONTAINER:-rootsofthevalley.org}"
 
 # Load environment variables from .env file if it exists
 if [ -f ".env" ]; then
@@ -34,64 +39,147 @@ case "${1:-help}" in
 
     start)
         echo "Starting Roots of The Valley..."
-        echo "PostgreSQL data will be stored in: $DATA_DIR"
 
         # Stop existing container if running
         podman stop "$CONTAINER_NAME" 2>/dev/null || true
         podman rm "$CONTAINER_NAME" 2>/dev/null || true
 
-        # Set up permissions if directory is empty or newly created
-        if [ ! -f "$DATA_DIR/PG_VERSION" ]; then
-            echo "Setting up data directory permissions..."
-            podman unshare chown 1000:1000 "$DATA_DIR" 2>/dev/null || true
-            podman unshare chmod 700 "$DATA_DIR" 2>/dev/null || true
+        # Build storage mount options
+        if [ "$USE_PERSISTENT" = "true" ]; then
+            echo "Using persistent storage: $DATA_DIR"
+            mkdir -p "$DATA_DIR"
+            # Set up permissions for bind-mounted data directory
+            if [ ! -f "$DATA_DIR/PG_VERSION" ]; then
+                echo "Setting up data directory permissions..."
+                podman unshare chown 70:70 "$DATA_DIR" 2>/dev/null || true
+                podman unshare chmod 700 "$DATA_DIR" 2>/dev/null || true
+            fi
+            STORAGE_MOUNT="-v $DATA_DIR:/data/pgdata:Z"
+        else
+            echo "Using ephemeral storage (data will be lost on restart)"
+            STORAGE_MOUNT="--tmpfs /data/pgdata:rw,size=2G,mode=0700"
+        fi
+
+        # Handle seed data in development mode
+        SEED_MOUNT=""
+        if [ "$USE_PERSISTENT" = "false" ]; then
+            # Check if seed data exists
+            if [ ! -f "$SEED_DATA_FILE" ]; then
+                echo "⚠ No seed data found at $SEED_DATA_FILE"
+                echo "Automatically pulling production data..."
+                echo ""
+
+                # Create cache directory
+                mkdir -p "$(dirname "$SEED_DATA_FILE")"
+
+                # Pull data from production
+                echo "Running pg_dump on production container: $PRODUCTION_CONTAINER"
+                ssh -p "$PRODUCTION_PORT" root@"$PRODUCTION_HOST" \
+                    "podman exec $PRODUCTION_CONTAINER pg_dump -U rotv --clean --if-exists --no-owner --no-acl rotv" \
+                    > "$SEED_DATA_FILE"
+
+                if [ $? -eq 0 ]; then
+                    SEED_SIZE=$(du -h "$SEED_DATA_FILE" | cut -f1)
+                    echo "✓ Production data downloaded ($SEED_SIZE)"
+                    echo ""
+                else
+                    echo "❌ Failed to pull production data"
+                    echo "Cannot start in development mode without seed data"
+                    rm -f "$SEED_DATA_FILE"
+                    exit 1
+                fi
+            else
+                # Check freshness of seed data (warn if older than 7 days)
+                SEED_AGE_DAYS=$(( ($(date +%s) - $(date -r "$SEED_DATA_FILE" +%s)) / 86400 ))
+                if [ $SEED_AGE_DAYS -gt 7 ]; then
+                    echo "⚠ Seed data is $SEED_AGE_DAYS days old"
+                    echo "Consider running './run.sh seed' to refresh production data"
+                    echo ""
+                fi
+            fi
+
+            # Mount seed data for import
+            echo "Mounting seed data for import..."
+            SEED_MOUNT="-v $SEED_DATA_FILE:/tmp/seed-data.sql:ro"
         fi
 
         podman run -d \
             --name "$CONTAINER_NAME" \
             --privileged \
             -p 8080:8080 \
-            -v "$DATA_DIR:/data/pgdata:Z" \
+            $STORAGE_MOUNT \
+            $SEED_MOUNT \
             $ENV_ARGS \
             "$IMAGE_NAME"
 
         echo "Application starting at http://localhost:8080"
-        echo "Waiting for PostgreSQL to be ready..."
-        sleep 5
+        if [ -n "$SEED_MOUNT" ]; then
+            echo "Seed data will be imported during startup..."
+        fi
+        echo "Waiting for application to be ready..."
+        sleep 10
+
         echo "✓ Container started successfully"
         echo ""
         echo "Useful commands:"
         echo "  ./run.sh logs   - View logs"
         echo "  ./run.sh stop   - Stop container"
+        echo "  ./run.sh seed   - Pull fresh data from production"
         ;;
 
     test)
         echo "Running integration tests..."
         echo ""
 
-        # Start container if not running
-        if ! podman ps --filter "name=$CONTAINER_NAME" --format "{{.Names}}" | grep -q "^$CONTAINER_NAME$"; then
-            echo "Starting container for tests..."
-            ./run.sh start
-            echo "Waiting for application to be ready..."
-            sleep 10
-        else
-            echo "✓ Container already running"
-        fi
+        # Stop and remove existing container
+        echo "Stopping main container..."
+        podman stop "$CONTAINER_NAME" 2>/dev/null || true
+        podman rm "$CONTAINER_NAME" 2>/dev/null || true
+
+        # Start container with test database using ephemeral storage
+        echo "Starting test container with ephemeral storage..."
+        podman run -d \
+            --name "$CONTAINER_NAME" \
+            --privileged \
+            -p 8080:8080 \
+            --tmpfs /data/pgdata:rw,size=2G,mode=0700 \
+            -e PGDATABASE=rotv_test \
+            $ENV_ARGS \
+            "$IMAGE_NAME" >/dev/null
+
+        echo "Waiting for container to be ready..."
+        sleep 10
 
         # Create test database if it doesn't exist
         echo "Setting up test database..."
-        podman exec "$CONTAINER_NAME" psql -U rotv -d rotv -c "DROP DATABASE IF EXISTS rotv_test;" 2>/dev/null || true
-        podman exec "$CONTAINER_NAME" psql -U rotv -d rotv -c "CREATE DATABASE rotv_test;" 2>/dev/null || true
+        podman exec "$CONTAINER_NAME" psql -U postgres -d postgres -c "DROP DATABASE IF EXISTS rotv_test;" 2>/dev/null || true
+        podman exec "$CONTAINER_NAME" psql -U postgres -d postgres -c "CREATE DATABASE rotv_test;" 2>/dev/null || true
+
+        # Run migrations on test database
+        echo "Running migrations on test database..."
+        podman exec "$CONTAINER_NAME" psql -U postgres -d rotv_test -f /app/migrations/schema.sql 2>/dev/null || echo "⚠ No migrations found (continuing anyway)"
+
         echo "✓ Test database ready"
         echo ""
 
-        # Run tests
-        echo "Running tests..."
-        cd backend && TEST_DATABASE_URL="postgresql://rotv:rotv@localhost:5432/rotv_test" npm test
+        # Run tests INSIDE container
+        echo "Running tests inside container..."
+        podman exec "$CONTAINER_NAME" sh -c "cd /app && npm test"
+        TEST_EXIT_CODE=$?
+
+        # Clean up - stop test container
+        echo ""
+        echo "Stopping test container..."
+        podman stop "$CONTAINER_NAME" >/dev/null 2>&1
+        podman rm "$CONTAINER_NAME" >/dev/null 2>&1
 
         echo ""
-        echo "✓ Tests completed"
+        if [ $TEST_EXIT_CODE -eq 0 ]; then
+            echo "✓ Tests completed successfully"
+        else
+            echo "❌ Tests failed"
+            exit $TEST_EXIT_CODE
+        fi
         ;;
 
     stop)
@@ -126,6 +214,36 @@ case "${1:-help}" in
         echo "✓ Frontend reloaded - refresh browser"
         ;;
 
+    seed)
+        echo "Pulling data from production..."
+        echo "Host: $PRODUCTION_HOST:$PRODUCTION_PORT"
+        echo ""
+
+        # Create cache directory
+        mkdir -p "$(dirname "$SEED_DATA_FILE")"
+
+        # Pull data from production using pg_dump
+        # --no-owner: Don't include ownership commands (rotv vs postgres user mismatch)
+        # --no-acl: Don't include access privileges
+        echo "Running pg_dump on production container: $PRODUCTION_CONTAINER"
+        ssh -p "$PRODUCTION_PORT" root@"$PRODUCTION_HOST" \
+            "podman exec $PRODUCTION_CONTAINER pg_dump -U rotv --clean --if-exists --no-owner --no-acl rotv" \
+            > "$SEED_DATA_FILE"
+
+        if [ $? -eq 0 ]; then
+            SEED_SIZE=$(du -h "$SEED_DATA_FILE" | cut -f1)
+            echo "✓ Production data saved to $SEED_DATA_FILE ($SEED_SIZE)"
+            echo ""
+            echo "Next steps:"
+            echo "  ./run.sh start   # Start with this data"
+            echo "  ./run.sh test    # Run tests with this data"
+        else
+            echo "❌ Failed to pull production data"
+            rm -f "$SEED_DATA_FILE"
+            exit 1
+        fi
+        ;;
+
     push)
         echo "Pushing to quay.io..."
         podman push "$IMAGE_NAME"
@@ -138,8 +256,9 @@ case "${1:-help}" in
         echo ""
         echo "Main Commands:"
         echo "  build   Build the container image"
-        echo "  start   Start the application container"
-        echo "  test    Run integration tests (starts container if needed)"
+        echo "  seed    Pull production data to seed local development"
+        echo "  start   Start the application container (ephemeral storage)"
+        echo "  test    Run integration tests (ephemeral storage)"
         echo "  stop    Stop and remove the container"
         echo ""
         echo "Development Commands:"
@@ -151,7 +270,28 @@ case "${1:-help}" in
         echo "  shell   Open bash shell in running container"
         echo "  push    Push image to quay.io/fatherlinux/rotv"
         echo ""
+        echo "Storage & Data Workflow:"
+        echo "  Development (default): Ephemeral storage + Production seed data"
+        echo "    1. ./run.sh seed         # Pull latest data from production (one-time)"
+        echo "    2. ./run.sh start        # Starts with ephemeral storage + seed data"
+        echo "    3. Make changes, restart # Each restart = fresh copy of prod data"
+        echo ""
+        echo "    Benefits:"
+        echo "    - Real production data for testing"
+        echo "    - Clean slate on every restart"
+        echo "    - No permission issues"
+        echo "    - Fast startup"
+        echo ""
+        echo "  Production: Persistent storage (on production server)"
+        echo "    - Set PERSISTENT_DATA=true to enable"
+        echo "    - Set DATA_DIR=/path/to/storage (default: ~/.rotv/pgdata)"
+        echo "    - Data survives container restarts"
+        echo "    - Example: PERSISTENT_DATA=true ./run.sh start"
+        echo ""
         echo "Environment variables (set in .env file or export):"
+        echo "  PERSISTENT_DATA      Enable persistent storage (default: false)"
+        echo "  PRODUCTION_HOST      Production server (default: sven.dc3.crunchtools.com)"
+        echo "  PRODUCTION_PORT      SSH port (default: 22422)"
         echo "  DATA_DIR             PostgreSQL data directory (default: ~/.rotv/pgdata)"
         echo "  GOOGLE_CLIENT_ID     Google OAuth client ID"
         echo "  GOOGLE_CLIENT_SECRET Google OAuth client secret"
@@ -159,11 +299,12 @@ case "${1:-help}" in
         echo "  SESSION_SECRET       Session encryption key"
         echo "  ADMIN_EMAIL          Email for admin user"
         echo ""
-        echo "Quick Start:"
+        echo "Quick Start (Development):"
         echo "  1. cp .env.example .env    # Copy and fill in credentials"
         echo "  2. ./run.sh build          # Build container image"
-        echo "  3. ./run.sh start          # Start application"
-        echo "  4. ./run.sh test           # Run tests"
+        echo "  3. ./run.sh seed           # Pull production data (one-time)"
+        echo "  4. ./run.sh start          # Start with ephemeral storage + seed data"
+        echo "  5. ./run.sh test           # Run tests"
         echo ""
         ;;
 esac
