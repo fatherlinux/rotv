@@ -122,17 +122,31 @@ export async function renderJavaScriptPage(url, options = {}) {
     });
 
     const context = await browser.newContext({
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      ignoreHTTPSErrors: true // Ignore SSL certificate errors for sites with invalid certs
     });
 
     const page = await context.newPage();
 
     // Navigate to the page
     console.log(`[JS Renderer] Navigating to ${url}...`);
-    await page.goto(url, {
-      waitUntil: 'networkidle',
-      timeout
-    });
+    try {
+      await page.goto(url, {
+        waitUntil: 'networkidle',
+        timeout
+      });
+    } catch (navError) {
+      // If networkidle times out, try with domcontentloaded as fallback
+      if (navError.message.includes('Timeout') || navError.message.includes('timeout')) {
+        console.log(`[JS Renderer] Network idle timeout, retrying with domcontentloaded...`);
+        await page.goto(url, {
+          waitUntil: 'domcontentloaded',
+          timeout: Math.min(timeout, 10000) // Shorter timeout for fallback
+        });
+      } else {
+        throw navError;
+      }
+    }
 
     // Wait for specific selector if provided
     if (waitForSelector) {
