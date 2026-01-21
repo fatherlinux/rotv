@@ -40,10 +40,11 @@ case "${1:-help}" in
         podman stop "$CONTAINER_NAME" 2>/dev/null || true
         podman rm "$CONTAINER_NAME" 2>/dev/null || true
 
-        # Set up permissions if directory is empty or newly created
+        # Set up permissions for bind-mounted data directory
+        # Use podman unshare to set ownership to postgres user (UID 70 in container)
         if [ ! -f "$DATA_DIR/PG_VERSION" ]; then
             echo "Setting up data directory permissions..."
-            podman unshare chown 1000:1000 "$DATA_DIR" 2>/dev/null || true
+            podman unshare chown 70:70 "$DATA_DIR" 2>/dev/null || true
             podman unshare chmod 700 "$DATA_DIR" 2>/dev/null || true
         fi
 
@@ -74,10 +75,11 @@ case "${1:-help}" in
         podman stop "$CONTAINER_NAME" 2>/dev/null || true
         podman rm "$CONTAINER_NAME" 2>/dev/null || true
 
-        # Set up permissions if directory is empty or newly created
+        # Set up permissions for bind-mounted data directory
+        # Use podman unshare to set ownership to postgres user (UID 70 in container)
         if [ ! -f "$DATA_DIR/PG_VERSION" ]; then
             echo "Setting up data directory permissions..."
-            podman unshare chown 1000:1000 "$DATA_DIR" 2>/dev/null || true
+            podman unshare chown 70:70 "$DATA_DIR" 2>/dev/null || true
             podman unshare chmod 700 "$DATA_DIR" 2>/dev/null || true
         fi
 
@@ -100,12 +102,12 @@ case "${1:-help}" in
 
         # Create test database if it doesn't exist
         echo "Setting up test database..."
-        podman exec "$CONTAINER_NAME" psql -U rotv -d postgres -c "DROP DATABASE IF EXISTS rotv_test;" 2>/dev/null || true
-        podman exec "$CONTAINER_NAME" psql -U rotv -d postgres -c "CREATE DATABASE rotv_test;" 2>/dev/null || true
+        podman exec "$CONTAINER_NAME" psql -U postgres -d postgres -c "DROP DATABASE IF EXISTS rotv_test;" 2>/dev/null || true
+        podman exec "$CONTAINER_NAME" psql -U postgres -d postgres -c "CREATE DATABASE rotv_test;" 2>/dev/null || true
 
         # Run migrations on test database
         echo "Running migrations on test database..."
-        podman exec "$CONTAINER_NAME" psql -U rotv -d rotv_test -f /app/migrations/schema.sql 2>/dev/null || echo "⚠ No migrations found (continuing anyway)"
+        podman exec "$CONTAINER_NAME" psql -U postgres -d rotv_test -f /app/migrations/schema.sql 2>/dev/null || echo "⚠ No migrations found (continuing anyway)"
 
         echo "✓ Test database ready"
         echo ""
