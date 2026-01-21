@@ -1,6 +1,8 @@
 # Claude Code Development Guidelines
 
-## Local Development Setup (Preferred for Development)
+## Container-Based Development (Recommended)
+
+**IMPORTANT:** Always develop using containers to ensure consistency with production. This prevents issues like missing dependencies (e.g., Playwright not installed).
 
 ### Architecture
 ```
@@ -11,52 +13,63 @@
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                 Frontend (Vite) - Port 8080                     │
-│                    React + Leaflet Map                          │
+│              Container: quay.io/fatherlinux/rotv                │
+│                        Port 8080                                │
 │                                                                 │
-│   Serves: React app with hot reload                             │
-│   Proxies: /api/*  → localhost:3001                             │
-│            /auth/* → localhost:3001                             │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                 Backend (Node.js) - Port 3001                   │
-│                    Express API Server                           │
+│   ┌─────────────────────────────────────────────────────────┐  │
+│   │ Frontend (Built Static Assets in /app/public)          │  │
+│   │ Backend (Node.js Express on :8080)                      │  │
+│   │ PostgreSQL 17 (localhost:5432)                          │  │
+│   └─────────────────────────────────────────────────────────┘  │
 │                                                                 │
-│   /api/*   - REST endpoints (destinations, filters, etc)        │
-│   /auth/*  - Google OAuth callbacks                             │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│              PostgreSQL Container - Port 5432                   │
-│                   postgres:17-alpine                            │
-│                                                                 │
-│   Data: ~/.rotv/pgdata                                          │
-│   DB: rotv  │  User: rotv  │  Pass: rotv                        │
+│   Data Volume: ~/.rotv/pgdata → /data/pgdata                   │
+│   Databases: rotv (production), rotv_test (testing)            │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### Quick Restart Script
-
-**After making code changes, use this script to restart dev servers:**
+### Quick Start
 
 ```bash
-./restart-dev.sh          # Restart both backend and frontend
-./restart-dev.sh backend  # Restart backend only
-./restart-dev.sh frontend # Restart frontend only
+# 1. Setup environment
+cp .env.example .env  # Fill in your API keys
+
+# 2. Build container
+./run.sh build
+
+# 3. Start application
+./run.sh start
+
+# 4. Run tests
+./run.sh test
 ```
 
-The script:
-- Kills existing dev servers
-- Starts them in the background
-- Logs output to `/tmp/rotv-backend.log` and `/tmp/rotv-frontend.log`
-- Verifies servers started successfully
+### Development Workflow
 
-**Important:** Always use this script after modifying `server.js`, routes, or other backend code that requires a restart.
+**Making Code Changes:**
 
-### Start Local Development
+```bash
+# Backend changes - hot reload into container
+./run.sh reload-backend
+
+# Frontend changes - rebuild and reload
+./run.sh reload-frontend
+
+# View logs
+./run.sh logs
+
+# Access container shell
+./run.sh shell
+```
+
+**Complete rebuild (for major changes):**
+
+```bash
+./run.sh stop
+./run.sh build
+./run.sh start
+```
+
+### Start Local Development (Alternative - Direct Node.js)
 
 1. **Start PostgreSQL container**:
    ```bash
