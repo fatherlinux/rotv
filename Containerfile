@@ -49,7 +49,7 @@ FROM infrastructure AS application
 # Labels at the top of app stage - bump version here to force app layer rebuild
 LABEL maintainer="fatherlinux"
 LABEL description="Roots of The Valley - Cuyahoga Valley National Park destination explorer"
-LABEL version="1.11.0"
+LABEL version="1.11.1"
 
 WORKDIR /app
 

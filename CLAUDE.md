@@ -269,26 +269,33 @@ cp .env.example backend/.env  # Fill in your API keys
 
 **Making Code Changes:**
 
+🚫 **NEVER use `./run.sh reload-backend` or `./run.sh reload-frontend`**
+
+These hot-reload commands can leave the container in an inconsistent state where code changes appear to work but are lost on restart, or where the running code doesn't match what's in the source files.
+
+✅ **ALWAYS rebuild the container after code changes:**
+
 ```bash
-# Backend changes - hot reload into container
-./run.sh reload-backend
+./run.sh build && ./run.sh start
+```
 
-# Frontend changes - rebuild and reload
-./run.sh reload-frontend
+This ensures:
+- All code changes are properly compiled into the container image
+- Frontend and backend are always in sync
+- No surprises when the container restarts
+- Consistent behavior between development and production
 
+**Utility commands (safe to use):**
+
+```bash
 # View logs
 ./run.sh logs
 
 # Access container shell
 ./run.sh shell
-```
 
-**Complete rebuild (for major changes):**
-
-```bash
-./run.sh stop
-./run.sh build
-./run.sh start
+# Run tests
+./run.sh test
 ```
 
 ### Start Local Development (Alternative - Direct Node.js)

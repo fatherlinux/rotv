@@ -4194,6 +4194,99 @@ body {
   margin: 0;
 }
 
+/* AI Provider Configuration Section */
+.ai-config-section {
+  margin-bottom: 24px;
+  padding: 16px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+}
+
+.ai-config-section h4 {
+  margin: 0 0 8px 0;
+  color: #333;
+}
+
+.ai-config-section .settings-description {
+  color: #666;
+  font-size: 0.9rem;
+  margin-bottom: 16px;
+}
+
+.config-row {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 16px;
+}
+
+.config-row label {
+  font-weight: 500;
+  margin-bottom: 4px;
+  color: #333;
+}
+
+.config-row select,
+.config-row input[type="number"] {
+  padding: 8px 12px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 14px;
+  max-width: 350px;
+  background: white;
+}
+
+.config-row select:focus,
+.config-row input[type="number"]:focus {
+  outline: none;
+  border-color: #4a7c23;
+  box-shadow: 0 0 0 2px rgba(74, 124, 35, 0.1);
+}
+
+.config-row select:disabled,
+.config-row input[type="number"]:disabled {
+  background: #f5f5f5;
+  cursor: not-allowed;
+}
+
+.config-hint {
+  font-size: 12px;
+  color: #666;
+  margin-top: 4px;
+}
+
+.ai-config-section .action-btn {
+  margin-top: 8px;
+}
+
+/* AI Provider info in progress widget */
+.progress-provider-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+.provider-label {
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.provider-value {
+  color: white;
+  font-weight: 500;
+}
+
+.provider-fallback {
+  color: rgba(255, 255, 255, 0.7);
+  font-weight: 400;
+  font-size: 0.85rem;
+}
+
 .news-actions-section {
   margin-bottom: 1.5rem;
 }
@@ -4298,6 +4391,314 @@ body {
   color: #555;
   margin: 0;
   font-size: 0.9rem;
+}
+
+/* Revamped News Settings */
+.news-settings-revamped {
+  padding: 1rem;
+}
+
+.news-settings-revamped h3 {
+  color: #2d5016;
+  margin-bottom: 0.5rem;
+  margin-top: 0;
+}
+
+.news-settings-revamped h4 {
+  color: #333;
+  margin: 1.5rem 0 1rem 0;
+  font-size: 1rem;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 0.5rem;
+}
+
+/* Collection Progress Card - Purple gradient like sidebar */
+.collection-progress-card {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 12px;
+  padding: 1.25rem;
+  margin-bottom: 1.5rem;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+  animation: slideDown 0.4s ease-out;
+}
+
+.progress-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.progress-phase {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.progress-phase .phase-icon {
+  font-size: 1.5rem;
+  display: inline-block;
+}
+
+.progress-phase .phase-icon.pulse {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.progress-phase .phase-label {
+  color: white;
+  font-weight: 600;
+  font-size: 1rem;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.progress-bar-wrapper {
+  height: 6px;
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 1rem;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  border-radius: 10px;
+  transition: width 0.5s ease;
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+  animation: shimmer 2s linear infinite;
+}
+
+.progress-counts {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.collection-progress-card .count-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: rgba(255, 255, 255, 0.2);
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  backdrop-filter: blur(10px);
+}
+
+.collection-progress-card .count-icon {
+  font-size: 1.1rem;
+}
+
+.collection-progress-card .count-value {
+  color: white;
+  font-weight: 700;
+  font-size: 1.1rem;
+}
+
+.collection-progress-card .count-label {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.collection-progress-card .count-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.progress-hint-text {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.85rem;
+  font-style: italic;
+  margin: 0;
+}
+
+/* Recent Results Section */
+.news-events-results-section {
+  margin-bottom: 1.5rem;
+}
+
+.results-tabs {
+  display: flex;
+  gap: 0.25rem;
+  background: #f0f0f0;
+  padding: 0.25rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+}
+
+.results-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1rem;
+  border: none;
+  background: transparent;
+  color: #666;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.results-tab:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: #333;
+}
+
+.results-tab.active {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  font-weight: 600;
+}
+
+.results-tab .tab-icon {
+  font-size: 1rem;
+}
+
+/* Results list */
+.results-list {
+  max-height: 400px;
+  overflow-y: auto;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 0.5rem;
+}
+
+.results-loading {
+  padding: 2rem;
+  text-align: center;
+  color: #666;
+}
+
+.no-results {
+  padding: 2rem;
+  text-align: center;
+  color: #666;
+  font-style: italic;
+}
+
+/* Item cards for news/events */
+.news-item-card,
+.event-item-card {
+  background: white;
+  border-radius: 8px;
+  padding: 0.75rem;
+  margin-bottom: 0.5rem;
+  border-left: 4px solid #6a1b9a;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.news-item-card:last-child,
+.event-item-card:last-child {
+  margin-bottom: 0;
+}
+
+.news-item-card:hover,
+.event-item-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+
+/* Type-specific border colors */
+.news-item-card.closure { border-left-color: #c62828; }
+.news-item-card.seasonal { border-left-color: #1565c0; }
+.news-item-card.maintenance { border-left-color: #f57c00; }
+.news-item-card.wildlife { border-left-color: #2e7d32; }
+.news-item-card.general { border-left-color: #6a1b9a; }
+
+.event-item-card.guided-tour { border-left-color: #1565c0; }
+.event-item-card.program { border-left-color: #6a1b9a; }
+.event-item-card.festival { border-left-color: #c62828; }
+.event-item-card.volunteer { border-left-color: #2e7d32; }
+.event-item-card.educational { border-left-color: #f57c00; }
+.event-item-card.concert { border-left-color: #e91e63; }
+
+.item-card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.item-card-title {
+  font-weight: 600;
+  color: #333;
+  font-size: 0.95rem;
+  flex: 1;
+  line-height: 1.3;
+}
+
+.item-card-delete {
+  background: none;
+  border: none;
+  color: #999;
+  font-size: 1.25rem;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.item-card-delete:hover {
+  color: #c62828;
+}
+
+.item-card-date-row {
+  font-size: 0.85rem;
+  color: #1565c0;
+  font-weight: 500;
+  margin-bottom: 0.25rem;
+}
+
+.item-card-summary {
+  font-size: 0.85rem;
+  color: #666;
+  margin: 0.25rem 0;
+  line-height: 1.4;
+}
+
+.item-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  font-size: 0.8rem;
+  margin-top: 0.5rem;
+}
+
+.item-card-poi {
+  background: #f0f0f0;
+  color: #555;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.item-card-source {
+  color: #888;
+}
+
+.item-card-date {
+  color: #888;
+}
+
+.item-card-location {
+  color: #888;
+  font-style: italic;
+}
+
+.item-card-link {
+  color: #1565c0;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.item-card-link:hover {
+  text-decoration: underline;
 }
 
 .google-integration-tab {
@@ -4862,6 +5263,205 @@ body {
     opacity: 0.85;
     transform: translateY(0);
   }
+}
+
+/* Cancel button */
+.status-cancel-btn {
+  background: rgba(244, 67, 54, 0.3);
+  border: 1px solid rgba(244, 67, 54, 0.5);
+  color: rgba(255, 255, 255, 0.95);
+  font-size: 0.8rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  backdrop-filter: blur(10px);
+  font-weight: 500;
+}
+
+.status-cancel-btn:hover {
+  background: rgba(244, 67, 54, 0.5);
+  border-color: rgba(244, 67, 54, 0.7);
+  transform: scale(1.05);
+}
+
+/* AI Stats section */
+.ai-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+  padding: 0.75rem;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 8px;
+  align-items: center;
+}
+
+.ai-provider-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ai-provider-label,
+.ai-errors-label,
+.ai-usage-label {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.ai-provider-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+}
+
+.ai-provider-name.gemini {
+  background: rgba(33, 150, 243, 0.3);
+  color: #90caf9;
+}
+
+.ai-provider-name.perplexity {
+  background: rgba(156, 39, 176, 0.3);
+  color: #ce93d8;
+}
+
+.ai-errors {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ai-error-count {
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  background: rgba(244, 67, 54, 0.3);
+  color: #ef9a9a;
+}
+
+.ai-error-count.gemini {
+  background: rgba(244, 67, 54, 0.25);
+}
+
+.ai-error-count.perplexity {
+  background: rgba(244, 67, 54, 0.25);
+}
+
+.ai-usage {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ai-usage-count {
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+}
+
+.ai-usage-count.gemini {
+  background: rgba(33, 150, 243, 0.2);
+  color: #90caf9;
+}
+
+.ai-usage-count.perplexity {
+  background: rgba(156, 39, 176, 0.2);
+  color: #ce93d8;
+}
+
+/* AI Stats Table for NewsSettings */
+.ai-stats-table {
+  margin: 0.75rem 0;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.ai-stats-header {
+  display: grid;
+  grid-template-columns: 2fr 1.5fr 1fr 1fr;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: rgba(0, 0, 0, 0.2);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.7);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.ai-stats-row {
+  display: grid;
+  grid-template-columns: 2fr 1.5fr 1fr 1fr;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.9);
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.ai-stats-row.active {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.ai-stats-row.gemini.active {
+  background: rgba(33, 150, 243, 0.15);
+}
+
+.ai-stats-row.perplexity.active {
+  background: rgba(156, 39, 176, 0.15);
+}
+
+.ai-col-provider {
+  font-weight: 600;
+}
+
+.ai-col-status {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.ai-stats-row.active .ai-col-status {
+  color: #4caf50;
+  font-weight: 600;
+}
+
+.ai-col-requests,
+.ai-col-errors {
+  text-align: center;
+  font-weight: 500;
+}
+
+.ai-stats-row .ai-col-errors {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.ai-stats-row .ai-col-errors:not(:empty) {
+  color: #ef9a9a;
+}
+
+/* Progress Header Actions (cancel/close buttons) */
+.progress-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Cancelled Badge */
+.cancelled-badge {
+  background: rgba(244, 67, 54, 0.2);
+  color: #ef9a9a;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  text-align: center;
+  margin: 0.5rem 0;
+  border: 1px solid rgba(244, 67, 54, 0.3);
 }
 
 /* Legacy step-check style (no longer used) */

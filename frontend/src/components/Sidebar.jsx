@@ -1213,6 +1213,27 @@ function PoiNews({ poiId, isAdmin, editMode, onCountChange }) {
     }
   };
 
+  const handleCancelCollection = async () => {
+    if (!poiId) return;
+    try {
+      const response = await fetch(`/api/admin/pois/${poiId}/collection-cancel`, {
+        method: 'POST',
+        credentials: 'include'
+      });
+      if (response.ok) {
+        console.log('[PoiNews] Cancellation requested');
+        // The status widget will update to show cancelled state
+        setTimeout(() => {
+          setCollecting(false);
+          setShowCompletedStatus(true);
+          localStorage.removeItem(`news-collecting-${poiId}`);
+        }, 500);
+      }
+    } catch (err) {
+      console.error('[PoiNews] Error cancelling collection:', err);
+    }
+  };
+
   const handleDelete = async (newsId) => {
     setDeleting(newsId);
     try {
@@ -1270,6 +1291,7 @@ function PoiNews({ poiId, isAdmin, editMode, onCountChange }) {
               console.log('[Sidebar] User closed status widget');
               setShowCompletedStatus(false);
             }}
+            onCancel={handleCancelCollection}
           />
         )}
 
@@ -1423,6 +1445,27 @@ function PoiEvents({ poiId, poiName, isAdmin, editMode, onCountChange }) {
     }
   };
 
+  const handleCancelCollection = async () => {
+    if (!poiId) return;
+    try {
+      const response = await fetch(`/api/admin/pois/${poiId}/collection-cancel`, {
+        method: 'POST',
+        credentials: 'include'
+      });
+      if (response.ok) {
+        console.log('[PoiEvents] Cancellation requested');
+        // The status widget will update to show cancelled state
+        setTimeout(() => {
+          setCollecting(false);
+          setShowCompletedStatus(true);
+          localStorage.removeItem(`events-collecting-${poiId}`);
+        }, 500);
+      }
+    } catch (err) {
+      console.error('[PoiEvents] Error cancelling collection:', err);
+    }
+  };
+
   const handleDelete = async (eventId) => {
     setDeleting(eventId);
     try {
@@ -1498,6 +1541,7 @@ function PoiEvents({ poiId, poiName, isAdmin, editMode, onCountChange }) {
               console.log('[Sidebar] User closed status widget');
               setShowCompletedStatus(false);
             }}
+            onCancel={handleCancelCollection}
           />
         )}
 

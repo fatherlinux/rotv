@@ -1456,11 +1456,46 @@ app.get('*', (req, res) => {
 // Start server
 const PORT = process.env.PORT || 3001;
 
+/**
+ * Set up AI search provider defaults
+ */
+async function setupAiSearchDefaults() {
+  try {
+    // Set default AI search config if not already set
+    const defaults = [
+      { key: 'ai_search_primary', value: 'gemini' },
+      { key: 'ai_search_fallback', value: 'perplexity' },
+      { key: 'ai_search_primary_limit', value: '0' } // 0 = unlimited
+    ];
+
+    for (const { key, value } of defaults) {
+      await pool.query(`
+        INSERT INTO admin_settings (key, value, updated_at)
+        VALUES ($1, $2, CURRENT_TIMESTAMP)
+        ON CONFLICT (key) DO NOTHING
+      `, [key, value]);
+    }
+
+    // Ensure last_news_collection column exists for tracking
+    await pool.query(`
+      ALTER TABLE pois
+      ADD COLUMN IF NOT EXISTS last_news_collection TIMESTAMP
+    `);
+
+    console.log('[AI Search] Default configuration verified');
+  } catch (error) {
+    console.error('[AI Search] Error setting up defaults:', error.message);
+  }
+}
+
 async function start() {
   await initDatabase();
 
   // Ensure news job checkpoint columns exist for resumability
   await ensureNewsJobCheckpointColumns(pool);
+
+  // Set up AI search provider defaults
+  await setupAiSearchDefaults();
 
   // Initialize job scheduler for news collection
   const connectionString = `postgresql://${process.env.PGUSER || 'rotv'}:${process.env.PGPASSWORD || 'rotv'}@${process.env.PGHOST || 'localhost'}:${process.env.PGPORT || 5432}/${process.env.PGDATABASE || 'rotv'}`;
@@ -1468,18 +1503,20 @@ async function start() {
   try {
     await initJobScheduler(connectionString);
 
-    // Register scheduled news collection handler (daily at 6 AM)
+    // Register scheduled news collection handler (daily job for all POIs)
     await registerNewsCollectionHandler(async () => {
-      console.log('Running scheduled news collection...');
-      const result = await runNewsCollection(pool);
-      console.log(`News collection completed: ${result.newsFound} news items, ${result.eventsFound} events found`);
+      console.log('Running scheduled news collection for all POIs...');
+      const result = await runNewsCollection(pool, null);
+      if (result.totalPois > 0) {
+        console.log(`News collection completed: ${result.newsFound} news items, ${result.eventsFound} events found`);
+      } else {
+        console.log('No POIs to collect');
+      }
     });
 
     // Register batch news collection handler (for admin-triggered jobs via pg-boss)
     await registerBatchNewsHandler(async (pgBossJobId, jobData) => {
       console.log(`[pg-boss] Processing batch news job: ${pgBossJobId}`);
-      // Note: sheets client is not available in the worker context
-      // Jobs will sync to sheets on completion if they find any news/events
       await processNewsCollectionJob(pool, null, pgBossJobId, jobData);
     });
 
@@ -1507,7 +1544,7 @@ async function start() {
     // Continue without scheduler - manual triggers still work via admin route
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  app.listen(PORT, '::', () => {
     console.log(`Roots of The Valley API running on port ${PORT}`);
   });
 }

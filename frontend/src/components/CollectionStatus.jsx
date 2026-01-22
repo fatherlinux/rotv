@@ -57,7 +57,7 @@ const PHASE_CONFIG = {
   }
 };
 
-function CollectionStatus({ poiId, isCollecting, onComplete, onClose, type }) {
+function CollectionStatus({ poiId, isCollecting, onComplete, onClose, onCancel, type }) {
   const [progress, setProgress] = useState(null);
   const [finalStats, setFinalStats] = useState(null);
   const startTimeRef = React.useRef(Date.now());
@@ -191,6 +191,9 @@ function CollectionStatus({ poiId, isCollecting, onComplete, onClose, type }) {
         </div>
         <div className="status-header-right">
           <div className="status-timer">{elapsedSeconds}s</div>
+          {onCancel && !isComplete && (
+            <button className="status-cancel-btn" onClick={onCancel} title="Cancel job">Cancel</button>
+          )}
           {onClose && isComplete && (
             <button className="status-close-btn" onClick={onClose} title="Close status">×</button>
           )}
@@ -200,6 +203,32 @@ function CollectionStatus({ poiId, isCollecting, onComplete, onClose, type }) {
       {!isComplete && (
         <div className="status-message">{displayProgress.message}</div>
       )}
+
+      {/* AI Provider Stats - Two rows for each provider */}
+      <div className="ai-stats-table">
+        <div className="ai-stats-header">
+          <span className="ai-col-provider">Provider</span>
+          <span className="ai-col-status">Status</span>
+          <span className="ai-col-requests">Requests</span>
+          <span className="ai-col-errors">429 Errors</span>
+        </div>
+        <div className={`ai-stats-row gemini ${displayProgress.aiStats?.activeProvider === 'gemini' ? 'active' : ''}`}>
+          <span className="ai-col-provider">🔷 Gemini</span>
+          <span className="ai-col-status">
+            {displayProgress.aiStats?.activeProvider === 'gemini' ? '⚡ Active' : '—'}
+          </span>
+          <span className="ai-col-requests">{displayProgress.aiStats?.usage?.gemini || 0}</span>
+          <span className="ai-col-errors">{displayProgress.aiStats?.errors?.gemini429 || 0}</span>
+        </div>
+        <div className={`ai-stats-row perplexity ${displayProgress.aiStats?.activeProvider === 'perplexity' ? 'active' : ''}`}>
+          <span className="ai-col-provider">🟣 Perplexity</span>
+          <span className="ai-col-status">
+            {displayProgress.aiStats?.activeProvider === 'perplexity' ? '⚡ Active' : '—'}
+          </span>
+          <span className="ai-col-requests">{displayProgress.aiStats?.usage?.perplexity || 0}</span>
+          <span className="ai-col-errors">{displayProgress.aiStats?.errors?.perplexity429 || 0}</span>
+        </div>
+      </div>
 
       {displayProgress.phase !== 'error' && (
         <div className="status-progress-bar">

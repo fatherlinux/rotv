@@ -1,25 +1,5 @@
 import React, { useState, useEffect } from 'react';
-
-function formatDate(dateString) {
-  if (!dateString) return 'N/A';
-  return new Date(dateString).toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit'
-  });
-}
-
-function formatDuration(ms) {
-  if (!ms) return 'N/A';
-  const seconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(seconds / 60);
-  if (minutes > 0) {
-    return `${minutes}m ${seconds % 60}s`;
-  }
-  return `${seconds}s`;
-}
+import { formatDateTime } from './NewsEventsShared';
 
 function NewsSettings() {
   const [jobStatus, setJobStatus] = useState(null);
@@ -29,25 +9,49 @@ function NewsSettings() {
   const [result, setResult] = useState(null);
   const [liveProgress, setLiveProgress] = useState(null);
   const [activeJobId, setActiveJobId] = useState(null);
+  const [aiStats, setAiStats] = useState(null);
+
+  // AI provider configuration state
+  const [aiConfig, setAiConfig] = useState({
+    primary: 'perplexity',
+    fallback: 'none',
+    primaryLimit: 0
+  });
+  const [aiConfigLoading, setAiConfigLoading] = useState(true);
+  const [aiConfigSaving, setAiConfigSaving] = useState(false);
 
   useEffect(() => {
     fetchJobStatus();
-    // Check for running jobs on mount
     checkForRunningJob();
+    fetchAiConfig();
   }, []);
 
-  // Poll for active job status
+  // Poll for active job status and AI stats
   useEffect(() => {
     if (!activeJobId) return;
 
     const pollInterval = setInterval(async () => {
       try {
+        // Fetch job status
         const response = await fetch(`/api/admin/news/job/${activeJobId}`, {
           credentials: 'include'
         });
         if (response.ok) {
           const status = await response.json();
           setLiveProgress(status);
+
+          // Fetch AI stats while job is running
+          try {
+            const statsResponse = await fetch('/api/admin/news/ai-stats', {
+              credentials: 'include'
+            });
+            if (statsResponse.ok) {
+              const stats = await statsResponse.json();
+              setAiStats(stats);
+            }
+          } catch (statsErr) {
+            console.error('Error fetching AI stats:', statsErr);
+          }
 
           if (status.status === 'completed') {
             clearInterval(pollInterval);
@@ -58,7 +62,7 @@ function NewsSettings() {
               message: `Completed! Found ${status.news_found} news and ${status.events_found} events from ${status.pois_processed} POIs`
             });
             setLiveProgress(null);
-            fetchJobStatus(); // Refresh the last job display
+            fetchJobStatus();
           } else if (status.status === 'failed') {
             clearInterval(pollInterval);
             setCollecting(false);
@@ -69,15 +73,40 @@ function NewsSettings() {
             });
             setLiveProgress(null);
             fetchJobStatus();
+          } else if (status.status === 'cancelled') {
+            clearInterval(pollInterval);
+            setCollecting(false);
+            setActiveJobId(null);
+            // Keep liveProgress visible with cancelled status
+            setLiveProgress({
+              ...status,
+              cancelledMessage: `Job cancelled at ${status.pois_processed}/${status.total_pois} POIs`
+            });
+            fetchJobStatus();
           }
         }
       } catch (err) {
         console.error('Error polling job status:', err);
       }
-    }, 2000); // Poll every 2 seconds
+    }, 2000);
 
     return () => clearInterval(pollInterval);
   }, [activeJobId]);
+
+  const handleCancelJob = async () => {
+    if (!activeJobId) return;
+    try {
+      const response = await fetch(`/api/admin/news/job/${activeJobId}/cancel`, {
+        method: 'POST',
+        credentials: 'include'
+      });
+      if (response.ok) {
+        console.log('Job cancellation requested');
+      }
+    } catch (err) {
+      console.error('Error cancelling job:', err);
+    }
+  };
 
   const fetchJobStatus = async () => {
     try {
@@ -103,7 +132,6 @@ function NewsSettings() {
       if (response.ok) {
         const data = await response.json();
         if (data.status === 'running') {
-          // There's a running job - start polling
           setActiveJobId(data.id);
           setCollecting(true);
           setLiveProgress(data);
@@ -111,6 +139,66 @@ function NewsSettings() {
       }
     } catch (err) {
       console.error('Error checking for running job:', err);
+    }
+  };
+
+  const fetchAiConfig = async () => {
+    try {
+      const response = await fetch('/api/admin/settings', {
+        credentials: 'include'
+      });
+      if (response.ok) {
+        const settings = await response.json();
+        // Settings are returned as {value, updatedAt} objects
+        setAiConfig({
+          primary: settings.ai_search_primary?.value || 'perplexity',
+          fallback: settings.ai_search_fallback?.value || 'none',
+          primaryLimit: parseInt(settings.ai_search_primary_limit?.value) || 0
+        });
+      }
+    } catch (err) {
+      console.error('Error fetching AI config:', err);
+    } finally {
+      setAiConfigLoading(false);
+    }
+  };
+
+  const handleSaveAiConfig = async () => {
+    setAiConfigSaving(true);
+    setResult(null);
+
+    try {
+      const settings = [
+        { key: 'ai_search_primary', value: aiConfig.primary },
+        { key: 'ai_search_fallback', value: aiConfig.fallback },
+        { key: 'ai_search_primary_limit', value: String(aiConfig.primaryLimit) }
+      ];
+
+      for (const setting of settings) {
+        const response = await fetch(`/api/admin/settings/${setting.key}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ value: setting.value })
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || 'Failed to save setting');
+        }
+      }
+
+      setResult({
+        type: 'success',
+        message: 'AI provider configuration saved successfully'
+      });
+    } catch (err) {
+      setResult({
+        type: 'error',
+        message: `Failed to save AI config: ${err.message}`
+      });
+    } finally {
+      setAiConfigSaving(false);
     }
   };
 
@@ -192,103 +280,188 @@ function NewsSettings() {
   };
 
   return (
-    <div className="news-settings">
+    <div className="news-settings-revamped">
       <h3>News & Events Collection</h3>
       <p className="settings-description">
         News and events are collected automatically each day at 6 AM Eastern time using AI-powered web search.
         You can also trigger collection manually below.
       </p>
 
-      {/* Live Progress (shown when job is running) */}
+      {/* Live Progress - Purple gradient styling */}
       {liveProgress && (
-        <div className="news-status-section live-progress">
-          <h4>Live Progress</h4>
-          <div className="job-status-card running">
-            <div className="progress-bar-container">
-              <div
-                className="progress-bar"
-                style={{
-                  width: liveProgress.total_pois > 0
-                    ? `${(liveProgress.pois_processed / liveProgress.total_pois) * 100}%`
-                    : '0%'
-                }}
-              />
+        <div className="collection-progress-card">
+          <div className="progress-card-header">
+            <div className="progress-phase">
+              <span className={`phase-icon ${liveProgress.status !== 'completed' && liveProgress.status !== 'cancelled' ? 'pulse' : ''}`}>
+                {liveProgress.status === 'completed' ? '✓' :
+                 liveProgress.status === 'cancelled' ? '✗' : '🔍'}
+              </span>
+              <span className="phase-label">
+                {liveProgress.status === 'completed' ? 'Complete' :
+                 liveProgress.status === 'cancelled' ? 'Cancelled' : 'Collecting News & Events'}
+              </span>
             </div>
-            <div className="progress-stats">
-              <div className="progress-stat">
-                <span className="stat-label">POIs:</span>
-                <span className="stat-value">
-                  {liveProgress.pois_processed}
-                  {liveProgress.total_pois > 0 && ` / ${liveProgress.total_pois}`}
+            <div className="progress-header-actions">
+              {collecting && liveProgress.status !== 'completed' && liveProgress.status !== 'cancelled' && (
+                <button className="status-cancel-btn" onClick={handleCancelJob} title="Cancel job">
+                  Cancel
+                </button>
+              )}
+              {(liveProgress.status === 'completed' || liveProgress.status === 'cancelled') && (
+                <button className="status-close-btn" onClick={() => setLiveProgress(null)} title="Close">
+                  ×
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Cancelled message badge */}
+          {liveProgress.cancelledMessage && (
+            <div className="cancelled-badge">
+              {liveProgress.cancelledMessage}
+            </div>
+          )}
+
+          <div className="progress-bar-wrapper">
+            <div
+              className="progress-bar-fill"
+              style={{
+                width: liveProgress.total_pois > 0
+                  ? `${(liveProgress.pois_processed / liveProgress.total_pois) * 100}%`
+                  : '0%',
+                background: liveProgress.status === 'completed'
+                  ? 'linear-gradient(90deg, #4caf50, #8bc34a)'
+                  : 'linear-gradient(90deg, #fff, rgba(255,255,255,0.7))'
+              }}
+            />
+          </div>
+
+          <div className="progress-counts">
+            <div className="count-badge">
+              <span className="count-icon">📍</span>
+              <div className="count-details">
+                <span className="count-value">{liveProgress.pois_processed || 0}</span>
+                <span className="count-label">
+                  {liveProgress.total_pois > 0 ? ` / ${liveProgress.total_pois}` : ''} POIs
                 </span>
               </div>
-              <div className="progress-stat">
-                <span className="stat-label">News Found:</span>
-                <span className="stat-value">{liveProgress.news_found || 0}</span>
-              </div>
-              <div className="progress-stat">
-                <span className="stat-label">Events Found:</span>
-                <span className="stat-value">{liveProgress.events_found || 0}</span>
+            </div>
+            <div className="count-badge">
+              <span className="count-icon">📰</span>
+              <div className="count-details">
+                <span className="count-value">{liveProgress.news_found || 0}</span>
+                <span className="count-label">News</span>
               </div>
             </div>
-            <p className="progress-hint">
-              Processing {liveProgress.total_pois > 0 ? liveProgress.total_pois : 'all'} POIs in parallel (15 at a time)...
-            </p>
+            <div className="count-badge">
+              <span className="count-icon">📅</span>
+              <div className="count-details">
+                <span className="count-value">{liveProgress.events_found || 0}</span>
+                <span className="count-label">Events</span>
+              </div>
+            </div>
           </div>
+
+          {/* AI Stats - Two rows for each provider */}
+          <div className="ai-stats-table">
+            <div className="ai-stats-header">
+              <span className="ai-col-provider">Provider</span>
+              <span className="ai-col-status">Status</span>
+              <span className="ai-col-requests">Requests</span>
+              <span className="ai-col-errors">429 Errors</span>
+            </div>
+            <div className={`ai-stats-row gemini ${aiStats?.activeProvider === 'gemini' ? 'active' : ''}`}>
+              <span className="ai-col-provider">🔷 Gemini</span>
+              <span className="ai-col-status">
+                {aiStats?.activeProvider === 'gemini' ? '⚡ Active' : '—'}
+              </span>
+              <span className="ai-col-requests">{aiStats?.usage?.gemini || 0}</span>
+              <span className="ai-col-errors">{aiStats?.errors?.gemini429 || 0}</span>
+            </div>
+            <div className={`ai-stats-row perplexity ${aiStats?.activeProvider === 'perplexity' ? 'active' : ''}`}>
+              <span className="ai-col-provider">🟣 Perplexity</span>
+              <span className="ai-col-status">
+                {aiStats?.activeProvider === 'perplexity' ? '⚡ Active' : '—'}
+              </span>
+              <span className="ai-col-requests">{aiStats?.usage?.perplexity || 0}</span>
+              <span className="ai-col-errors">{aiStats?.errors?.perplexity429 || 0}</span>
+            </div>
+          </div>
+
+          <p className="progress-hint-text">
+            Processing {liveProgress.total_pois > 0 ? liveProgress.total_pois : 'all'} POIs in parallel (1 new job/second)...
+          </p>
         </div>
       )}
 
-      {/* Last Job Status */}
-      <div className="news-status-section">
-        <h4>Last Collection Job</h4>
-        {loading ? (
-          <p>Loading status...</p>
-        ) : jobStatus ? (
-          <div className="job-status-card">
-            <div className="status-row">
-              <span className="status-label">Status:</span>
-              <span className={`status-value status-${jobStatus.status}`}>
-                {jobStatus.status}
-              </span>
-            </div>
-            <div className="status-row">
-              <span className="status-label">Type:</span>
-              <span className="status-value">{jobStatus.job_type || 'manual'}</span>
-            </div>
-            <div className="status-row">
-              <span className="status-label">Started:</span>
-              <span className="status-value">{formatDate(jobStatus.started_at)}</span>
-            </div>
-            {jobStatus.completed_at && (
-              <div className="status-row">
-                <span className="status-label">Completed:</span>
-                <span className="status-value">{formatDate(jobStatus.completed_at)}</span>
-              </div>
-            )}
-            <div className="status-row">
-              <span className="status-label">POIs Processed:</span>
-              <span className="status-value">
-                {jobStatus.pois_processed || 0}
-                {jobStatus.total_pois > 0 && ` / ${jobStatus.total_pois}`}
-              </span>
-            </div>
-            <div className="status-row">
-              <span className="status-label">News Found:</span>
-              <span className="status-value">{jobStatus.news_found || 0}</span>
-            </div>
-            <div className="status-row">
-              <span className="status-label">Events Found:</span>
-              <span className="status-value">{jobStatus.events_found || 0}</span>
-            </div>
-            {jobStatus.error_message && (
-              <div className="status-row error">
-                <span className="status-label">Error:</span>
-                <span className="status-value">{jobStatus.error_message}</span>
-              </div>
-            )}
-          </div>
+      {/* AI Provider Configuration */}
+      <div className="ai-config-section">
+        <h4>AI Search Provider</h4>
+        <p className="settings-description">
+          Configure which AI provider to use for news/events web search.
+        </p>
+
+        {aiConfigLoading ? (
+          <p>Loading configuration...</p>
         ) : (
-          <p className="no-status">No collection jobs have run yet.</p>
+          <>
+            <div className="config-row">
+              <label>Primary Provider:</label>
+              <select
+                value={aiConfig.primary}
+                onChange={e => setAiConfig({...aiConfig, primary: e.target.value})}
+                disabled={aiConfigSaving}
+              >
+                <option value="gemini">Google Gemini (with Google Search)</option>
+                <option value="perplexity">Perplexity Sonar (with web search)</option>
+              </select>
+            </div>
+
+            <div className="config-row">
+              <label>Fallback Provider:</label>
+              <select
+                value={aiConfig.fallback}
+                onChange={e => setAiConfig({...aiConfig, fallback: e.target.value})}
+                disabled={aiConfigSaving}
+              >
+                <option value="none">None (no fallback)</option>
+                <option value="gemini">Google Gemini</option>
+                <option value="perplexity">Perplexity Sonar</option>
+              </select>
+              <span className="config-hint">
+                Used if primary provider fails or hits its limit
+              </span>
+            </div>
+
+            <div className="config-row">
+              <label>Primary Limit (0 = unlimited):</label>
+              <input
+                type="number"
+                value={aiConfig.primaryLimit === 0 ? '' : aiConfig.primaryLimit}
+                onChange={e => setAiConfig({...aiConfig, primaryLimit: e.target.value === '' ? 0 : parseInt(e.target.value) || 0})}
+                onBlur={e => {
+                  if (e.target.value === '') {
+                    setAiConfig({...aiConfig, primaryLimit: 0});
+                  }
+                }}
+                placeholder="0"
+                min="0"
+                step="100"
+                disabled={aiConfigSaving}
+              />
+              <span className="config-hint">
+                Switch to fallback after this many requests per job (helps stay under rate limits)
+              </span>
+            </div>
+
+            <button
+              className="action-btn primary"
+              onClick={handleSaveAiConfig}
+              disabled={aiConfigSaving || collecting}
+            >
+              {aiConfigSaving ? 'Saving...' : 'Save AI Configuration'}
+            </button>
+          </>
         )}
       </div>
 
@@ -332,12 +505,66 @@ function NewsSettings() {
         </div>
       )}
 
+      {/* Last Job Status */}
+      <div className="news-status-section">
+        <h4>Last Collection Job</h4>
+        {loading ? (
+          <p>Loading status...</p>
+        ) : jobStatus ? (
+          <div className="job-status-card">
+            <div className="status-row">
+              <span className="status-label">Status:</span>
+              <span className={`status-value status-${jobStatus.status}`}>
+                {jobStatus.status}
+              </span>
+            </div>
+            <div className="status-row">
+              <span className="status-label">Type:</span>
+              <span className="status-value">{jobStatus.job_type || 'manual'}</span>
+            </div>
+            <div className="status-row">
+              <span className="status-label">Started:</span>
+              <span className="status-value">{formatDateTime(jobStatus.started_at)}</span>
+            </div>
+            {jobStatus.completed_at && (
+              <div className="status-row">
+                <span className="status-label">Completed:</span>
+                <span className="status-value">{formatDateTime(jobStatus.completed_at)}</span>
+              </div>
+            )}
+            <div className="status-row">
+              <span className="status-label">POIs Processed:</span>
+              <span className="status-value">
+                {jobStatus.pois_processed || 0}
+                {jobStatus.total_pois > 0 && ` / ${jobStatus.total_pois}`}
+              </span>
+            </div>
+            <div className="status-row">
+              <span className="status-label">News Found:</span>
+              <span className="status-value">{jobStatus.news_found || 0}</span>
+            </div>
+            <div className="status-row">
+              <span className="status-label">Events Found:</span>
+              <span className="status-value">{jobStatus.events_found || 0}</span>
+            </div>
+            {jobStatus.error_message && (
+              <div className="status-row error">
+                <span className="status-label">Error:</span>
+                <span className="status-value">{jobStatus.error_message}</span>
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="no-status">No collection jobs have run yet.</p>
+        )}
+      </div>
+
       {/* Schedule Info */}
       <div className="news-schedule-section">
         <h4>Automatic Schedule</h4>
         <p>
           News collection runs automatically every day at <strong>6:00 AM Eastern Time</strong>.
-          The job processes up to 50 POIs per run and uses Google Search grounding for accurate, current information.
+          Jobs are dispatched in parallel (1 new POI per second) for faster processing.
         </p>
       </div>
     </div>

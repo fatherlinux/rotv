@@ -32,10 +32,18 @@ The system prevents duplicates using two complementary strategies:
 
 This robust deduplication allows admins to refresh news multiple times without creating duplicates, even when the AI finds the same articles through different search paths.
 
-**5. Timezone-Aware Date Parsing**
+**5. Multi-Provider AI Strategy**
+The system supports multiple AI providers with automatic fallback. Administrators can configure:
+- **Primary Provider**: First choice for searches (Gemini or Perplexity)
+- **Secondary Provider**: Fallback when primary reaches rate limits
+- **Usage Limits**: Configure per-job request limits for each provider (0 = unlimited)
+
+When the primary provider hits its configured limit or returns rate-limiting errors (HTTP 429), the system automatically switches to the secondary provider. This ensures uninterrupted collection even under heavy load.
+
+**6. Timezone-Aware Date Parsing**
 All dates are interpreted in the user's configured timezone (defaults to Eastern Time for Cuyahoga Valley). The AI extracts dates in ISO 8601 format (YYYY-MM-DD), ensuring consistency across all sources and preventing timezone-related bugs. This is especially important for event start dates and news publication dates.
 
-**6. Real-Time Progress Tracking**
+**7. Real-Time Progress Tracking**
 The UI displays a scrollable status widget that moves through distinct phases:
 - Rendering JavaScript-heavy pages
 - AI search with Google Search grounding
@@ -43,9 +51,21 @@ The UI displays a scrollable status widget that moves through distinct phases:
 - Searching Google News for external coverage
 - Saving items to database
 
+The progress widget also displays real-time AI provider statistics:
+- Current primary/secondary provider being used
+- Number of requests made to each provider
+- Total usage across the job session
+
 Admins can scroll down to see newly added items while the collection is still running, providing immediate feedback and transparency into what the system is finding.
 
-**7. Quality Filters and Validation**
+**8. Batch Job Cancellation**
+Long-running batch jobs can be cancelled at any time via the Cancel button. When cancelled:
+- The system stops starting new POI collections
+- In-flight POIs complete naturally (no data loss)
+- Job status updates to "cancelled" with a distinctive UI badge
+- Progress shows how many POIs were processed before cancellation
+
+**9. Quality Filters and Validation**
 - **Date filtering**: News older than 365 days is automatically excluded (unless from a dedicated news page)
 - **Past event filtering**: Events with end dates in the past are skipped
 - **Failed URL resolution**: Items with unresolvable redirect URLs are discarded to maintain data quality
@@ -75,8 +95,11 @@ Admins can scroll down to see newly added items while the collection is still ru
 ### Technology Stack
 
 - **Playwright**: Headless browser automation for JavaScript rendering
-- **Google Gemini 1.5 Flash**: AI-powered content extraction with search grounding
+- **AI Providers** (configurable primary/secondary):
+  - **Google Gemini 2.0 Flash**: AI-powered content extraction with search grounding
+  - **Perplexity Sonar Pro**: Alternative AI with built-in web search capability
 - **PostgreSQL**: Structured storage for news, events, and deduplication
+- **pg-boss**: Job queue for reliable background processing
 - **Node.js/Express**: Backend API and orchestration
 - **React**: Real-time progress tracking UI
 
@@ -156,14 +179,26 @@ The News & Events collection system uses AI-powered research combined with headl
 └─────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────┐
-│                  Google Gemini 1.5 Flash                        │
-│  (backend/services/geminiService.js)                            │
+│                   AI Search Factory                             │
+│  (backend/services/aiSearchFactory.js)                          │
 │                                                                 │
-│  - Google Search grounding enabled                              │
-│  - Custom prompts with POI context                              │
-│  - Structured JSON output parsing                               │
-│  - Temperature: 0.1 (deterministic)                             │
+│  - Selects AI provider based on configuration                   │
+│  - Tracks usage per job session                                 │
+│  - Auto-fallback on rate limits (429 errors)                    │
+│  - Provides unified interface for news/events collection        │
 └─────────────────────────────────────────────────────────────────┘
+                              │
+              ┌───────────────┴───────────────┐
+              ▼                               ▼
+┌─────────────────────────────┐ ┌─────────────────────────────────┐
+│   Google Gemini 2.0 Flash   │ │     Perplexity Sonar Pro        │
+│  (geminiService.js)         │ │    (perplexityService.js)       │
+│                             │ │                                 │
+│  - Google Search grounding  │ │  - Built-in web search          │
+│  - Custom prompts           │ │  - Citations included           │
+│  - Structured JSON output   │ │  - Structured JSON output       │
+│  - Temperature: 0.1         │ │  - Temperature: 0.1             │
+└─────────────────────────────┘ └─────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
@@ -233,6 +268,57 @@ renderJavaScriptPage(url, {
   waitTime: 4000,        // Additional JS execution wait (4s)
   waitForSelector: null  // Optional specific element to wait for
 })
+```
+
+## AI Provider System
+
+### Provider Configuration
+
+The system supports two AI providers that can be configured as primary or secondary:
+
+| Provider | Model | Key Features |
+|----------|-------|--------------|
+| **Gemini** | gemini-2.0-flash | Google Search grounding, high accuracy |
+| **Perplexity** | sonar-pro | Built-in web search, includes citations |
+
+**Configuration is stored in the database (`ai_config` table) and can be changed via the Admin Settings UI.**
+
+### AI Search Factory
+
+The `aiSearchFactory.js` module provides a unified interface for AI searches:
+
+```javascript
+// Factory exports
+import {
+  performAiSearch,    // Main search function - auto-selects provider
+  getJobStats,        // Get current usage stats for display
+  resetJobUsage,      // Reset counters for new job session
+  forceProviderSwitch // Manually switch providers (for testing)
+} from '../services/aiSearchFactory.js';
+
+// Usage tracking per job session
+const stats = getJobStats();
+// Returns: { gemini: 15, perplexity: 5, rateLimitHits: 2 }
+```
+
+### Fallback Behavior
+
+1. **Usage Limit Fallback**: When primary provider reaches configured limit, switches to secondary
+2. **Rate Limit Fallback**: On HTTP 429 errors, automatically retries with secondary provider
+3. **Error Tracking**: Rate limit hits are counted and displayed in the UI
+
+### Admin Settings UI
+
+Administrators can configure AI providers via the Settings page:
+
+- **Primary Provider**: Select Gemini or Perplexity as default
+- **Primary Limit**: Maximum requests before switching (0 = unlimited)
+- **Secondary Provider**: Fallback provider
+- **Secondary Limit**: Maximum secondary requests (0 = unlimited)
+
+The UI displays real-time statistics during collection:
+```
+AI Stats: Gemini: 10 | Perplexity: 5 | Rate Limits: 0
 ```
 
 ## AI Collection Prompt System
@@ -459,6 +545,20 @@ FROM news_job_status
 WHERE job_id = $1
 ```
 
+### Cancel Batch Job
+
+**PUT /api/admin/news/batch-collect/:jobId/cancel**
+
+Cancels a running batch job.
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Job 550e8400-e29b-41d4-a716-446655440000 cancelled"
+}
+```
+
 ### Read Endpoints
 
 **GET /api/pois/:id/news?limit=20**
@@ -472,6 +572,58 @@ Returns upcoming events for a POI, sorted by start_date.
 **GET /api/admin/news/job-status/:jobId**
 
 Returns batch job status and progress.
+
+**GET /api/admin/news/ai-stats**
+
+Returns current AI provider usage statistics.
+
+```json
+{
+  "gemini": 15,
+  "perplexity": 5,
+  "rateLimitHits": 2
+}
+```
+
+## Job Scheduling
+
+### Daily Scheduled Collection
+
+The system uses pg-boss for reliable job scheduling with PostgreSQL as the backing store.
+
+**Schedule:** Daily at 6:00 AM Eastern Time
+
+```javascript
+// Cron expression: 0 6 * * * (6 AM daily)
+await scheduleNewsCollection('0 6 * * *');
+```
+
+**Job Types:**
+
+| Job Name | Purpose |
+|----------|---------|
+| `news-collection` | Scheduled daily collection for all POIs |
+| `news-collection-poi` | Individual POI processing (internal) |
+| `news-batch-collection` | Admin-triggered batch collection |
+
+### Batch Job Lifecycle
+
+1. **Submit**: Admin clicks "Update News & Events" → creates job in `news_job_status` table
+2. **Queue**: Job submitted to pg-boss queue for background processing
+3. **Process**: Worker picks up job, processes POIs with configurable concurrency
+4. **Progress**: Real-time updates written to database, polled by frontend
+5. **Complete/Cancel**: Job finishes normally or is cancelled by admin
+
+### Cancellation Flow
+
+```
+Admin clicks Cancel → PUT /api/admin/news/batch-collect/:id/cancel
+                    → Database status set to 'cancelled'
+                    → Worker checks status before each new POI
+                    → In-flight POIs complete naturally
+                    → No new POIs started
+                    → Final status remains 'cancelled'
+```
 
 ## Frontend Components
 
@@ -536,8 +688,9 @@ Returns batch job status and progress.
 ### Environment Variables
 
 ```bash
-# Gemini API
+# AI Provider API Keys
 GEMINI_API_KEY=your_gemini_api_key_here
+PERPLEXITY_API_KEY=your_perplexity_api_key_here
 
 # Playwright
 PLAYWRIGHT_BROWSERS_PATH=/path/to/browsers  # Optional
@@ -548,15 +701,37 @@ POSTGRES_PASSWORD=rotv
 POSTGRES_DB=rotv
 ```
 
+### AI Configuration Table
+
+The `ai_config` table stores provider settings:
+
+```sql
+CREATE TABLE ai_config (
+  key VARCHAR(100) PRIMARY KEY,
+  value VARCHAR(500) NOT NULL,
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Default values
+INSERT INTO ai_config (key, value) VALUES
+  ('primary_provider', 'gemini'),
+  ('secondary_provider', 'perplexity'),
+  ('primary_limit', '0'),      -- 0 = unlimited
+  ('secondary_limit', '0');
+```
+
 ### Dependencies
 
 **Backend:**
 ```json
 {
   "playwright": "^1.40.0",
-  "@google/generative-ai": "^0.2.0"
+  "@google/generative-ai": "^0.2.0",
+  "pg-boss": "^10.0.0"
 }
 ```
+
+**Note:** Perplexity API uses standard HTTP requests, no additional package required.
 
 **Installation:**
 ```bash
@@ -700,6 +875,17 @@ console.log(`[JS Renderer] Rendered ${content.text.length} chars`);
 ```
 
 ## Changelog
+
+**Version 1.4.0 (2026-01-22)**
+- ✨ Added multi-provider AI support (Gemini + Perplexity with automatic fallback)
+- ✨ Added AI provider configuration UI in Admin Settings
+- ✨ Added real-time AI usage statistics display during collection
+- ✨ Added batch job cancellation feature with Cancel button
+- ✨ Added cancelled status badge for stopped jobs
+- 🔧 Simplified scheduling to single daily job at 6 AM Eastern (removed tier system)
+- 🐛 Fixed single-POI collection not respecting provider fallback limits
+- 🐛 Fixed Primary Limit input UX (step by 100, empty field shows 0)
+- 📝 Updated architecture documentation
 
 **Version 1.3.0 (2026-01-20)**
 - ✨ Added Playwright JavaScript rendering for Wix/Squarespace sites

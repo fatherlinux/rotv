@@ -26,6 +26,7 @@ ENV_ARGS=""
 [ -n "$GOOGLE_CLIENT_SECRET" ] && ENV_ARGS="$ENV_ARGS -e GOOGLE_CLIENT_SECRET=$GOOGLE_CLIENT_SECRET"
 [ -n "$SESSION_SECRET" ] && ENV_ARGS="$ENV_ARGS -e SESSION_SECRET=$SESSION_SECRET"
 [ -n "$GEMINI_API_KEY" ] && ENV_ARGS="$ENV_ARGS -e GEMINI_API_KEY=$GEMINI_API_KEY"
+[ -n "$PERPLEXITY_API_KEY" ] && ENV_ARGS="$ENV_ARGS -e PERPLEXITY_API_KEY=$PERPLEXITY_API_KEY"
 [ -n "$GOOGLE_SHEETS_CREDENTIALS" ] && ENV_ARGS="$ENV_ARGS -e GOOGLE_SHEETS_CREDENTIALS=$GOOGLE_SHEETS_CREDENTIALS"
 [ -n "$FACEBOOK_APP_ID" ] && ENV_ARGS="$ENV_ARGS -e FACEBOOK_APP_ID=$FACEBOOK_APP_ID"
 [ -n "$FACEBOOK_APP_SECRET" ] && ENV_ARGS="$ENV_ARGS -e FACEBOOK_APP_SECRET=$FACEBOOK_APP_SECRET"
@@ -106,6 +107,7 @@ case "${1:-help}" in
         podman run -d \
             --name "$CONTAINER_NAME" \
             --privileged \
+            --network=pasta:--dns-forward,8.8.8.8 \
             -p 8080:8080 \
             $STORAGE_MOUNT \
             $SEED_MOUNT \
@@ -141,6 +143,7 @@ case "${1:-help}" in
         podman run -d \
             --name "$CONTAINER_NAME" \
             --privileged \
+            --network=pasta:--dns-forward,8.8.8.8 \
             -p 8080:8080 \
             --tmpfs /data/pgdata:rw,size=2G,mode=0700 \
             -e PGDATABASE=rotv_test \
@@ -198,22 +201,6 @@ case "${1:-help}" in
         podman exec -it "$CONTAINER_NAME" /bin/bash
         ;;
 
-    reload-backend)
-        echo "Reloading backend code into running container..."
-        podman cp backend/. "$CONTAINER_NAME":/app/
-        podman exec "$CONTAINER_NAME" pkill -f 'node server.js' 2>/dev/null || true
-        sleep 1
-        echo "✓ Backend reloaded - check http://localhost:8080"
-        ;;
-
-    reload-frontend)
-        echo "Rebuilding and reloading frontend..."
-        (cd frontend && npm run build)
-        podman exec "$CONTAINER_NAME" rm -rf /app/public/assets/* 2>/dev/null || true
-        podman cp frontend/dist/. "$CONTAINER_NAME":/app/public/
-        echo "✓ Frontend reloaded - refresh browser"
-        ;;
-
     seed)
         echo "Pulling data from production..."
         echo "Host: $PRODUCTION_HOST:$PRODUCTION_PORT"
@@ -260,10 +247,6 @@ case "${1:-help}" in
         echo "  start   Start the application container (ephemeral storage)"
         echo "  test    Run integration tests (ephemeral storage)"
         echo "  stop    Stop and remove the container"
-        echo ""
-        echo "Development Commands:"
-        echo "  reload-backend   Hot-reload backend code into running container"
-        echo "  reload-frontend  Rebuild and reload frontend into running container"
         echo ""
         echo "Utility Commands:"
         echo "  logs    Follow container logs"
