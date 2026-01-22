@@ -3,6 +3,9 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+// Note: Rate limiting is now handled at the dispatch level in newsService.js
+// POIs are started one per second with unlimited concurrency
+
 /**
  * Create Perplexity client with API key from environment
  * @returns {Perplexity} - Perplexity client instance

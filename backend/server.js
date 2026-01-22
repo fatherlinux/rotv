@@ -1458,11 +1458,77 @@ app.get('*', (req, res) => {
 // Start server
 const PORT = process.env.PORT || 3001;
 
+/**
+ * Set up AI search provider defaults and migrate POIs to Tier 1
+ * This is a one-time migration that runs on startup
+ */
+async function setupAiSearchDefaults() {
+  try {
+    // Set default AI search config if not already set
+    const defaults = [
+      { key: 'ai_search_primary', value: 'gemini' },
+      { key: 'ai_search_fallback', value: 'perplexity' },
+      { key: 'ai_search_primary_limit', value: '0' } // 0 = unlimited
+    ];
+
+    for (const { key, value } of defaults) {
+      await pool.query(`
+        INSERT INTO admin_settings (key, value, updated_at)
+        VALUES ($1, $2, CURRENT_TIMESTAMP)
+        ON CONFLICT (key) DO NOTHING
+      `, [key, value]);
+    }
+
+    // Ensure collection_priority and last_news_collection columns exist
+    await pool.query(`
+      ALTER TABLE pois
+      ADD COLUMN IF NOT EXISTS collection_priority INTEGER
+    `);
+
+    await pool.query(`
+      ALTER TABLE pois
+      ADD COLUMN IF NOT EXISTS last_news_collection TIMESTAMP
+    `);
+
+    // Set all active POIs to Tier 1 if they don't have a priority yet
+    const setTier1Result = await pool.query(`
+      UPDATE pois
+      SET collection_priority = 1
+      WHERE collection_priority IS NULL
+        AND (deleted IS NULL OR deleted = FALSE)
+    `);
+
+    if (setTier1Result.rowCount > 0) {
+      console.log(`[Migration] Set ${setTier1Result.rowCount} POIs to Tier 1`);
+    }
+
+    // Move any POIs not in Tier 1 to Tier 1
+    const moveTier1Result = await pool.query(`
+      UPDATE pois
+      SET collection_priority = 1
+      WHERE collection_priority IS NOT NULL
+        AND collection_priority != 1
+        AND (deleted IS NULL OR deleted = FALSE)
+    `);
+
+    if (moveTier1Result.rowCount > 0) {
+      console.log(`[Migration] Moved ${moveTier1Result.rowCount} POIs to Tier 1`);
+    }
+
+    console.log('[AI Search] Default configuration verified');
+  } catch (error) {
+    console.error('[AI Search] Error setting up defaults:', error.message);
+  }
+}
+
 async function start() {
   await initDatabase();
 
   // Ensure news job checkpoint columns exist for resumability
   await ensureNewsJobCheckpointColumns(pool);
+
+  // Set up AI search provider defaults and migrate POIs to Tier 1
+  await setupAiSearchDefaults();
 
   // Initialize job scheduler for news collection
   const connectionString = `postgresql://${process.env.PGUSER || 'rotv'}:${process.env.PGPASSWORD || 'rotv'}@${process.env.PGHOST || 'localhost'}:${process.env.PGPORT || 5432}/${process.env.PGDATABASE || 'rotv'}`;

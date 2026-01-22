@@ -1,6 +1,27 @@
 import { chromium } from 'playwright';
 
 /**
+ * Hard timeout wrapper - ensures a promise resolves within a time limit
+ * This is a safety net for operations that may hang indefinitely
+ * @param {Promise} promise - The promise to wrap
+ * @param {number} ms - Timeout in milliseconds
+ * @param {string} operationName - Name of operation for error messages
+ * @returns {Promise} - Resolves with result or rejects with timeout error
+ */
+function withHardTimeout(promise, ms, operationName = 'Operation') {
+  let timeoutId;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`${operationName} timed out after ${ms}ms`));
+    }, ms);
+  });
+
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    clearTimeout(timeoutId);
+  });
+}
+
+/**
  * Detect if a URL is likely a JavaScript-heavy site that needs rendering
  * @param {string} url - URL to check
  * @param {Object} options - Detection options
@@ -102,24 +123,101 @@ export async function renderJavaScriptPage(url, options = {}) {
     timeout = 15000,
     waitForSelector = null,
     waitTime = 3000, // Extra wait for dynamic content
-    extractSelectors = [] // Optional specific selectors to extract
+    extractSelectors = [], // Optional specific selectors to extract
+    hardTimeout = 60000, // Hard timeout for entire operation (default 60s)
+    browserLaunchTimeout = 30000 // Timeout for browser launch specifically
   } = options;
 
   console.log(`[JS Renderer] Starting browser for: ${url}`);
 
+  // Track browser instance for cleanup on hard timeout
+  let browserRef = { browser: null };
+  let hardTimeoutId;
+  let isTimedOut = false;
+
+  // Create a promise that will be rejected on hard timeout and clean up browser
+  const hardTimeoutPromise = new Promise((_, reject) => {
+    hardTimeoutId = setTimeout(async () => {
+      isTimedOut = true;
+      console.error(`[JS Renderer] ⏰ Hard timeout (${hardTimeout}ms) reached for ${url}, forcing cleanup...`);
+
+      // Force close the browser if it exists
+      if (browserRef.browser) {
+        try {
+          await browserRef.browser.close();
+          console.log(`[JS Renderer] ✓ Browser force-closed after hard timeout`);
+        } catch (closeError) {
+          console.error(`[JS Renderer] Failed to force-close browser: ${closeError.message}`);
+        }
+      }
+
+      reject(new Error(`JS Renderer hard timeout after ${hardTimeout}ms`));
+    }, hardTimeout);
+  });
+
+  try {
+    // Race between the rendering operation and the hard timeout
+    const result = await Promise.race([
+      renderJavaScriptPageInternal(url, {
+        timeout, waitForSelector, waitTime, extractSelectors, browserLaunchTimeout, browserRef
+      }),
+      hardTimeoutPromise
+    ]);
+
+    return result;
+  } catch (error) {
+    console.error(`[JS Renderer] ❌ Error for ${url}:`, error.message);
+    return {
+      text: '',
+      html: '',
+      title: '',
+      url: url,
+      success: false,
+      error: error.message
+    };
+  } finally {
+    clearTimeout(hardTimeoutId);
+
+    // Extra safety: close browser if it's still open after hard timeout
+    if (isTimedOut && browserRef.browser) {
+      try {
+        await browserRef.browser.close();
+      } catch (e) {
+        // Ignore - browser may already be closed
+      }
+    }
+  }
+}
+
+/**
+ * Internal implementation of page rendering (wrapped by hard timeout)
+ */
+async function renderJavaScriptPageInternal(url, options) {
+  const { timeout, waitForSelector, waitTime, extractSelectors, browserLaunchTimeout, browserRef } = options;
+
   let browser = null;
   try {
-    // Launch browser
-    browser = await chromium.launch({
-      headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--disable-gpu'
-      ]
-    });
+    // Launch browser with its own timeout to catch hangs during launch
+    console.log(`[JS Renderer] Launching browser (timeout: ${browserLaunchTimeout}ms)...`);
+    browser = await withHardTimeout(
+      chromium.launch({
+        headless: true,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas',
+          '--disable-gpu'
+        ]
+      }),
+      browserLaunchTimeout,
+      'Browser launch'
+    );
+
+    // Store browser reference for hard timeout cleanup
+    if (browserRef) {
+      browserRef.browser = browser;
+    }
 
     const context = await browser.newContext({
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',

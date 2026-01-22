@@ -1,26 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import MapThumbnail from './MapThumbnail';
-
-function formatDate(dateString) {
-  if (!dateString) return '';
-  const date = new Date(dateString);
-  return date.toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric'
-  });
-}
-
-function NewsTypeIcon({ type }) {
-  const icons = {
-    closure: 'X',
-    seasonal: 'S',
-    maintenance: 'W',
-    wildlife: 'A',
-    general: 'N'
-  };
-  return <span className={`news-type-icon ${type || 'general'}`}>{icons[type] || 'N'}</span>;
-}
+import { formatDate, NewsTypeIcon } from './NewsEventsShared';
 
 function ParkNews({ isAdmin, onSelectPoi, filteredDestinations, filteredLinearFeatures, filteredVirtualPois, mapState, onMapClick, refreshTrigger }) {
   const [news, setNews] = useState([]);
@@ -140,38 +120,6 @@ function ParkNews({ isAdmin, onSelectPoi, filteredDestinations, filteredLinearFe
     );
   }
 
-  if (filteredNews.length === 0) {
-    return (
-      <div className="park-news-tab">
-        <div className="news-events-header">
-          <h2>Park News</h2>
-          <p className="tab-subtitle">Recent news from across Cuyahoga Valley National Park</p>
-        </div>
-        <div className="news-events-layout">
-          <div className="news-events-content">
-            <p className="no-content">
-              {news.length > 0
-                ? 'No news for the visible POIs. Adjust the map to see more.'
-                : 'No recent news available.'}
-            </p>
-          </div>
-          {/* Map thumbnail sidebar */}
-          {mapState && (
-            <div className="map-thumbnail-sidebar">
-              <MapThumbnail
-                bounds={mapState.bounds}
-                aspectRatio={mapState.aspectRatio || 1.5}
-                visibleDestinations={filteredDestinations}
-                onClick={onMapClick}
-                poiCount={(filteredDestinations?.length || 0) + (filteredLinearFeatures?.length || 0) + (filteredVirtualPois?.length || 0)}
-              />
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="park-news-tab">
       <div className="news-events-header">
@@ -231,6 +179,13 @@ function ParkNews({ isAdmin, onSelectPoi, filteredDestinations, filteredLinearFe
 
       <div className="news-events-layout">
         <div className="news-events-content">
+          {filteredNews.length === 0 ? (
+            <p className="no-content">
+              {news.length > 0
+                ? 'No news matches the current filters. Try adjusting the type filters above or the map view.'
+                : 'No recent news available.'}
+            </p>
+          ) : (
           <div className="park-news-list">
         {filteredNews.map(item => (
           <div key={item.id} className={`park-news-item ${item.news_type || 'general'}`}>
@@ -265,6 +220,7 @@ function ParkNews({ isAdmin, onSelectPoi, filteredDestinations, filteredLinearFe
           </div>
         ))}
           </div>
+          )}
         </div>
         {/* Map thumbnail sidebar */}
         {mapState && (

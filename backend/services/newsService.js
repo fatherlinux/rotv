@@ -6,12 +6,14 @@
  * Progress is checkpointed after each batch so jobs can resume after container restarts.
  */
 
-import { generateTextWithCustomPrompt } from './perplexityService.js';
+import { generateTextWithCustomPrompt, resetJobUsage, getJobUsage } from './aiSearchFactory.js';
 import { pushNewsToSheets, pushEventsToSheets } from './sheetsSync.js';
 import { renderJavaScriptPage, isJavaScriptHeavySite, extractEventContent } from './jsRenderer.js';
 
-// Concurrency for parallel processing (Perplexity API)
-const CONCURRENCY = 15;
+// Dispatch interval: start one new POI job every N milliseconds
+const DISPATCH_INTERVAL_MS = 1500;
+// Maximum number of concurrent jobs in flight
+const MAX_CONCURRENCY = 10;
 
 // In-memory progress tracking for active collections
 const collectionProgress = new Map();
@@ -56,6 +58,34 @@ export function getCollectionProgress(poiId) {
  */
 export function clearProgress(poiId) {
   collectionProgress.delete(poiId);
+}
+
+/**
+ * Request cancellation of an ongoing collection job
+ * @param {number} poiId - The POI ID to cancel
+ * @returns {boolean} - true if cancellation was requested, false if no job found
+ */
+export function requestCancellation(poiId) {
+  const progress = collectionProgress.get(poiId);
+  if (progress && !progress.completed) {
+    updateProgress(poiId, {
+      cancellationRequested: true,
+      message: 'Cancellation requested...'
+    });
+    console.log(`[News Collection] Cancellation requested for POI ${poiId}`);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Check if cancellation has been requested for a POI
+ * @param {number} poiId - The POI ID to check
+ * @returns {boolean} - true if cancellation was requested
+ */
+export function isCancellationRequested(poiId) {
+  const progress = collectionProgress.get(poiId);
+  return progress?.cancellationRequested === true;
 }
 
 /**
@@ -189,6 +219,12 @@ export async function ensureNewsJobCheckpointColumns(pool) {
     await pool.query(`
       ALTER TABLE news_job_status
       ADD COLUMN IF NOT EXISTS pg_boss_job_id VARCHAR(100)
+    `);
+
+    // Add priority_tier column if it doesn't exist
+    await pool.query(`
+      ALTER TABLE news_job_status
+      ADD COLUMN IF NOT EXISTS priority_tier INTEGER
     `);
 
     console.log('News job checkpoint columns verified');
@@ -396,6 +432,19 @@ export async function collectNewsForPoi(pool, poi, sheets = null, timezone = 'Am
   console.log(`[AI Research]   - News URL: ${newsUrl}`);
   console.log(`[AI Research]   - Activities: ${activities}`);
 
+  // Helper to check for cancellation and throw if requested
+  const checkCancellation = () => {
+    if (isCancellationRequested(poi.id)) {
+      console.log(`[AI Research] Cancellation detected for ${poi.name}`);
+      updateProgress(poi.id, {
+        phase: 'error',
+        message: 'Collection cancelled by user',
+        completed: true
+      });
+      throw new Error('Collection cancelled by user');
+    }
+  };
+
   // Check if we need to render JavaScript-heavy pages
   let renderedEventsContent = '';
   let renderedNewsContent = '';
@@ -406,6 +455,7 @@ export async function collectNewsForPoi(pool, poi, sheets = null, timezone = 'Am
   // Only render events page if we're collecting events
   // If no dedicated events URL, fall back to checking the main website
   const eventsPageToRender = eventsUrl !== 'No dedicated events page' ? eventsUrl : website;
+  checkCancellation(); // Check before rendering events
   if (collectionType !== 'news' && eventsPageToRender !== 'No website available' && await isJavaScriptHeavySite(eventsPageToRender)) {
     console.log(`[AI Research] Rendering events page (collectionType: ${collectionType})`);
     updateProgress(poi.id, {
@@ -439,6 +489,7 @@ export async function collectNewsForPoi(pool, poi, sheets = null, timezone = 'Am
   // Only render news page if we're collecting news
   // If no dedicated news URL, fall back to checking the main website
   const newsPageToRender = newsUrl !== 'No dedicated news page' ? newsUrl : website;
+  checkCancellation(); // Check before rendering news
   if (collectionType !== 'events' && newsPageToRender !== 'No website available' && await isJavaScriptHeavySite(newsPageToRender)) {
     console.log(`[AI Research] Rendering news page (collectionType: ${collectionType})`);
     updateProgress(poi.id, {
@@ -509,6 +560,8 @@ Since this content comes directly from the organization's dedicated news page, u
 Extract ALL news from this rendered content using these relaxed criteria.`;
   }
 
+  checkCancellation(); // Check before AI search
+
   try {
     updateProgress(poi.id, {
       phase: 'ai_search',
@@ -572,6 +625,8 @@ Extract ALL news from this rendered content using these relaxed criteria.`;
         console.log(`[AI Research]   ${idx + 1}. ${item.title} (${item.published_date})`);
       });
     }
+
+    checkCancellation(); // Check before link matching
 
     // Match events/news to extracted links for deep linking
     // Only override source_url if it's missing/null (don't override URLs from Google Search)
@@ -652,6 +707,8 @@ Extract ALL news from this rendered content using these relaxed criteria.`;
     }
 
     let allNews = result.news || [];
+
+    checkCancellation(); // Check before Google News search
 
     // SECOND PASS: If we used a dedicated news URL, also search Google News for external coverage
     if (usedDedicatedNewsUrl) {
@@ -1031,50 +1088,71 @@ export async function saveEventItems(pool, poiId, eventItems) {
 }
 
 /**
- * Process a batch of POIs in parallel
+ * Process a batch of POIs with staggered dispatch and limited concurrency
  * @param {Pool} pool - Database connection pool
  * @param {Array} pois - Array of POI objects
  * @param {Object} sheets - Optional sheets client
- * @param {number} concurrency - Number of concurrent requests
+ * @param {number} dispatchInterval - Milliseconds between starting each POI
  * @param {string} timezone - IANA timezone string
  * @returns {Object} - { newsFound, eventsFound, processed }
  */
-async function processPoiBatch(pool, pois, sheets, concurrency = 3, timezone = 'America/New_York') {
+async function processPoiBatch(pool, pois, sheets, dispatchInterval = DISPATCH_INTERVAL_MS, timezone = 'America/New_York') {
   let newsFound = 0;
   let eventsFound = 0;
   let processed = 0;
+  const results = [];
 
-  // Process in chunks of `concurrency` size
-  for (let i = 0; i < pois.length; i += concurrency) {
-    const chunk = pois.slice(i, i + concurrency);
+  // Semaphore for limiting concurrency
+  let inFlight = 0;
+  let nextIndex = 0;
+  let resolveAll;
+  const allDone = new Promise(resolve => { resolveAll = resolve; });
 
-    // Process chunk in parallel
-    const results = await Promise.all(
-      chunk.map(async (poi) => {
-        try {
-          console.log(`Collecting news for: ${poi.name}`);
-          const { news, events, metadata } = await collectNewsForPoi(pool, poi, sheets, timezone);
-          const savedNews = await saveNewsItems(pool, poi.id, news, { skipDateFilter: metadata.usedDedicatedNewsUrl });
-          const savedEvents = await saveEventItems(pool, poi.id, events);
-          return { newsFound: savedNews, eventsFound: savedEvents, success: true };
-        } catch (error) {
-          console.error(`Error processing POI ${poi.name}:`, error.message);
-          return { newsFound: 0, eventsFound: 0, success: false };
-        }
-      })
-    );
-
-    // Aggregate results
-    for (const result of results) {
-      newsFound += result.newsFound;
-      eventsFound += result.eventsFound;
-      processed++;
+  const processNext = async () => {
+    if (nextIndex >= pois.length) {
+      if (inFlight === 0) resolveAll();
+      return;
     }
 
-    // Small delay between batches to avoid rate limiting
-    if (i + concurrency < pois.length) {
-      await new Promise(resolve => setTimeout(resolve, 500));
+    const index = nextIndex++;
+    const poi = pois[index];
+    inFlight++;
+
+    try {
+      console.log(`[${index + 1}/${pois.length}] Starting: ${poi.name} (${inFlight} in flight)`);
+      const { news, events, metadata } = await collectNewsForPoi(pool, poi, sheets, timezone);
+      const savedNews = await saveNewsItems(pool, poi.id, news, { skipDateFilter: metadata.usedDedicatedNewsUrl });
+      const savedEvents = await saveEventItems(pool, poi.id, events);
+      console.log(`[${index + 1}/${pois.length}] ✓ ${poi.name}: ${savedNews} news, ${savedEvents} events`);
+      results.push({ newsFound: savedNews, eventsFound: savedEvents, success: true, poiName: poi.name });
+    } catch (error) {
+      console.error(`[${index + 1}/${pois.length}] ✗ ${poi.name}: ${error.message}`);
+      results.push({ newsFound: 0, eventsFound: 0, success: false, poiName: poi.name });
     }
+
+    inFlight--;
+    // Start next job with delay when a slot opens (prevents API rate limiting)
+    if (nextIndex < pois.length && inFlight < MAX_CONCURRENCY) {
+      setTimeout(() => processNext(), dispatchInterval);
+    } else if (nextIndex >= pois.length && inFlight === 0) {
+      resolveAll();
+    }
+  };
+
+  // Start initial batch with staggered dispatch
+  const initialBatch = Math.min(MAX_CONCURRENCY, pois.length);
+  for (let i = 0; i < initialBatch; i++) {
+    setTimeout(() => processNext(), i * dispatchInterval);
+  }
+
+  // Wait for all to complete
+  await allDone;
+
+  // Aggregate results
+  for (const result of results) {
+    newsFound += result.newsFound;
+    eventsFound += result.eventsFound;
+    processed++;
   }
 
   return { newsFound, eventsFound, processed };
@@ -1180,6 +1258,9 @@ export async function processNewsCollectionJob(pool, sheets, pgBossJobId, jobDat
     WHERE id = $2
   `, [pgBossJobId, jobId]);
 
+  // Reset AI provider usage tracking for this job
+  resetJobUsage();
+
   console.log(`[Job ${jobId}] Starting/resuming news collection: ${remainingPoiIds.length} POIs remaining (${processedPoiIds.length} already done)`);
 
   // Get POI details for remaining POIs
@@ -1197,70 +1278,126 @@ export async function processNewsCollectionJob(pool, sheets, pgBossJobId, jobDat
 
   // Track all results for summary
   const allResults = [];
+  let jobCancelled = false;
+
+  // Helper to check if job was cancelled in database
+  const checkJobCancelled = async () => {
+    const result = await pool.query(
+      'SELECT status FROM news_job_status WHERE id = $1',
+      [jobId]
+    );
+    return result.rows[0]?.status === 'cancelled';
+  };
 
   try {
-    // Process in batches with checkpointing
-    for (let i = 0; i < pois.length; i += CONCURRENCY) {
-      const chunk = pois.slice(i, i + CONCURRENCY);
+    // Process with staggered dispatch and limited concurrency (semaphore pattern)
+    let inFlight = 0;
+    let nextIndex = 0;
+    let resolveAll;
+    const allDone = new Promise(resolve => { resolveAll = resolve; });
 
-      const results = await Promise.all(
-        chunk.map(async (poi) => {
-          try {
-            console.log(`[Job ${jobId}] Collecting news for: ${poi.name}`);
-            // Use default timezone for batch jobs (could be enhanced to store timezone in job data)
-            const { news, events, metadata } = await collectNewsForPoi(pool, poi, sheets, 'America/New_York');
-            const savedNews = await saveNewsItems(pool, poi.id, news, { skipDateFilter: metadata.usedDedicatedNewsUrl });
-            const savedEvents = await saveEventItems(pool, poi.id, events);
-            console.log(`[Job ${jobId}] ✓ ${poi.name}: saved ${savedNews} news, ${savedEvents} events`);
-            return { poiId: poi.id, poiName: poi.name, newsFound: savedNews, eventsFound: savedEvents, success: true };
-          } catch (error) {
-            console.error(`[Job ${jobId}] ❌ Error processing POI ${poi.name}:`, error.message);
-            return { poiId: poi.id, poiName: poi.name, newsFound: 0, eventsFound: 0, success: false };
-          }
-        })
-      );
-
-      // Aggregate results and track processed POIs
-      for (const result of results) {
-        newsFound += result.newsFound;
-        eventsFound += result.eventsFound;
-        processed++;
-        newlyProcessedIds.push(result.poiId);
-        allResults.push(result);
+    const processNextPoi = async () => {
+      // Check if job was cancelled before starting new POI
+      if (jobCancelled || await checkJobCancelled()) {
+        jobCancelled = true;
+        console.log(`[Job ${jobId}] Cancellation detected, stopping new POI processing`);
+        if (inFlight === 0) resolveAll();
+        return;
       }
 
-      // Checkpoint: Update progress and processed POIs in database
-      // This allows the job to resume from this point after a restart
-      await pool.query(`
-        UPDATE news_job_status
-        SET pois_processed = $1, news_found = $2, events_found = $3, processed_poi_ids = $4
-        WHERE id = $5
-      `, [processed, newsFound, eventsFound, JSON.stringify(newlyProcessedIds), jobId]);
+      if (nextIndex >= pois.length) {
+        if (inFlight === 0) resolveAll();
+        return;
+      }
 
-      // Update last_news_collection timestamp for processed POIs
-      const batchPoiIds = results.map(r => r.poiId).filter(id => id);
-      if (batchPoiIds.length > 0) {
+      const index = nextIndex++;
+      const poi = pois[index];
+      inFlight++;
+
+      try {
+        console.log(`[Job ${jobId}] [${index + 1}/${pois.length}] Starting: ${poi.name} (${inFlight} in flight)`);
+        const { news, events, metadata } = await collectNewsForPoi(pool, poi, sheets, 'America/New_York');
+        const savedNews = await saveNewsItems(pool, poi.id, news, { skipDateFilter: metadata.usedDedicatedNewsUrl });
+        const savedEvents = await saveEventItems(pool, poi.id, events);
+        console.log(`[Job ${jobId}] [${index + 1}/${pois.length}] ✓ ${poi.name}: ${savedNews} news, ${savedEvents} events`);
+
+        // Update progress incrementally
+        processed++;
+        newsFound += savedNews;
+        eventsFound += savedEvents;
+        newlyProcessedIds.push(poi.id);
+
+        // Checkpoint progress to database
+        await pool.query(`
+          UPDATE news_job_status
+          SET pois_processed = $1, news_found = $2, events_found = $3, processed_poi_ids = $4
+          WHERE id = $5
+        `, [processed, newsFound, eventsFound, JSON.stringify(newlyProcessedIds), jobId]);
+
+        // Update last_news_collection timestamp
         await pool.query(`
           UPDATE pois
           SET last_news_collection = CURRENT_TIMESTAMP
-          WHERE id = ANY($1)
-        `, [batchPoiIds]);
+          WHERE id = $1
+        `, [poi.id]);
+
+        allResults.push({ poiId: poi.id, poiName: poi.name, newsFound: savedNews, eventsFound: savedEvents, success: true });
+      } catch (error) {
+        console.error(`[Job ${jobId}] [${index + 1}/${pois.length}] ✗ ${poi.name}: ${error.message}`);
+        processed++;
+        newlyProcessedIds.push(poi.id);
+
+        // Still checkpoint on error
+        await pool.query(`
+          UPDATE news_job_status
+          SET pois_processed = $1, news_found = $2, events_found = $3, processed_poi_ids = $4
+          WHERE id = $5
+        `, [processed, newsFound, eventsFound, JSON.stringify(newlyProcessedIds), jobId]);
+
+        allResults.push({ poiId: poi.id, poiName: poi.name, newsFound: 0, eventsFound: 0, success: false });
       }
 
-      // Small delay between batches
-      if (i + CONCURRENCY < pois.length) {
-        await new Promise(resolve => setTimeout(resolve, 500));
+      inFlight--;
+      // Start next job with delay when a slot opens (prevents API rate limiting)
+      // But don't start new jobs if cancelled
+      if (jobCancelled) {
+        if (inFlight === 0) resolveAll();
+      } else if (nextIndex < pois.length && inFlight < MAX_CONCURRENCY) {
+        setTimeout(() => processNextPoi(), DISPATCH_INTERVAL_MS);
+      } else if (nextIndex >= pois.length && inFlight === 0) {
+        resolveAll();
       }
+    };
+
+    // Start initial batch with staggered dispatch
+    const initialBatch = Math.min(MAX_CONCURRENCY, pois.length);
+    for (let i = 0; i < initialBatch; i++) {
+      setTimeout(() => processNextPoi(), i * DISPATCH_INTERVAL_MS);
     }
 
-    // Mark job complete
-    await pool.query(`
-      UPDATE news_job_status
-      SET status = 'completed', completed_at = $1
-      WHERE id = $2
-    `, [new Date(), jobId]);
+    // Wait for all to complete
+    await allDone;
 
-    console.log(`[Job ${jobId}] Completed: ${processed} POIs, ${newsFound} news, ${eventsFound} events`);
+    // Only mark complete if not cancelled (cancel endpoint already set status)
+    if (!jobCancelled) {
+      await pool.query(`
+        UPDATE news_job_status
+        SET status = 'completed', completed_at = $1
+        WHERE id = $2
+      `, [new Date(), jobId]);
+    } else {
+      console.log(`[Job ${jobId}] Job was cancelled, not marking as completed`);
+    }
+
+    // Log AI provider usage for this job
+    const usage = getJobUsage();
+    console.log(`[Job ${jobId}] AI provider usage: Gemini=${usage.gemini}, Perplexity=${usage.perplexity}`);
+
+    if (jobCancelled) {
+      console.log(`[Job ${jobId}] Cancelled after processing ${processed} POIs, ${newsFound} news, ${eventsFound} events`);
+    } else {
+      console.log(`[Job ${jobId}] Completed: ${processed} POIs, ${newsFound} news, ${eventsFound} events`);
+    }
 
     // Log summary of results
     const poisWithResults = allResults.filter(r => r.newsFound > 0 || r.eventsFound > 0);

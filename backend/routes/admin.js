@@ -69,9 +69,11 @@ import {
   saveEventItems,
   getCollectionProgress,
   clearProgress,
-  updateProgress
+  updateProgress,
+  requestCancellation
 } from '../services/newsService.js';
 import { submitBatchNewsJob } from '../services/jobScheduler.js';
+import { getJobStats, resetJobUsage } from '../services/aiSearchFactory.js';
 
 const router = express.Router();
 
@@ -525,7 +527,14 @@ export function createAdminRouter(pool, clearThumbnailCache) {
     const { key } = req.params;
     const { value } = req.body;
 
-    const allowedKeys = ['gemini_api_key', 'gemini_prompt_brief', 'gemini_prompt_historical'];
+    const allowedKeys = [
+      'gemini_api_key',
+      'gemini_prompt_brief',
+      'gemini_prompt_historical',
+      'ai_search_primary',
+      'ai_search_fallback',
+      'ai_search_primary_limit'
+    ];
     if (!allowedKeys.includes(key)) {
       return res.status(400).json({ error: 'Invalid setting key' });
     }
@@ -3233,10 +3242,39 @@ export function createAdminRouter(pool, clearThumbnailCache) {
         return res.json({ phase: 'idle', message: 'No collection in progress' });
       }
 
-      res.json(progress);
+      // Include AI provider stats
+      const jobStats = getJobStats();
+      res.json({
+        ...progress,
+        aiStats: {
+          activeProvider: jobStats.activeProvider,
+          usage: jobStats.usage,
+          errors: jobStats.errors
+        }
+      });
     } catch (error) {
       console.error('Error getting collection progress:', error);
       res.status(500).json({ error: 'Failed to get collection progress' });
+    }
+  });
+
+  // Cancel an ongoing collection job
+  router.post('/pois/:id/collection-cancel', isAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const poiId = parseInt(id);
+
+      const cancelled = requestCancellation(poiId);
+
+      if (cancelled) {
+        console.log(`Admin ${req.user.email} cancelled collection for POI ${poiId}`);
+        res.json({ success: true, message: 'Cancellation requested' });
+      } else {
+        res.json({ success: false, message: 'No active collection job found for this POI' });
+      }
+    } catch (error) {
+      console.error('Error cancelling collection:', error);
+      res.status(500).json({ error: 'Failed to cancel collection' });
     }
   });
 
@@ -3271,6 +3309,9 @@ export function createAdminRouter(pool, clearThumbnailCache) {
 
       // Clear any old completed progress before starting new collection
       clearProgress(parseInt(id));
+
+      // Reset AI usage counter for this single-POI collection
+      resetJobUsage();
 
       console.log(`Admin ${req.user.email} triggered NEWS ONLY collection for POI: ${poi.name}`);
 
@@ -3339,6 +3380,9 @@ export function createAdminRouter(pool, clearThumbnailCache) {
       // Clear any old completed progress before starting new collection
       clearProgress(parseInt(id));
 
+      // Reset AI usage counter for this single-POI collection
+      resetJobUsage();
+
       console.log(`Admin ${req.user.email} triggered EVENTS ONLY collection for POI: ${poi.name}`);
 
       // Get timezone from request body (defaults to America/New_York)
@@ -3382,6 +3426,43 @@ export function createAdminRouter(pool, clearThumbnailCache) {
     } catch (error) {
       console.error('Error getting job status:', error);
       res.status(500).json({ error: 'Failed to get job status' });
+    }
+  });
+
+  // Get AI stats for current job
+  router.get('/news/ai-stats', isAdmin, async (req, res) => {
+    try {
+      const stats = getJobStats();
+      res.json(stats);
+    } catch (error) {
+      console.error('Error getting AI stats:', error);
+      res.status(500).json({ error: 'Failed to get AI stats' });
+    }
+  });
+
+  // Cancel a running batch job
+  router.post('/news/job/:id/cancel', isAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const jobId = parseInt(id);
+
+      // Update job status in database to 'cancelled'
+      const result = await pool.query(`
+        UPDATE news_job_status
+        SET status = 'cancelled', completed_at = NOW()
+        WHERE id = $1 AND status = 'running'
+        RETURNING *
+      `, [jobId]);
+
+      if (result.rows.length > 0) {
+        console.log(`Admin ${req.user.email} cancelled batch job ${jobId}`);
+        res.json({ success: true, message: 'Job cancelled' });
+      } else {
+        res.json({ success: false, message: 'Job not found or not running' });
+      }
+    } catch (error) {
+      console.error('Error cancelling batch job:', error);
+      res.status(500).json({ error: 'Failed to cancel job' });
     }
   });
 

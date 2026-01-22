@@ -1,33 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import MapThumbnail from './MapThumbnail';
+import { formatDateWithWeekday, EventTypeIcon } from './NewsEventsShared';
 
-function formatDate(dateString) {
-  if (!dateString) return '';
-  const date = new Date(dateString);
-  return date.toLocaleDateString('en-US', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric'
-  });
-}
-
+// Calendar-specific date formatting (local to this component)
 function formatDateForCalendar(dateString) {
   if (!dateString) return '';
   const date = new Date(dateString);
   return date.toISOString().replace(/-|:|\.\d{3}/g, '').slice(0, 15) + 'Z';
-}
-
-function EventTypeIcon({ type }) {
-  const icons = {
-    'guided-tour': 'T',
-    'program': 'P',
-    'festival': 'F',
-    'volunteer': 'V',
-    'educational': 'E',
-    'concert': 'C'
-  };
-  return <span className={`event-type-icon ${type || 'program'}`}>{icons[type] || 'E'}</span>;
 }
 
 function ParkEvents({ isAdmin, onSelectPoi, filteredDestinations, filteredLinearFeatures, filteredVirtualPois, mapState, onMapClick, refreshTrigger }) {
@@ -199,38 +178,6 @@ END:VCALENDAR`;
     );
   }
 
-  if (filteredEvents.length === 0) {
-    return (
-      <div className="park-events-tab">
-        <div className="news-events-header">
-          <h2>Upcoming Events</h2>
-          <p className="tab-subtitle">Events across Cuyahoga Valley National Park</p>
-        </div>
-        <div className="news-events-layout">
-          <div className="news-events-content">
-            <p className="no-content">
-              {events.length > 0
-                ? 'No events for the visible POIs. Adjust the map to see more.'
-                : 'No upcoming events found.'}
-            </p>
-          </div>
-          {/* Map thumbnail sidebar */}
-          {mapState && (
-            <div className="map-thumbnail-sidebar">
-              <MapThumbnail
-                bounds={mapState.bounds}
-                aspectRatio={mapState.aspectRatio || 1.5}
-                visibleDestinations={filteredDestinations}
-                onClick={onMapClick}
-                poiCount={(filteredDestinations?.length || 0) + (filteredLinearFeatures?.length || 0) + (filteredVirtualPois?.length || 0)}
-              />
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="park-events-tab">
       <div className="news-events-header">
@@ -297,6 +244,13 @@ END:VCALENDAR`;
 
       <div className="news-events-layout">
         <div className="news-events-content">
+          {filteredEvents.length === 0 ? (
+            <p className="no-content">
+              {events.length > 0
+                ? 'No events match the current filters. Try adjusting the type filters above or the map view.'
+                : 'No upcoming events found.'}
+            </p>
+          ) : (
           <div className="park-events-list">
             {filteredEvents.map(item => (
           <div key={item.id} className={`park-event-item ${item.event_type || 'program'}`}>
@@ -315,9 +269,9 @@ END:VCALENDAR`;
             </div>
 
             <div className="park-event-date">
-              {formatDate(item.start_date)}
+              {formatDateWithWeekday(item.start_date)}
               {item.end_date && item.end_date !== item.start_date && (
-                <> - {formatDate(item.end_date)}</>
+                <> - {formatDateWithWeekday(item.end_date)}</>
               )}
             </div>
 
@@ -362,6 +316,7 @@ END:VCALENDAR`;
           </div>
             ))}
           </div>
+          )}
         </div>
         {/* Map thumbnail sidebar */}
         {mapState && (

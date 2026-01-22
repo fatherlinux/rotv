@@ -107,6 +107,7 @@ case "${1:-help}" in
         podman run -d \
             --name "$CONTAINER_NAME" \
             --privileged \
+            --network=pasta:--dns-forward,8.8.8.8 \
             -p 8080:8080 \
             $STORAGE_MOUNT \
             $SEED_MOUNT \
@@ -142,6 +143,7 @@ case "${1:-help}" in
         podman run -d \
             --name "$CONTAINER_NAME" \
             --privileged \
+            --network=pasta:--dns-forward,8.8.8.8 \
             -p 8080:8080 \
             --tmpfs /data/pgdata:rw,size=2G,mode=0700 \
             -e PGDATABASE=rotv_test \
@@ -199,22 +201,6 @@ case "${1:-help}" in
         podman exec -it "$CONTAINER_NAME" /bin/bash
         ;;
 
-    reload-backend)
-        echo "Reloading backend code into running container..."
-        podman cp backend/. "$CONTAINER_NAME":/app/
-        podman exec "$CONTAINER_NAME" pkill -f 'node server.js' 2>/dev/null || true
-        sleep 1
-        echo "✓ Backend reloaded - check http://localhost:8080"
-        ;;
-
-    reload-frontend)
-        echo "Rebuilding and reloading frontend..."
-        (cd frontend && npm run build)
-        podman exec "$CONTAINER_NAME" rm -rf /app/public/assets/* 2>/dev/null || true
-        podman cp frontend/dist/. "$CONTAINER_NAME":/app/public/
-        echo "✓ Frontend reloaded - refresh browser"
-        ;;
-
     seed)
         echo "Pulling data from production..."
         echo "Host: $PRODUCTION_HOST:$PRODUCTION_PORT"
@@ -261,10 +247,6 @@ case "${1:-help}" in
         echo "  start   Start the application container (ephemeral storage)"
         echo "  test    Run integration tests (ephemeral storage)"
         echo "  stop    Stop and remove the container"
-        echo ""
-        echo "Development Commands:"
-        echo "  reload-backend   Hot-reload backend code into running container"
-        echo "  reload-frontend  Rebuild and reload frontend into running container"
         echo ""
         echo "Utility Commands:"
         echo "  logs    Follow container logs"

@@ -1,36 +1,5 @@
 import React, { useState, useEffect } from 'react';
-
-function formatDate(dateString) {
-  if (!dateString) return '';
-  const date = new Date(dateString);
-  return date.toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric'
-  });
-}
-
-function NewsTypeIcon({ type }) {
-  const icons = {
-    closure: 'X',
-    seasonal: 'S',
-    maintenance: 'W',
-    wildlife: 'A',
-    general: 'N'
-  };
-  return <span className={`news-type-icon ${type || 'general'}`}>{icons[type] || 'N'}</span>;
-}
-
-function EventTypeIcon({ type }) {
-  const icons = {
-    'guided-tour': 'T',
-    'program': 'P',
-    'festival': 'F',
-    'volunteer': 'V',
-    'educational': 'E'
-  };
-  return <span className={`event-type-icon ${type || 'program'}`}>{icons[type] || 'E'}</span>;
-}
+import { formatDate, NewsTypeIcon, EventTypeIcon } from './NewsEventsShared';
 
 function NewsEvents({ poiId, isAdmin }) {
   const [news, setNews] = useState([]);
