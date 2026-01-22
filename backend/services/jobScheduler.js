@@ -9,10 +9,6 @@ let boss = null;
 
 const JOB_NAMES = {
   NEWS_COLLECTION: 'news-collection',           // Scheduled daily collection
-  NEWS_COLLECTION_TIER_1: 'news-collection-tier-1',  // Daily (tier 1)
-  NEWS_COLLECTION_TIER_2: 'news-collection-tier-2',  // Every 2 days (tier 2)
-  NEWS_COLLECTION_TIER_3: 'news-collection-tier-3',  // Weekly (tier 3)
-  NEWS_COLLECTION_TIER_4: 'news-collection-tier-4',  // Bi-weekly (tier 4)
   NEWS_COLLECTION_POI: 'news-collection-poi',   // Individual POI processing
   NEWS_BATCH: 'news-batch-collection'           // Admin-triggered batch collection
 };
@@ -62,34 +58,6 @@ export async function scheduleNewsCollection(cronExpression = '0 6 * * *') {
 }
 
 /**
- * Schedule tier-based news collection jobs
- * @param {number} tier - Priority tier (1-4)
- * @param {string} cronExpression - Cron expression for this tier
- */
-export async function scheduleNewsCollectionForTier(tier, cronExpression) {
-  const scheduler = getJobScheduler();
-
-  const tierJobNames = {
-    1: JOB_NAMES.NEWS_COLLECTION_TIER_1,
-    2: JOB_NAMES.NEWS_COLLECTION_TIER_2,
-    3: JOB_NAMES.NEWS_COLLECTION_TIER_3,
-    4: JOB_NAMES.NEWS_COLLECTION_TIER_4
-  };
-
-  const jobName = tierJobNames[tier];
-  if (!jobName) {
-    throw new Error(`Invalid tier: ${tier}. Must be 1-4.`);
-  }
-
-  // Create a schedule for this tier's news collection
-  await scheduler.schedule(jobName, cronExpression, { tier }, {
-    tz: 'America/New_York'
-  });
-
-  console.log(`Tier ${tier} news collection scheduled with cron: ${cronExpression}`);
-}
-
-/**
  * Register the news collection job handler
  * @param {Function} handler - Async function to handle the job
  */
@@ -117,47 +85,6 @@ export async function registerNewsCollectionHandler(handler) {
       throw error; // Re-throw to mark job as failed
     }
   });
-}
-
-/**
- * Register handlers for tier-based news collection jobs
- * @param {Function} handler - Async function to handle tier-based collection
- */
-export async function registerTierNewsHandlers(handler) {
-  const scheduler = getJobScheduler();
-
-  const tierJobs = [
-    { tier: 1, jobName: JOB_NAMES.NEWS_COLLECTION_TIER_1 },
-    { tier: 2, jobName: JOB_NAMES.NEWS_COLLECTION_TIER_2 },
-    { tier: 3, jobName: JOB_NAMES.NEWS_COLLECTION_TIER_3 },
-    { tier: 4, jobName: JOB_NAMES.NEWS_COLLECTION_TIER_4 }
-  ];
-
-  for (const { tier, jobName } of tierJobs) {
-    // Create the queue if it doesn't exist
-    try {
-      await scheduler.createQueue(jobName);
-      console.log(`Queue '${jobName}' created`);
-    } catch (error) {
-      if (!error.message?.includes('already exists')) {
-        console.log(`Queue '${jobName}' may already exist`);
-      }
-    }
-
-    // Register the worker for this tier
-    await scheduler.work(jobName, async (job) => {
-      console.log(`Starting tier ${tier} news collection job:`, job.id);
-      try {
-        await handler({ ...job.data, tier });
-        console.log(`Tier ${tier} news collection job completed:`, job.id);
-      } catch (error) {
-        console.error(`Tier ${tier} news collection job failed:`, error);
-        throw error; // Re-throw to mark job as failed
-      }
-    });
-  }
-
-  console.log('Registered handlers for all tier-based news collection jobs');
 }
 
 /**

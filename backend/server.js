@@ -16,9 +16,7 @@ import { createAdminRouter } from './routes/admin.js';
 import {
   initJobScheduler,
   scheduleNewsCollection,
-  scheduleNewsCollectionForTier,
   registerNewsCollectionHandler,
-  registerTierNewsHandlers,
   registerBatchNewsHandler,
   submitBatchNewsJob,
   stopJobScheduler
@@ -1459,8 +1457,7 @@ app.get('*', (req, res) => {
 const PORT = process.env.PORT || 3001;
 
 /**
- * Set up AI search provider defaults and migrate POIs to Tier 1
- * This is a one-time migration that runs on startup
+ * Set up AI search provider defaults
  */
 async function setupAiSearchDefaults() {
   try {
@@ -1479,41 +1476,11 @@ async function setupAiSearchDefaults() {
       `, [key, value]);
     }
 
-    // Ensure collection_priority and last_news_collection columns exist
-    await pool.query(`
-      ALTER TABLE pois
-      ADD COLUMN IF NOT EXISTS collection_priority INTEGER
-    `);
-
+    // Ensure last_news_collection column exists for tracking
     await pool.query(`
       ALTER TABLE pois
       ADD COLUMN IF NOT EXISTS last_news_collection TIMESTAMP
     `);
-
-    // Set all active POIs to Tier 1 if they don't have a priority yet
-    const setTier1Result = await pool.query(`
-      UPDATE pois
-      SET collection_priority = 1
-      WHERE collection_priority IS NULL
-        AND (deleted IS NULL OR deleted = FALSE)
-    `);
-
-    if (setTier1Result.rowCount > 0) {
-      console.log(`[Migration] Set ${setTier1Result.rowCount} POIs to Tier 1`);
-    }
-
-    // Move any POIs not in Tier 1 to Tier 1
-    const moveTier1Result = await pool.query(`
-      UPDATE pois
-      SET collection_priority = 1
-      WHERE collection_priority IS NOT NULL
-        AND collection_priority != 1
-        AND (deleted IS NULL OR deleted = FALSE)
-    `);
-
-    if (moveTier1Result.rowCount > 0) {
-      console.log(`[Migration] Moved ${moveTier1Result.rowCount} POIs to Tier 1`);
-    }
 
     console.log('[AI Search] Default configuration verified');
   } catch (error) {
@@ -1527,7 +1494,7 @@ async function start() {
   // Ensure news job checkpoint columns exist for resumability
   await ensureNewsJobCheckpointColumns(pool);
 
-  // Set up AI search provider defaults and migrate POIs to Tier 1
+  // Set up AI search provider defaults
   await setupAiSearchDefaults();
 
   // Initialize job scheduler for news collection
@@ -1536,38 +1503,25 @@ async function start() {
   try {
     await initJobScheduler(connectionString);
 
-    // Register tier-based news collection handlers
-    await registerTierNewsHandlers(async (jobData) => {
-      const tier = jobData.tier;
-      console.log(`Running tier ${tier} news collection...`);
-      const result = await runNewsCollection(pool, null, tier);
+    // Register scheduled news collection handler (daily job for all POIs)
+    await registerNewsCollectionHandler(async () => {
+      console.log('Running scheduled news collection for all POIs...');
+      const result = await runNewsCollection(pool, null);
       if (result.totalPois > 0) {
-        console.log(`Tier ${tier} news collection completed: ${result.newsFound} news items, ${result.eventsFound} events found`);
+        console.log(`News collection completed: ${result.newsFound} news items, ${result.eventsFound} events found`);
       } else {
-        console.log(`Tier ${tier}: No POIs due for collection`);
+        console.log('No POIs to collect');
       }
     });
 
     // Register batch news collection handler (for admin-triggered jobs via pg-boss)
     await registerBatchNewsHandler(async (pgBossJobId, jobData) => {
       console.log(`[pg-boss] Processing batch news job: ${pgBossJobId}`);
-      // Note: sheets client is not available in the worker context
-      // Jobs will sync to sheets on completion if they find any news/events
       await processNewsCollectionJob(pool, null, pgBossJobId, jobData);
     });
 
-    // Schedule tier-based news collection jobs
-    // Tier 1: Daily at 6 AM (Organizations & Parks)
-    await scheduleNewsCollectionForTier(1, '0 6 * * *');
-
-    // Tier 2: Every 2 days at 6 AM (Trails & Hiking POIs)
-    await scheduleNewsCollectionForTier(2, '0 6 */2 * *');
-
-    // Tier 3: Weekly on Sunday at 6 AM (Historic Sites & POIs)
-    await scheduleNewsCollectionForTier(3, '0 6 * * 0');
-
-    // Note: Tier 4 has 0 POIs currently, so not scheduling
-    // await scheduleNewsCollectionForTier(4, '0 6 1,15 * *');
+    // Schedule daily news collection at 6 AM Eastern
+    await scheduleNewsCollection('0 6 * * *');
 
     // Resume any incomplete jobs from before restart
     const incompleteJobs = await findIncompleteJobs(pool);
