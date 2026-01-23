@@ -65,8 +65,8 @@ const ResultsTile = memo(function ResultsTile({ poi, poiKey, isLinear, isVirtual
           <span className={`poi-type-icon ${poiType}`}>
             {poiType === 'virtual' ? 'O' : poiType === 'destination' ? 'D' : poiType === 'trail' ? 'T' : poiType === 'river' ? 'R' : 'B'}
           </span>
-          {poi.era && (
-            <span className="results-tile-era">{poi.era}</span>
+          {poi.era_name && (
+            <span className="results-tile-era">{poi.era_name}</span>
           )}
           {isLinear && poi.difficulty && (
             <span className={`results-tile-difficulty ${poi.difficulty.toLowerCase()}`}>

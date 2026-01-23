@@ -8,7 +8,6 @@ function NewPOIForm({ onClose, onCreate, initialCoords }) {
     owner_id: null,
     property_owner: '',
     brief_description: '',
-    era: '',
     era_id: null,
     historical_description: '',
     primary_activities: '',
@@ -161,9 +160,7 @@ function NewPOIForm({ onClose, onCreate, initialCoords }) {
                 value={formData.era_id || ''}
                 onChange={(e) => {
                   const eraId = e.target.value ? parseInt(e.target.value) : null;
-                  const selectedEra = availableEras.find(era => era.id === eraId);
                   handleChange('era_id', eraId);
-                  handleChange('era', selectedEra ? selectedEra.name : '');
                 }}
               >
                 <option value="">Select an era...</option>
