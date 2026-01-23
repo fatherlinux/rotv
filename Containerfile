@@ -9,7 +9,7 @@ FROM ${BASE_IMAGE}
 # Labels - bump version here to force app layer rebuild
 LABEL maintainer="fatherlinux"
 LABEL description="Roots of The Valley - Cuyahoga Valley National Park destination explorer"
-LABEL version="1.12.1"
+LABEL version="1.12.2"
 
 WORKDIR /app
 
