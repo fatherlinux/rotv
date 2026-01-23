@@ -269,9 +269,9 @@ function ReadOnlyView({ destination, isLinearFeature, isAdmin, showImage = true,
           {destination.era && destination.poi_type !== 'virtual' && (
             <span className="era-badge-large">{destination.era}</span>
           )}
-          {destination.property_owner && destination.poi_type !== 'virtual' && (
-            <span className={`owner-badge ${getOwnerClass(destination.property_owner)}`}>
-              {destination.property_owner}
+          {(destination.owner_name || destination.property_owner) && destination.poi_type !== 'virtual' && (
+            <span className={`owner-badge ${getOwnerClass(destination.owner_name || destination.property_owner)}`}>
+              {destination.owner_name || destination.property_owner}
             </span>
           )}
           {/* Share button */}
@@ -435,7 +435,10 @@ function EditView({ destination, editedData, setEditedData, onSave, onCancel, on
   // Standardized surfaces list
   const [availableSurfaces, setAvailableSurfaces] = useState([]);
 
-  // Fetch activities, eras, and surfaces on mount
+  // Owner organizations list
+  const [availableOwnerOrgs, setAvailableOwnerOrgs] = useState([]);
+
+  // Fetch activities, eras, surfaces, and owner organizations on mount
   useEffect(() => {
     async function fetchActivities() {
       try {
@@ -479,9 +482,24 @@ function EditView({ destination, editedData, setEditedData, onSave, onCancel, on
       }
     }
 
+    async function fetchOwnerOrgs() {
+      try {
+        const response = await fetch('/api/owner-organizations', {
+          credentials: 'include'
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setAvailableOwnerOrgs(data);
+        }
+      } catch (err) {
+        console.error('Failed to fetch owner organizations:', err);
+      }
+    }
+
     fetchActivities();
     fetchEras();
     fetchSurfaces();
+    fetchOwnerOrgs();
   }, []);
 
   // Parse current activities from comma-separated string
@@ -763,12 +781,23 @@ function EditView({ destination, editedData, setEditedData, onSave, onCancel, on
             </div>
             <div className="edit-section half">
               <label>Property Owner</label>
-              <input
-                type="text"
-                value={editedData.property_owner || ''}
-                onChange={(e) => handleChange('property_owner', e.target.value)}
-                placeholder="e.g., Federal (NPS)"
-              />
+              <select
+                value={editedData.owner_id || ''}
+                onChange={(e) => {
+                  const ownerId = e.target.value ? parseInt(e.target.value) : null;
+                  const ownerOrg = availableOwnerOrgs.find(o => o.id === ownerId);
+                  handleChange('owner_id', ownerId);
+                  // Also update property_owner for backward compatibility
+                  handleChange('property_owner', ownerOrg ? ownerOrg.name : null);
+                }}
+              >
+                <option value="">-- No Owner --</option>
+                {availableOwnerOrgs.map(org => (
+                  <option key={org.id} value={org.id}>
+                    {org.name}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 
@@ -1611,8 +1640,8 @@ function AssociationsModal({ isOpen, onClose, poi, associations, allDestinations
   // Determine if this is a virtual POI
   const isVirtualPoi = poi.poi_type === 'virtual';
 
-  // Get the associated POIs with association IDs
-  const associatedPoisWithAssocId = poiAssociations.map(assoc => {
+  // Get regular associations
+  const regularAssociations = poiAssociations.map(assoc => {
     if (isVirtualPoi) {
       // This is a virtual POI, show associated physical POIs
       const physicalId = assoc.physical_poi_id;
@@ -1628,6 +1657,31 @@ function AssociationsModal({ isOpen, onClose, poi, associations, allDestinations
       return associatedPoi ? { ...associatedPoi, _isVirtual: true, _isLinear: false, _assocId: assoc.id } : null;
     }
   }).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name));
+
+  // Get owner organization (for physical POIs) - show first in list with Owner badge
+  const ownerOrg = !isVirtualPoi && poi.owner_id
+    ? allVirtualPois?.find(v => Number(v.id) === Number(poi.owner_id))
+    : null;
+
+  // Get owned POIs (for virtual POIs/organizations) - POIs that have this org as their owner
+  const ownedPois = isVirtualPoi
+    ? [
+        ...(allDestinations || []).filter(d => Number(d.owner_id) === Number(poi.id)),
+        ...(allLinearFeatures || []).filter(f => Number(f.owner_id) === Number(poi.id))
+      ].map(p => ({
+        ...p,
+        _isLinear: !!(allLinearFeatures || []).find(f => f.id === p.id),
+        _isVirtual: false,
+        _isOwned: true
+      })).sort((a, b) => a.name.localeCompare(b.name))
+    : [];
+
+  // Combine: owner first (for physical POIs), owned POIs first (for virtual POIs), then regular associations
+  const associatedPoisWithAssocId = [
+    ...(ownerOrg ? [{ ...ownerOrg, _isVirtual: true, _isLinear: false, _isOwner: true }] : []),
+    ...ownedPois.filter(p => !regularAssociations.some(a => a.id === p.id)),
+    ...regularAssociations.filter(a => (!ownerOrg || a.id !== ownerOrg.id) && !ownedPois.some(p => p.id === a.id))
+  ];
 
   // Get available POIs for adding (not currently associated)
   const availablePois = useMemo(() => {
@@ -1784,7 +1838,13 @@ function AssociationsModal({ isOpen, onClose, poi, associations, allDestinations
                              associatedPoi.feature_type === 'river' ? 'R' :
                              associatedPoi.feature_type === 'boundary' ? 'B' : 'T'}
                           </span>
-                          {associatedPoi.era && (
+                          {associatedPoi._isOwner && (
+                            <span className="owner-badge-small">Owner</span>
+                          )}
+                          {associatedPoi._isOwned && (
+                            <span className="owner-badge-small">Owned</span>
+                          )}
+                          {associatedPoi.era && !associatedPoi._isVirtual && (
                             <span className="association-item-era">{associatedPoi.era}</span>
                           )}
                         </div>
@@ -1793,7 +1853,7 @@ function AssociationsModal({ isOpen, onClose, poi, associations, allDestinations
                         )}
                       </div>
                     </div>
-                    {isAdmin && editMode && isVirtualPoi && (
+                    {isAdmin && editMode && isVirtualPoi && !associatedPoi._isOwner && !associatedPoi._isOwned && (
                       <button
                         onClick={() => handleDeleteAssociation(associatedPoi._assocId, associatedPoi.name)}
                         className="btn-delete-association"
@@ -1884,8 +1944,8 @@ function AssociationsTabContent({ poi, associations, allDestinations, allLinearF
   // Determine if this is a virtual POI
   const isVirtualPoi = poi.poi_type === 'virtual';
 
-  // Get the associated POIs with association IDs
-  const associatedPoisWithAssocId = poiAssociations.map(assoc => {
+  // Get the associated POIs with association IDs (regular associations from table)
+  const regularAssociations = poiAssociations.map(assoc => {
     if (isVirtualPoi) {
       // This is a virtual POI, show associated physical POIs
       const physicalId = assoc.physical_poi_id;
@@ -1901,6 +1961,31 @@ function AssociationsTabContent({ poi, associations, allDestinations, allLinearF
       return associatedPoi ? { ...associatedPoi, _isVirtual: true, _isLinear: false, _assocId: assoc.id } : null;
     }
   }).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name));
+
+  // Get owner organization (for physical POIs) - show first in list with Owner badge
+  const ownerOrg = !isVirtualPoi && poi.owner_id
+    ? allVirtualPois?.find(v => Number(v.id) === Number(poi.owner_id))
+    : null;
+
+  // Get owned POIs (for virtual POIs/organizations) - POIs that have this org as their owner
+  const ownedPois = isVirtualPoi
+    ? [
+        ...(allDestinations || []).filter(d => Number(d.owner_id) === Number(poi.id)),
+        ...(allLinearFeatures || []).filter(f => Number(f.owner_id) === Number(poi.id))
+      ].map(p => ({
+        ...p,
+        _isLinear: !!(allLinearFeatures || []).find(f => f.id === p.id),
+        _isVirtual: false,
+        _isOwned: true
+      })).sort((a, b) => a.name.localeCompare(b.name))
+    : [];
+
+  // Combine: owner first (for physical POIs), owned POIs first (for virtual POIs), then regular associations
+  const associatedPoisWithAssocId = [
+    ...(ownerOrg ? [{ ...ownerOrg, _isVirtual: true, _isLinear: false, _isOwner: true }] : []),
+    ...ownedPois.filter(p => !regularAssociations.some(a => a.id === p.id)),
+    ...regularAssociations.filter(a => (!ownerOrg || a.id !== ownerOrg.id) && !ownedPois.some(p => p.id === a.id))
+  ];
 
   // Get available POIs for adding (not currently associated)
   const availablePois = useMemo(() => {
@@ -1973,7 +2058,7 @@ function AssociationsTabContent({ poi, associations, allDestinations, allLinearF
     }
   };
 
-  if (poiAssociations.length === 0 && !isAdmin) {
+  if (poiAssociations.length === 0 && !ownerOrg && ownedPois.length === 0 && !isAdmin) {
     return (
       <div className="sidebar-tab-empty">
         No associated entities for this location.
@@ -2074,7 +2159,13 @@ function AssociationsTabContent({ poi, associations, allDestinations, allLinearF
                            associatedPoi.feature_type === 'river' ? 'R' :
                            associatedPoi.feature_type === 'boundary' ? 'B' : 'T'}
                         </span>
-                        {associatedPoi.era && (
+                        {associatedPoi._isOwner && (
+                          <span className="owner-badge-small">Owner</span>
+                        )}
+                        {associatedPoi._isOwned && (
+                          <span className="owner-badge-small">Owned</span>
+                        )}
+                        {associatedPoi.era && !associatedPoi._isVirtual && (
                           <span className="association-item-era">{associatedPoi.era}</span>
                         )}
                       </div>
@@ -2083,7 +2174,7 @@ function AssociationsTabContent({ poi, associations, allDestinations, allLinearF
                       )}
                     </div>
                   </div>
-                  {isAdmin && editMode && isVirtualPoi && (
+                  {isAdmin && editMode && isVirtualPoi && !associatedPoi._isOwned && (
                     <button
                       onClick={() => handleDeleteAssociation(associatedPoi._assocId, associatedPoi.name)}
                       className="btn-delete-association"

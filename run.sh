@@ -1,6 +1,7 @@
 #!/bin/bash
 set -e
 
+BASE_IMAGE_NAME="quay.io/fatherlinux/rotv-base"
 IMAGE_NAME="quay.io/fatherlinux/rotv"
 CONTAINER_NAME="rotv"
 
@@ -33,9 +34,40 @@ ENV_ARGS=""
 [ -n "$ADMIN_EMAIL" ] && ENV_ARGS="$ENV_ARGS -e ADMIN_EMAIL=$ADMIN_EMAIL"
 
 case "${1:-help}" in
+    build-base)
+        echo "Building base container image..."
+        echo "This contains PostgreSQL, Node.js, and Playwright (rarely changes)"
+        podman build --security-opt label=disable -f Containerfile.base -t "$BASE_IMAGE_NAME" .
+        echo ""
+        echo "✓ Base image built: $BASE_IMAGE_NAME"
+        echo "You can now run: ./run.sh build"
+        ;;
+
     build)
-        echo "Building container image..."
-        podman build --security-opt label=disable -t "$IMAGE_NAME" .
+        echo "Building application container image..."
+        # Check if base image exists locally
+        if ! podman image exists "$BASE_IMAGE_NAME"; then
+            echo "Base image not found locally, pulling from quay.io..."
+            if ! podman pull "$BASE_IMAGE_NAME"; then
+                echo ""
+                echo "⚠ Base image not found on quay.io"
+                echo "Building base image locally (this will take longer)..."
+                podman build --security-opt label=disable -f Containerfile.base -t "$BASE_IMAGE_NAME" .
+            fi
+        fi
+        podman build --security-opt label=disable --build-arg BASE_IMAGE="$BASE_IMAGE_NAME" -t "$IMAGE_NAME" .
+        ;;
+
+    build-all)
+        echo "Building both base and application images..."
+        echo ""
+        echo "=== Building base image ==="
+        podman build --security-opt label=disable -f Containerfile.base -t "$BASE_IMAGE_NAME" .
+        echo ""
+        echo "=== Building application image ==="
+        podman build --security-opt label=disable --build-arg BASE_IMAGE="$BASE_IMAGE_NAME" -t "$IMAGE_NAME" .
+        echo ""
+        echo "✓ Both images built successfully"
         ;;
 
     start)
@@ -232,8 +264,22 @@ case "${1:-help}" in
         ;;
 
     push)
-        echo "Pushing to quay.io..."
+        echo "Pushing application image to quay.io..."
         podman push "$IMAGE_NAME"
+        ;;
+
+    push-base)
+        echo "Pushing base image to quay.io..."
+        podman push "$BASE_IMAGE_NAME"
+        ;;
+
+    push-all)
+        echo "Pushing both images to quay.io..."
+        echo "Pushing base image..."
+        podman push "$BASE_IMAGE_NAME"
+        echo "Pushing application image..."
+        podman push "$IMAGE_NAME"
+        echo "✓ Both images pushed"
         ;;
 
     help|*)
@@ -241,17 +287,23 @@ case "${1:-help}" in
         echo ""
         echo "Usage: ./run.sh [command]"
         echo ""
+        echo "Build Commands:"
+        echo "  build       Build application image (pulls base from quay.io if needed)"
+        echo "  build-base  Build base image locally (PostgreSQL, Node.js, Playwright)"
+        echo "  build-all   Build both base and application images"
+        echo ""
         echo "Main Commands:"
-        echo "  build   Build the container image"
         echo "  seed    Pull production data to seed local development"
         echo "  start   Start the application container (ephemeral storage)"
         echo "  test    Run integration tests (ephemeral storage)"
         echo "  stop    Stop and remove the container"
         echo ""
         echo "Utility Commands:"
-        echo "  logs    Follow container logs"
-        echo "  shell   Open bash shell in running container"
-        echo "  push    Push image to quay.io/fatherlinux/rotv"
+        echo "  logs       Follow container logs"
+        echo "  shell      Open bash shell in running container"
+        echo "  push       Push application image to quay.io/fatherlinux/rotv"
+        echo "  push-base  Push base image to quay.io/fatherlinux/rotv-base"
+        echo "  push-all   Push both images to quay.io"
         echo ""
         echo "Storage & Data Workflow:"
         echo "  Development (default): Ephemeral storage + Production seed data"
