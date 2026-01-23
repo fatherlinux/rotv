@@ -165,12 +165,19 @@ case "${1:-help}" in
         echo "Running integration tests..."
         echo ""
 
+        # Check if seed data exists
+        if [ ! -f "$SEED_DATA_FILE" ]; then
+            echo "⚠ No seed data found at $SEED_DATA_FILE"
+            echo "Run './run.sh seed' first to pull production data"
+            exit 1
+        fi
+
         # Stop and remove existing container
         echo "Stopping main container..."
         podman stop "$CONTAINER_NAME" 2>/dev/null || true
         podman rm "$CONTAINER_NAME" 2>/dev/null || true
 
-        # Start container with test database using ephemeral storage
+        # Start container with test database using ephemeral storage and seed data
         echo "Starting test container with ephemeral storage..."
         podman run -d \
             --name "$CONTAINER_NAME" \
@@ -178,6 +185,7 @@ case "${1:-help}" in
             --network=pasta:--dns-forward,8.8.8.8 \
             -p 8080:8080 \
             --tmpfs /data/pgdata:rw,size=2G,mode=0700 \
+            -v "$SEED_DATA_FILE:/tmp/seed-data.sql:ro" \
             -e PGDATABASE=rotv_test \
             $ENV_ARGS \
             "$IMAGE_NAME" >/dev/null
@@ -190,9 +198,9 @@ case "${1:-help}" in
         podman exec "$CONTAINER_NAME" psql -U postgres -d postgres -c "DROP DATABASE IF EXISTS rotv_test;" 2>/dev/null || true
         podman exec "$CONTAINER_NAME" psql -U postgres -d postgres -c "CREATE DATABASE rotv_test;" 2>/dev/null || true
 
-        # Run migrations on test database
-        echo "Running migrations on test database..."
-        podman exec "$CONTAINER_NAME" psql -U postgres -d rotv_test -f /app/migrations/schema.sql 2>/dev/null || echo "⚠ No migrations found (continuing anyway)"
+        # Import seed data into test database
+        echo "Importing seed data into test database..."
+        podman exec "$CONTAINER_NAME" psql -U postgres -d rotv_test -f /tmp/seed-data.sql 2>&1 | grep -c "^COPY" | xargs echo "Imported rows from tables:"
 
         echo "✓ Test database ready"
         echo ""

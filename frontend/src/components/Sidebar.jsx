@@ -764,13 +764,18 @@ function EditView({ destination, editedData, setEditedData, onSave, onCancel, on
             <div className="edit-section half">
               <label>Era</label>
               <select
-                value={editedData.era || ''}
-                onChange={(e) => handleChange('era', e.target.value)}
+                value={editedData.era_id || ''}
+                onChange={(e) => {
+                  const eraId = e.target.value ? parseInt(e.target.value) : null;
+                  const selectedEra = availableEras.find(era => era.id === eraId);
+                  handleChange('era_id', eraId);
+                  handleChange('era', selectedEra ? selectedEra.name : '');
+                }}
                 className="era-select"
               >
                 <option value="">Select an era...</option>
                 {availableEras.map(era => (
-                  <option key={era.id} value={era.name}>
+                  <option key={era.id} value={era.id}>
                     {era.name}
                     {era.year_start || era.year_end
                       ? ` (${era.year_start || ''}${era.year_start && era.year_end ? '-' : ''}${era.year_end || '+'})`
