@@ -671,7 +671,7 @@ app.get('/api/pois', async (req, res) => {
     let query = `
       SELECT p.id, p.name, p.poi_type, p.latitude, p.longitude, p.geometry, p.geometry_drive_file_id,
              p.owner_id, o.name as owner_name, p.property_owner,
-             p.brief_description, p.era_id, e.name as era_name, p.era, p.historical_description,
+             p.brief_description, p.era_id, e.name as era_name, p.historical_description,
              p.primary_activities, p.surface, p.pets, p.cell_signal, p.more_info_link,
              p.length_miles, p.difficulty, p.image_mime_type, p.image_drive_file_id,
              p.boundary_type, p.boundary_color, p.news_url, p.events_url,
@@ -703,7 +703,7 @@ app.get('/api/pois/:id', async (req, res) => {
     const result = await pool.query(`
       SELECT p.id, p.name, p.poi_type, p.latitude, p.longitude, p.geometry, p.geometry_drive_file_id,
              p.owner_id, o.name as owner_name, p.property_owner,
-             p.brief_description, p.era_id, e.name as era_name, p.era, p.historical_description,
+             p.brief_description, p.era_id, e.name as era_name, p.historical_description,
              p.primary_activities, p.surface, p.pets, p.cell_signal, p.more_info_link,
              p.length_miles, p.difficulty, p.image_mime_type, p.image_drive_file_id,
              p.boundary_type, p.boundary_color, p.news_url, p.events_url,
@@ -1009,7 +1009,7 @@ app.get('/api/destinations', async (req, res) => {
     const result = await pool.query(`
       SELECT p.id, p.name, p.poi_type, p.latitude, p.longitude,
              p.owner_id, o.name as owner_name, p.property_owner,
-             p.brief_description, p.era_id, e.name as era_name, p.era, p.historical_description,
+             p.brief_description, p.era_id, e.name as era_name, p.historical_description,
              p.primary_activities, p.surface, p.pets, p.cell_signal, p.more_info_link,
              p.image_mime_type, p.image_drive_file_id, p.news_url, p.events_url,
              p.locally_modified, p.deleted, p.synced, p.created_at, p.updated_at
@@ -1033,7 +1033,7 @@ app.get('/api/destinations/:id', async (req, res) => {
     const result = await pool.query(`
       SELECT p.id, p.name, p.poi_type, p.latitude, p.longitude,
              p.owner_id, o.name as owner_name, p.property_owner,
-             p.brief_description, p.era_id, e.name as era_name, p.era, p.historical_description,
+             p.brief_description, p.era_id, e.name as era_name, p.historical_description,
              p.primary_activities, p.surface, p.pets, p.cell_signal, p.more_info_link,
              p.image_mime_type, p.image_drive_file_id, p.news_url, p.events_url,
              p.locally_modified, p.deleted, p.synced, p.created_at, p.updated_at
@@ -1083,7 +1083,7 @@ app.get('/api/linear-features', async (req, res) => {
     const result = await pool.query(`
       SELECT p.id, p.name, p.poi_type as feature_type, p.geometry,
              p.owner_id, o.name as owner_name, p.property_owner,
-             p.brief_description, p.era_id, e.name as era_name, p.era, p.historical_description,
+             p.brief_description, p.era_id, e.name as era_name, p.historical_description,
              p.primary_activities, p.surface, p.pets, p.cell_signal, p.more_info_link,
              p.length_miles, p.difficulty, p.image_mime_type, p.image_drive_file_id,
              p.boundary_type, p.boundary_color, p.news_url, p.events_url,
@@ -1107,7 +1107,7 @@ app.get('/api/linear-features/:id', async (req, res) => {
     const result = await pool.query(`
       SELECT p.id, p.name, p.poi_type as feature_type, p.geometry,
              p.owner_id, o.name as owner_name, p.property_owner,
-             p.brief_description, p.era_id, e.name as era_name, p.era, p.historical_description,
+             p.brief_description, p.era_id, e.name as era_name, p.historical_description,
              p.primary_activities, p.surface, p.pets, p.cell_signal, p.more_info_link,
              p.length_miles, p.difficulty, p.image_mime_type, p.image_drive_file_id,
              p.boundary_type, p.boundary_color,

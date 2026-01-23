@@ -329,7 +329,7 @@ function AppContent() {
     }
 
     if (activeFilters.era) {
-      filtered = filtered.filter(d => d.era === activeFilters.era);
+      filtered = filtered.filter(d => d.era_name === activeFilters.era);
     }
 
     if (activeFilters.pets === 'yes') {
@@ -530,7 +530,6 @@ function AppContent() {
       longitude: coords.lng,
       property_owner: '',
       brief_description: '',
-      era: '',
       historical_description: '',
       primary_activities: '',
       surface: '',

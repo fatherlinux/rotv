@@ -221,7 +221,7 @@ export function createAdminRouter(pool, clearThumbnailCache) {
     const { id } = req.params;
     const allowedFields = [
       'name', 'poi_type', 'latitude', 'longitude', 'geometry', 'geometry_drive_file_id',
-      'property_owner', 'owner_id', 'brief_description', 'era', 'era_id', 'historical_description',
+      'property_owner', 'owner_id', 'brief_description', 'era_id', 'historical_description',
       'primary_activities', 'surface', 'pets', 'cell_signal', 'more_info_link',
       'events_url', 'news_url',
       'length_miles', 'difficulty', 'boundary_type', 'boundary_color'
@@ -352,7 +352,7 @@ export function createAdminRouter(pool, clearThumbnailCache) {
     }
 
     const allowedFields = [
-      'property_owner', 'owner_id', 'brief_description', 'era', 'era_id', 'historical_description',
+      'property_owner', 'owner_id', 'brief_description', 'era_id', 'historical_description',
       'primary_activities', 'surface', 'pets', 'cell_signal', 'more_info_link',
       'events_url', 'news_url'
     ];
@@ -972,23 +972,6 @@ export function createAdminRouter(pool, clearThumbnailCache) {
          RETURNING id, name, year_start, year_end, description, sort_order`,
         [name.trim(), year_start || null, year_end || null, description || null, sort_order, id]
       );
-
-      // If name changed, update all destinations that reference this era
-      const newName = name.trim();
-      if (oldName !== newName) {
-        const updateResult = await pool.query(
-          `UPDATE pois
-           SET era = $2,
-               updated_at = CURRENT_TIMESTAMP,
-               locally_modified = TRUE,
-               synced = FALSE
-           WHERE era = $1`,
-          [oldName, newName]
-        );
-        if (updateResult.rowCount > 0) {
-          console.log(`Updated ${updateResult.rowCount} POIs with renamed era: ${oldName} -> ${newName}`);
-        }
-      }
 
       console.log(`Admin ${req.user.email} updated era: ${name}`);
       await queueEraSync('UPDATE', id, result.rows[0]);
@@ -2509,8 +2492,8 @@ export function createAdminRouter(pool, clearThumbnailCache) {
   router.post('/linear-features', isAdmin, async (req, res) => {
     try {
       const {
-        name, feature_type, geometry, property_owner, brief_description,
-        era, historical_description, primary_activities, surface, pets,
+        name, feature_type, geometry, property_owner, owner_id, brief_description,
+        era_id, historical_description, primary_activities, surface, pets,
         cell_signal, more_info_link, length_miles, difficulty
       } = req.body;
 
@@ -2524,14 +2507,14 @@ export function createAdminRouter(pool, clearThumbnailCache) {
 
       const result = await pool.query(`
         INSERT INTO pois (
-          name, poi_type, geometry, property_owner, brief_description,
-          era, historical_description, primary_activities, surface, pets,
+          name, poi_type, geometry, property_owner, owner_id, brief_description,
+          era_id, historical_description, primary_activities, surface, pets,
           cell_signal, more_info_link, length_miles, difficulty, locally_modified
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, TRUE)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, TRUE)
         RETURNING *
       `, [
-        name, feature_type, JSON.stringify(geometry), property_owner, brief_description,
-        era, historical_description, primary_activities, surface, pets,
+        name, feature_type, JSON.stringify(geometry), property_owner, owner_id, brief_description,
+        era_id, historical_description, primary_activities, surface, pets,
         cell_signal, more_info_link, length_miles, difficulty
       ]);
 

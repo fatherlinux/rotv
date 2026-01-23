@@ -266,8 +266,8 @@ function ReadOnlyView({ destination, isLinearFeature, isAdmin, showImage = true,
               {destination.difficulty}
             </span>
           )}
-          {destination.era && destination.poi_type !== 'virtual' && (
-            <span className="era-badge-large">{destination.era}</span>
+          {destination.era_name && destination.poi_type !== 'virtual' && (
+            <span className="era-badge-large">{destination.era_name}</span>
           )}
           {(destination.owner_name || destination.property_owner) && destination.poi_type !== 'virtual' && (
             <span className={`owner-badge ${getOwnerClass(destination.owner_name || destination.property_owner)}`}>
@@ -546,7 +546,6 @@ function EditView({ destination, editedData, setEditedData, onSave, onCancel, on
       // Update all fields that have data
       setEditedData(prev => ({
         ...prev,
-        era: data.era || prev.era,
         property_owner: data.property_owner || prev.property_owner,
         primary_activities: data.primary_activities || prev.primary_activities,
         surface: data.surface || prev.surface,
@@ -767,9 +766,7 @@ function EditView({ destination, editedData, setEditedData, onSave, onCancel, on
                 value={editedData.era_id || ''}
                 onChange={(e) => {
                   const eraId = e.target.value ? parseInt(e.target.value) : null;
-                  const selectedEra = availableEras.find(era => era.id === eraId);
                   handleChange('era_id', eraId);
-                  handleChange('era', selectedEra ? selectedEra.name : '');
                 }}
                 className="era-select"
               >
@@ -1849,8 +1846,8 @@ function AssociationsModal({ isOpen, onClose, poi, associations, allDestinations
                           {associatedPoi._isOwned && (
                             <span className="owner-badge-small">Owned</span>
                           )}
-                          {associatedPoi.era && !associatedPoi._isVirtual && (
-                            <span className="association-item-era">{associatedPoi.era}</span>
+                          {associatedPoi.era_name && !associatedPoi._isVirtual && (
+                            <span className="association-item-era">{associatedPoi.era_name}</span>
                           )}
                         </div>
                         {associatedPoi.brief_description && (
@@ -2409,7 +2406,6 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
         more_info_link: newOrganization.more_info_link || '',
         historical_description: '',
         primary_activities: '',
-        era: '',
         surface: '',
         pets: '',
         cell_signal: null
