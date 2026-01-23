@@ -425,6 +425,10 @@ function AppContent() {
       } else if (feature.feature_type === 'river') {
         setShowRivers(true);
       }
+      // On mobile, switch to Results tab when linear feature is clicked from map
+      if (window.innerWidth < 768) {
+        setActiveTab('results');
+      }
     } else {
       setCurrentPoiIndex(-1);
     }
@@ -441,6 +445,10 @@ function AppContent() {
     if (destination) {
       const index = poiNavigationList.findIndex(p => !p._isLinear && p.id === destination.id);
       setCurrentPoiIndex(index);
+      // On mobile, switch to Results tab when POI is clicked from map
+      if (window.innerWidth < 768) {
+        setActiveTab('results');
+      }
     } else {
       setCurrentPoiIndex(-1);
     }
@@ -480,24 +488,20 @@ function AppContent() {
     }
   }, [poiNavigationList, currentPoiIndex, updateUrlWithPoi]);
 
-  // Stable callbacks for ResultsTab - select POI, only switch to view tab on desktop
+  // Stable callbacks for ResultsTab - always switch to view tab to show sidebar with navigation
   // Skip fly animation when selecting from Results to preserve map view
   const handleResultsSelectDestination = useCallback((poi) => {
     skipNextFlyRef.current = true; // Don't fly to POI - preserve current map view
     handleSelectDestination(poi);
-    // On mobile (< 768px), stay on Results tab for swipe navigation
-    if (window.innerWidth >= 768) {
-      setActiveTab('view');
-    }
+    // Always switch to view tab to show sidebar with thumbnail navigation
+    setActiveTab('view');
   }, [handleSelectDestination]);
 
   const handleResultsSelectLinearFeature = useCallback((poi) => {
     skipNextFlyRef.current = true; // Don't fly to POI - preserve current map view
     handleSelectLinearFeature(poi);
-    // On mobile (< 768px), stay on Results tab for swipe navigation
-    if (window.innerWidth >= 768) {
-      setActiveTab('view');
-    }
+    // Always switch to view tab to show sidebar with thumbnail navigation
+    setActiveTab('view');
   }, [handleSelectLinearFeature]);
 
   // Handle linear feature update - merge instead of replace to preserve geometry
@@ -1072,6 +1076,7 @@ function AppContent() {
           onNavigate={handleNavigatePoi}
           currentIndex={currentPoiIndex}
           totalCount={poiNavigationList.length}
+          poiNavigationList={poiNavigationList}
           associations={associations}
           allDestinations={destinations}
           allLinearFeatures={linearFeatures}
