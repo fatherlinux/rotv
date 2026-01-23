@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import ImageUploader from './ImageUploader';
 import NewsEvents from './NewsEvents';
 import CollectionStatus from './CollectionStatus';
+import ThumbnailCarousel from './ThumbnailCarousel';
 
 // Sidebar component with tabs: Info, News, Events, History
 // Share Modal Component
@@ -2279,7 +2280,7 @@ function AssociationsTabContent({ poi, associations, allDestinations, allLinearF
   );
 }
 
-function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, onClose, isAdmin, editMode, onDestinationUpdate, onDestinationDelete, onSaveNewPOI, onCancelNewPOI, onSaveNewOrganization, onCancelNewOrganization, previewCoords, onPreviewCoordsChange, linearFeature, onLinearFeatureUpdate, onLinearFeatureDelete, onNavigate, currentIndex, totalCount, associations, allDestinations, allLinearFeatures, allVirtualPois, onSelectDestination, onSelectLinearFeature, onAssociationsChanged, onStartDrawingAssociations }) {
+function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, onClose, isAdmin, editMode, onDestinationUpdate, onDestinationDelete, onSaveNewPOI, onCancelNewPOI, onSaveNewOrganization, onCancelNewOrganization, previewCoords, onPreviewCoordsChange, linearFeature, onLinearFeatureUpdate, onLinearFeatureDelete, onNavigate, currentIndex, totalCount, poiNavigationList, associations, allDestinations, allLinearFeatures, allVirtualPois, onSelectDestination, onSelectLinearFeature, onAssociationsChanged, onStartDrawingAssociations }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editedData, setEditedData] = useState({});
   const [saving, setSaving] = useState(false);
@@ -2330,6 +2331,8 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
   // Touch/swipe handling for mobile navigation
   const touchStartX = React.useRef(null);
   const touchStartY = React.useRef(null);
+  const [swipeOffset, setSwipeOffset] = useState(0);
+  const [isSwipingHorizontally, setIsSwipingHorizontally] = useState(false);
 
   // Check for mobile on resize
   useEffect(() => {
@@ -2342,6 +2345,31 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
   const handleTouchStart = (e) => {
     touchStartX.current = e.touches[0].clientX;
     touchStartY.current = e.touches[0].clientY;
+    setIsSwipingHorizontally(false);
+  };
+
+  const handleTouchMove = (e) => {
+    if (touchStartX.current === null || touchStartY.current === null) return;
+    if (!onNavigate) return;
+
+    const touchCurrentX = e.touches[0].clientX;
+    const touchCurrentY = e.touches[0].clientY;
+    const deltaX = touchCurrentX - touchStartX.current;
+    const deltaY = touchCurrentY - touchStartY.current;
+
+    // Determine if this is a horizontal swipe
+    if (!isSwipingHorizontally && Math.abs(deltaX) > 10) {
+      if (Math.abs(deltaX) > Math.abs(deltaY)) {
+        setIsSwipingHorizontally(true);
+      }
+    }
+
+    // Update swipe offset for visual feedback (only if horizontal swipe)
+    if (isSwipingHorizontally || Math.abs(deltaX) > Math.abs(deltaY)) {
+      // Cap the offset at +/- 100px for visual feedback
+      const cappedOffset = Math.max(-100, Math.min(100, deltaX * 0.5));
+      setSwipeOffset(cappedOffset);
+    }
   };
 
   const handleTouchEnd = (e) => {
@@ -2364,20 +2392,25 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
       }
     }
 
+    // Reset swipe state
     touchStartX.current = null;
     touchStartY.current = null;
+    setSwipeOffset(0);
+    setIsSwipingHorizontally(false);
   };
 
   // Determine what we're displaying
   const displayItem = linearFeature || destination;
   const isLinearFeature = !!linearFeature;
 
-  // Reset edit state when selection changes
+  // Reset edit state and sidebar tab when selection changes
   useEffect(() => {
     if (displayItem) {
       setEditedData({ ...displayItem });
       // Auto-enter edit mode if admin and editMode is on, or if creating new POI
       setIsEditing((isAdmin && editMode) || isNewPOI);
+      // Always reset to Info tab when switching to a different POI
+      setSidebarTab('view');
     } else {
       setIsEditing(false);
     }
@@ -2685,17 +2718,26 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
       <div
         className={`sidebar open ${isEditing ? 'editing' : ''}`}
         onTouchStart={isMobile && onNavigate ? handleTouchStart : undefined}
+        onTouchMove={isMobile && onNavigate ? handleTouchMove : undefined}
         onTouchEnd={isMobile && onNavigate ? handleTouchEnd : undefined}
       >
-        {/* Mobile navigation bar - above header so it doesn't move when title wraps */}
-        {isMobile && onNavigate && totalCount > 0 && (
-          <div className="sidebar-navigation-bar">
-            <button className="sidebar-nav-btn" onClick={() => onNavigate('prev')}>← Prev</button>
-            <span className="sidebar-nav-position">{currentIndex + 1} of {totalCount}</span>
-            <button className="sidebar-nav-btn" onClick={() => onNavigate('next')}>Next →</button>
-          </div>
+        {/* Mobile navigation carousel - above header so it doesn't move when title wraps */}
+        {isMobile && onNavigate && poiNavigationList && poiNavigationList.length > 0 && (
+          <ThumbnailCarousel
+            pois={poiNavigationList}
+            currentIndex={currentIndex}
+            onNavigate={onNavigate}
+          />
         )}
 
+        <div
+          className="sidebar-content-wrapper"
+          style={{
+            transform: swipeOffset !== 0 ? `translateX(${swipeOffset}px)` : 'none',
+            opacity: swipeOffset !== 0 ? Math.max(0.5, 1 - Math.abs(swipeOffset) / 200) : 1,
+            transition: swipeOffset === 0 ? 'transform 0.3s ease-out, opacity 0.3s ease-out' : 'none'
+          }}
+        >
         <div className="sidebar-header">
           <h2 title={linearFeature.name}>{isEditing ? 'Edit: ' : ''}{linearFeature.name}</h2>
           <div className="header-buttons">
@@ -2850,6 +2892,7 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
             />
           )}
         </div>
+        </div> {/* End sidebar-content-wrapper */}
 
         <ShareModal
           isOpen={showShareModal}
@@ -2887,17 +2930,26 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
     <div
       className={`sidebar ${destination ? 'open' : ''} ${isEditing ? 'editing' : ''}`}
       onTouchStart={isMobile && onNavigate ? handleTouchStart : undefined}
+      onTouchMove={isMobile && onNavigate ? handleTouchMove : undefined}
       onTouchEnd={isMobile && onNavigate ? handleTouchEnd : undefined}
     >
-      {/* Mobile navigation bar - above header so it doesn't move when title wraps */}
-      {isMobile && onNavigate && totalCount > 0 && (
-        <div className="sidebar-navigation-bar">
-          <button className="sidebar-nav-btn" onClick={() => onNavigate('prev')}>← Prev</button>
-          <span className="sidebar-nav-position">{currentIndex + 1} of {totalCount}</span>
-          <button className="sidebar-nav-btn" onClick={() => onNavigate('next')}>Next →</button>
-        </div>
+      {/* Mobile navigation carousel - above header so it doesn't move when title wraps */}
+      {isMobile && onNavigate && poiNavigationList && poiNavigationList.length > 0 && (
+        <ThumbnailCarousel
+          pois={poiNavigationList}
+          currentIndex={currentIndex}
+          onNavigate={onNavigate}
+        />
       )}
 
+      <div
+        className="sidebar-content-wrapper"
+        style={{
+          transform: swipeOffset !== 0 ? `translateX(${swipeOffset}px)` : 'none',
+          opacity: swipeOffset !== 0 ? Math.max(0.5, 1 - Math.abs(swipeOffset) / 200) : 1,
+          transition: swipeOffset === 0 ? 'transform 0.3s ease-out, opacity 0.3s ease-out' : 'none'
+        }}
+      >
       <div className="sidebar-header">
         <h2 title={destination?.name || 'Location Details'}>
           {isNewOrganization ? 'Create Organization' : (isEditing ? 'Edit: ' : '')}{!isNewOrganization && (destination?.name || 'Location Details')}
@@ -3097,6 +3149,7 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
           ) : null
         )}
       </div>
+      </div> {/* End sidebar-content-wrapper */}
 
       <ShareModal
         isOpen={showShareModal}
