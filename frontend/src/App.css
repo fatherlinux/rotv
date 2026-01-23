@@ -1258,6 +1258,18 @@ body {
 .owner-local { background: #e3f2fd; color: #1565c0; }
 .owner-other { background: #fff3e0; color: #f57c00; }
 
+.owner-badge-small {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 8px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  background: #e8f5e9;
+  color: #2d5016;
+  letter-spacing: 0.3px;
+}
+
 .section {
   margin-bottom: 1.5rem;
 }

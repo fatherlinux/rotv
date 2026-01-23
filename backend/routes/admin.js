@@ -221,7 +221,7 @@ export function createAdminRouter(pool, clearThumbnailCache) {
     const { id } = req.params;
     const allowedFields = [
       'name', 'poi_type', 'latitude', 'longitude', 'geometry', 'geometry_drive_file_id',
-      'property_owner', 'brief_description', 'era', 'historical_description',
+      'property_owner', 'owner_id', 'brief_description', 'era', 'historical_description',
       'primary_activities', 'surface', 'pets', 'cell_signal', 'more_info_link',
       'events_url', 'news_url',
       'length_miles', 'difficulty', 'boundary_type', 'boundary_color'
@@ -279,7 +279,7 @@ export function createAdminRouter(pool, clearThumbnailCache) {
   router.put('/destinations/:id', isAdmin, async (req, res) => {
     const { id } = req.params;
     const allowedFields = [
-      'name', 'latitude', 'longitude', 'property_owner', 'brief_description',
+      'name', 'latitude', 'longitude', 'property_owner', 'owner_id', 'brief_description',
       'era', 'historical_description', 'primary_activities', 'surface',
       'pets', 'cell_signal', 'more_info_link', 'events_url', 'news_url'
     ];
@@ -352,7 +352,7 @@ export function createAdminRouter(pool, clearThumbnailCache) {
     }
 
     const allowedFields = [
-      'property_owner', 'brief_description', 'era', 'historical_description',
+      'property_owner', 'owner_id', 'brief_description', 'era', 'historical_description',
       'primary_activities', 'surface', 'pets', 'cell_signal', 'more_info_link',
       'events_url', 'news_url'
     ];
@@ -422,7 +422,7 @@ export function createAdminRouter(pool, clearThumbnailCache) {
     }
 
     const allowedFields = [
-      'poi_type', 'property_owner', 'brief_description', 'era', 'historical_description',
+      'poi_type', 'property_owner', 'owner_id', 'brief_description', 'era', 'historical_description',
       'primary_activities', 'surface', 'pets', 'cell_signal', 'more_info_link',
       'events_url', 'news_url', 'image_drive_file_id'
     ];
@@ -2552,7 +2552,7 @@ export function createAdminRouter(pool, clearThumbnailCache) {
     try {
       const { id } = req.params;
       const allowedFields = [
-        'name', 'poi_type', 'geometry', 'property_owner', 'brief_description',
+        'name', 'poi_type', 'geometry', 'property_owner', 'owner_id', 'brief_description',
         'era', 'historical_description', 'primary_activities', 'surface', 'pets',
         'cell_signal', 'more_info_link', 'length_miles', 'difficulty',
         'boundary_type', 'boundary_color'

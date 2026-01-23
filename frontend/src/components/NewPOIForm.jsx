@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 function NewPOIForm({ onClose, onCreate, initialCoords }) {
   const [formData, setFormData] = useState({
     name: '',
     latitude: initialCoords?.lat?.toFixed(6) || '',
     longitude: initialCoords?.lng?.toFixed(6) || '',
+    owner_id: null,
     property_owner: '',
     brief_description: '',
     era: '',
@@ -17,6 +18,25 @@ function NewPOIForm({ onClose, onCreate, initialCoords }) {
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  const [availableOwnerOrgs, setAvailableOwnerOrgs] = useState([]);
+
+  // Fetch owner organizations on mount
+  useEffect(() => {
+    async function fetchOwnerOrgs() {
+      try {
+        const response = await fetch('/api/owner-organizations', {
+          credentials: 'include'
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setAvailableOwnerOrgs(data);
+        }
+      } catch (err) {
+        console.error('Failed to fetch owner organizations:', err);
+      }
+    }
+    fetchOwnerOrgs();
+  }, []);
 
   const handleChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -128,12 +148,22 @@ function NewPOIForm({ onClose, onCreate, initialCoords }) {
             </div>
             <div className="form-section half">
               <label>Property Owner</label>
-              <input
-                type="text"
-                value={formData.property_owner}
-                onChange={(e) => handleChange('property_owner', e.target.value)}
-                placeholder="e.g., Federal (NPS)"
-              />
+              <select
+                value={formData.owner_id || ''}
+                onChange={(e) => {
+                  const ownerId = e.target.value ? parseInt(e.target.value) : null;
+                  const ownerOrg = availableOwnerOrgs.find(o => o.id === ownerId);
+                  handleChange('owner_id', ownerId);
+                  handleChange('property_owner', ownerOrg ? ownerOrg.name : '');
+                }}
+              >
+                <option value="">-- No Owner --</option>
+                {availableOwnerOrgs.map(org => (
+                  <option key={org.id} value={org.id}>
+                    {org.name}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 

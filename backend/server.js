@@ -192,6 +192,7 @@ async function initDatabase() {
 
         -- Shared metadata fields
         property_owner VARCHAR(255),
+        owner_id INTEGER REFERENCES pois(id),
         brief_description TEXT,
         era VARCHAR(255),
         historical_description TEXT,
@@ -223,6 +224,11 @@ async function initDatabase() {
     // Create index for faster lookups by type
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_pois_type ON pois(poi_type)
+    `);
+
+    // Create index for owner lookups
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_pois_owner_id ON pois(owner_id)
     `);
 
     // Create unique constraint on (name, poi_type) to allow same-named features of different types
@@ -663,23 +669,25 @@ app.get('/api/pois', async (req, res) => {
     const { type } = req.query;
 
     let query = `
-      SELECT id, name, poi_type, latitude, longitude, geometry, geometry_drive_file_id,
-             property_owner, brief_description, era, historical_description,
-             primary_activities, surface, pets, cell_signal, more_info_link,
-             length_miles, difficulty, image_mime_type, image_drive_file_id,
-             boundary_type, boundary_color, news_url, events_url,
-             locally_modified, deleted, synced, created_at, updated_at
-      FROM pois
-      WHERE (deleted IS NULL OR deleted = FALSE)
+      SELECT p.id, p.name, p.poi_type, p.latitude, p.longitude, p.geometry, p.geometry_drive_file_id,
+             p.owner_id, o.name as owner_name, p.property_owner,
+             p.brief_description, p.era, p.historical_description,
+             p.primary_activities, p.surface, p.pets, p.cell_signal, p.more_info_link,
+             p.length_miles, p.difficulty, p.image_mime_type, p.image_drive_file_id,
+             p.boundary_type, p.boundary_color, p.news_url, p.events_url,
+             p.locally_modified, p.deleted, p.synced, p.created_at, p.updated_at
+      FROM pois p
+      LEFT JOIN pois o ON p.owner_id = o.id AND o.poi_type = 'virtual'
+      WHERE (p.deleted IS NULL OR p.deleted = FALSE)
     `;
 
     const params = [];
     if (type) {
       params.push(type);
-      query += ` AND poi_type = $1`;
+      query += ` AND p.poi_type = $1`;
     }
 
-    query += ` ORDER BY poi_type, name`;
+    query += ` ORDER BY p.poi_type, p.name`;
 
     const result = await pool.query(query, params);
     res.json(result.rows);
@@ -692,13 +700,16 @@ app.get('/api/pois', async (req, res) => {
 app.get('/api/pois/:id', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT id, name, poi_type, latitude, longitude, geometry, geometry_drive_file_id,
-             property_owner, brief_description, era, historical_description,
-             primary_activities, surface, pets, cell_signal, more_info_link,
-             length_miles, difficulty, image_mime_type, image_drive_file_id,
-             boundary_type, boundary_color, news_url, events_url,
-             locally_modified, deleted, synced, created_at, updated_at
-      FROM pois WHERE id = $1`,
+      SELECT p.id, p.name, p.poi_type, p.latitude, p.longitude, p.geometry, p.geometry_drive_file_id,
+             p.owner_id, o.name as owner_name, p.property_owner,
+             p.brief_description, p.era, p.historical_description,
+             p.primary_activities, p.surface, p.pets, p.cell_signal, p.more_info_link,
+             p.length_miles, p.difficulty, p.image_mime_type, p.image_drive_file_id,
+             p.boundary_type, p.boundary_color, p.news_url, p.events_url,
+             p.locally_modified, p.deleted, p.synced, p.created_at, p.updated_at
+      FROM pois p
+      LEFT JOIN pois o ON p.owner_id = o.id AND o.poi_type = 'virtual'
+      WHERE p.id = $1`,
       [req.params.id]
     );
     if (result.rows.length === 0) {
@@ -860,18 +871,44 @@ app.get('/api/pois/:id/thumbnail', async (req, res) => {
 
 app.get('/api/filters', async (req, res) => {
   try {
-    const owners = await pool.query('SELECT DISTINCT property_owner FROM pois WHERE property_owner IS NOT NULL ORDER BY property_owner');
+    // Get owners from organizations (virtual POIs that are used as owners)
+    const owners = await pool.query(`
+      SELECT DISTINCT o.id, o.name
+      FROM pois o
+      WHERE o.poi_type = 'virtual'
+        AND (o.deleted IS NULL OR o.deleted = FALSE)
+        AND EXISTS (SELECT 1 FROM pois p WHERE p.owner_id = o.id)
+      ORDER BY o.name
+    `);
     const eras = await pool.query('SELECT DISTINCT era FROM pois WHERE era IS NOT NULL ORDER BY era');
     const surfaces = await pool.query('SELECT DISTINCT surface FROM pois WHERE surface IS NOT NULL ORDER BY surface');
 
     res.json({
-      owners: owners.rows.map(r => r.property_owner),
+      owners: owners.rows.map(r => r.name),
+      ownerOrganizations: owners.rows, // Include id and name for new UI
       eras: eras.rows.map(r => r.era),
       surfaces: surfaces.rows.map(r => r.surface)
     });
   } catch (error) {
     console.error('Error fetching filters:', error);
     res.status(500).json({ error: 'Failed to fetch filters' });
+  }
+});
+
+// Get all organizations that can be used as property owners
+app.get('/api/owner-organizations', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT id, name, brief_description
+      FROM pois
+      WHERE poi_type = 'virtual'
+        AND (deleted IS NULL OR deleted = FALSE)
+      ORDER BY name
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching owner organizations:', error);
+    res.status(500).json({ error: 'Failed to fetch owner organizations' });
   }
 });
 
@@ -966,16 +1003,18 @@ app.get('/api/pois/virtual-in-viewport', async (req, res) => {
 app.get('/api/destinations', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT id, name, poi_type, latitude, longitude,
-             property_owner, brief_description, era, historical_description,
-             primary_activities, surface, pets, cell_signal, more_info_link,
-             image_mime_type, image_drive_file_id, news_url, events_url,
-             locally_modified, deleted, synced, created_at, updated_at
-      FROM pois
-      WHERE poi_type = 'point'
-        AND latitude IS NOT NULL AND longitude IS NOT NULL
-        AND (deleted IS NULL OR deleted = FALSE)
-      ORDER BY name
+      SELECT p.id, p.name, p.poi_type, p.latitude, p.longitude,
+             p.owner_id, o.name as owner_name, p.property_owner,
+             p.brief_description, p.era, p.historical_description,
+             p.primary_activities, p.surface, p.pets, p.cell_signal, p.more_info_link,
+             p.image_mime_type, p.image_drive_file_id, p.news_url, p.events_url,
+             p.locally_modified, p.deleted, p.synced, p.created_at, p.updated_at
+      FROM pois p
+      LEFT JOIN pois o ON p.owner_id = o.id AND o.poi_type = 'virtual'
+      WHERE p.poi_type = 'point'
+        AND p.latitude IS NOT NULL AND p.longitude IS NOT NULL
+        AND (p.deleted IS NULL OR p.deleted = FALSE)
+      ORDER BY p.name
     `);
     res.json(result.rows);
   } catch (error) {
@@ -987,12 +1026,15 @@ app.get('/api/destinations', async (req, res) => {
 app.get('/api/destinations/:id', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT id, name, poi_type, latitude, longitude,
-             property_owner, brief_description, era, historical_description,
-             primary_activities, surface, pets, cell_signal, more_info_link,
-             image_mime_type, image_drive_file_id, news_url, events_url,
-             locally_modified, deleted, synced, created_at, updated_at
-      FROM pois WHERE id = $1`,
+      SELECT p.id, p.name, p.poi_type, p.latitude, p.longitude,
+             p.owner_id, o.name as owner_name, p.property_owner,
+             p.brief_description, p.era, p.historical_description,
+             p.primary_activities, p.surface, p.pets, p.cell_signal, p.more_info_link,
+             p.image_mime_type, p.image_drive_file_id, p.news_url, p.events_url,
+             p.locally_modified, p.deleted, p.synced, p.created_at, p.updated_at
+      FROM pois p
+      LEFT JOIN pois o ON p.owner_id = o.id AND o.poi_type = 'virtual'
+      WHERE p.id = $1`,
       [req.params.id]
     );
     if (result.rows.length === 0) {
@@ -1033,16 +1075,18 @@ app.get('/api/destinations/:id/image', async (req, res) => {
 app.get('/api/linear-features', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT id, name, poi_type as feature_type, geometry,
-             property_owner, brief_description, era, historical_description,
-             primary_activities, surface, pets, cell_signal, more_info_link,
-             length_miles, difficulty, image_mime_type, image_drive_file_id,
-             boundary_type, boundary_color, news_url, events_url,
-             locally_modified, deleted, synced, created_at, updated_at
-      FROM pois
-      WHERE poi_type IN ('trail', 'river', 'boundary')
-        AND (deleted IS NULL OR deleted = FALSE)
-      ORDER BY poi_type, name
+      SELECT p.id, p.name, p.poi_type as feature_type, p.geometry,
+             p.owner_id, o.name as owner_name, p.property_owner,
+             p.brief_description, p.era, p.historical_description,
+             p.primary_activities, p.surface, p.pets, p.cell_signal, p.more_info_link,
+             p.length_miles, p.difficulty, p.image_mime_type, p.image_drive_file_id,
+             p.boundary_type, p.boundary_color, p.news_url, p.events_url,
+             p.locally_modified, p.deleted, p.synced, p.created_at, p.updated_at
+      FROM pois p
+      LEFT JOIN pois o ON p.owner_id = o.id AND o.poi_type = 'virtual'
+      WHERE p.poi_type IN ('trail', 'river', 'boundary')
+        AND (p.deleted IS NULL OR p.deleted = FALSE)
+      ORDER BY p.poi_type, p.name
     `);
     res.json(result.rows);
   } catch (error) {
@@ -1054,13 +1098,16 @@ app.get('/api/linear-features', async (req, res) => {
 app.get('/api/linear-features/:id', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT id, name, poi_type as feature_type, geometry,
-             property_owner, brief_description, era, historical_description,
-             primary_activities, surface, pets, cell_signal, more_info_link,
-             length_miles, difficulty, image_mime_type, image_drive_file_id,
-             boundary_type, boundary_color,
-             locally_modified, deleted, synced, created_at, updated_at
-      FROM pois WHERE id = $1`,
+      SELECT p.id, p.name, p.poi_type as feature_type, p.geometry,
+             p.owner_id, o.name as owner_name, p.property_owner,
+             p.brief_description, p.era, p.historical_description,
+             p.primary_activities, p.surface, p.pets, p.cell_signal, p.more_info_link,
+             p.length_miles, p.difficulty, p.image_mime_type, p.image_drive_file_id,
+             p.boundary_type, p.boundary_color,
+             p.locally_modified, p.deleted, p.synced, p.created_at, p.updated_at
+      FROM pois p
+      LEFT JOIN pois o ON p.owner_id = o.id AND o.poi_type = 'virtual'
+      WHERE p.id = $1`,
       [req.params.id]
     );
     if (result.rows.length === 0) {
