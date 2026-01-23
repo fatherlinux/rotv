@@ -586,7 +586,7 @@ function MapBoundsTracker({ destinations, visibleTypes, getDestinationIconType, 
 }
 
 // Combined Zoom and GPS Locate Control
-function ZoomLocateControl({ onLocationFound, onLocationError }) {
+function ZoomLocateControl({ onLocationFound, onLocationError, useSatellite, onSatelliteToggle }) {
   const map = useMap();
   const [locating, setLocating] = useState(false);
   const userMarkerRef = useRef(null);
@@ -702,6 +702,21 @@ function ZoomLocateControl({ onLocationFound, onLocationError }) {
           </svg>
         `;
 
+        // Satellite Toggle button
+        const satelliteToggle = L.DomUtil.create('a', 'zoom-locate-btn satellite-toggle-button', container);
+        satelliteToggle.href = '#';
+        satelliteToggle.title = useSatellite ? 'Switch to map view' : 'Switch to satellite view';
+        satelliteToggle.setAttribute('role', 'button');
+        satelliteToggle.setAttribute('aria-label', useSatellite ? 'Switch to map view' : 'Switch to satellite view');
+        satelliteToggle.innerHTML = `
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
+          </svg>
+        `;
+        if (useSatellite) {
+          satelliteToggle.classList.add('active');
+        }
+
         L.DomEvent.disableClickPropagation(container);
 
         L.DomEvent.on(zoomIn, 'click', function(e) {
@@ -717,6 +732,13 @@ function ZoomLocateControl({ onLocationFound, onLocationError }) {
         L.DomEvent.on(locate, 'click', function(e) {
           L.DomEvent.preventDefault(e);
           handleLocate();
+        });
+
+        L.DomEvent.on(satelliteToggle, 'click', function(e) {
+          L.DomEvent.preventDefault(e);
+          if (onSatelliteToggle) {
+            onSatelliteToggle();
+          }
         });
 
         return container;
@@ -735,7 +757,7 @@ function ZoomLocateControl({ onLocationFound, onLocationError }) {
         userCircleRef.current.remove();
       }
     };
-  }, [map, handleLocate]);
+  }, [map, handleLocate, useSatellite, onSatelliteToggle]);
 
   // Update button state when locating
   useEffect(() => {
@@ -748,6 +770,22 @@ function ZoomLocateControl({ onLocationFound, onLocationError }) {
       }
     }
   }, [locating]);
+
+  // Update satellite button state when satellite mode changes
+  useEffect(() => {
+    const button = document.querySelector('.satellite-toggle-button');
+    if (button) {
+      if (useSatellite) {
+        button.classList.add('active');
+        button.title = 'Switch to map view';
+        button.setAttribute('aria-label', 'Switch to map view');
+      } else {
+        button.classList.remove('active');
+        button.title = 'Switch to satellite view';
+        button.setAttribute('aria-label', 'Switch to satellite view');
+      }
+    }
+  }, [useSatellite]);
 
   return null;
 }
@@ -950,6 +988,7 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
   const [isLegendExpanded, setIsLegendExpanded] = useState(false);
   const [mapBounds, setMapBounds] = useState(DEFAULT_NPS_MAP_BOUNDS);
   const [overlayOpacity, setOverlayOpacity] = useState(1.0);
+  const [useSatellite, setUseSatellite] = useState(false);
   const [selectedFileName, setSelectedFileName] = useState(null); // Just for UI display
   const [importType, setImportType] = useState('trail');
   const [importingFile, setImportingFile] = useState(false);
@@ -1347,10 +1386,18 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
         zoomControl={false}
         style={{ height: '100%', width: '100%' }}
       >
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        />
+        {/* Base map layer - switch between regular and satellite */}
+        {useSatellite ? (
+          <TileLayer
+            attribution='Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
+            url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+          />
+        ) : (
+          <TileLayer
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+        )}
 
         {/* NPS Park Map overlay - rendered first so markers appear on top */}
         {showNpsMap && (
@@ -1544,7 +1591,10 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
         />
 
         {/* Combined Zoom and GPS Locate Control */}
-        <ZoomLocateControl />
+        <ZoomLocateControl
+          useSatellite={useSatellite}
+          onSatelliteToggle={() => setUseSatellite(prev => !prev)}
+        />
 
         {/* Temporary marker for new POI being created */}
         {newPOI && previewCoords && (
