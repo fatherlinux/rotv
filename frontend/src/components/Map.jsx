@@ -1292,8 +1292,10 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
     const viewSelectedColor = '#0066CC';
 
     if (feature.feature_type === 'river') {
+      // river - thinner solid line for less obtrusive appearance
       return {
-        ...baseStyle,
+        weight: isSelected ? 3 : 2,  // Thinner than base: 2 normal, 3 selected
+        opacity: isSelected ? 1 : 0.8,
         color: isSelected ? (editMode ? editSelectedColor : viewSelectedColor) : '#1E90FF'
       };
     } else if (feature.feature_type === 'boundary') {
@@ -1312,9 +1314,11 @@ function Map({ destinations, selectedDestination, onSelectDestination, isAdmin, 
         opacity: 1
       };
     } else {
-      // trail
+      // trail - thinner and dashed for less obtrusive appearance
       return {
-        ...baseStyle,
+        weight: isSelected ? 3 : 2,  // Thinner than base: 2 normal, 3 selected
+        opacity: isSelected ? 1 : 0.8,
+        dashArray: '5, 5',  // Dashed line pattern
         color: isSelected ? (editMode ? editSelectedColor : viewSelectedColor) : '#8B4513'
       };
     }
