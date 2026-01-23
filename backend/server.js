@@ -671,13 +671,14 @@ app.get('/api/pois', async (req, res) => {
     let query = `
       SELECT p.id, p.name, p.poi_type, p.latitude, p.longitude, p.geometry, p.geometry_drive_file_id,
              p.owner_id, o.name as owner_name, p.property_owner,
-             p.brief_description, p.era, p.historical_description,
+             p.brief_description, p.era_id, e.name as era_name, p.era, p.historical_description,
              p.primary_activities, p.surface, p.pets, p.cell_signal, p.more_info_link,
              p.length_miles, p.difficulty, p.image_mime_type, p.image_drive_file_id,
              p.boundary_type, p.boundary_color, p.news_url, p.events_url,
              p.locally_modified, p.deleted, p.synced, p.created_at, p.updated_at
       FROM pois p
       LEFT JOIN pois o ON p.owner_id = o.id AND o.poi_type = 'virtual'
+      LEFT JOIN eras e ON p.era_id = e.id
       WHERE (p.deleted IS NULL OR p.deleted = FALSE)
     `;
 
@@ -702,13 +703,14 @@ app.get('/api/pois/:id', async (req, res) => {
     const result = await pool.query(`
       SELECT p.id, p.name, p.poi_type, p.latitude, p.longitude, p.geometry, p.geometry_drive_file_id,
              p.owner_id, o.name as owner_name, p.property_owner,
-             p.brief_description, p.era, p.historical_description,
+             p.brief_description, p.era_id, e.name as era_name, p.era, p.historical_description,
              p.primary_activities, p.surface, p.pets, p.cell_signal, p.more_info_link,
              p.length_miles, p.difficulty, p.image_mime_type, p.image_drive_file_id,
              p.boundary_type, p.boundary_color, p.news_url, p.events_url,
              p.locally_modified, p.deleted, p.synced, p.created_at, p.updated_at
       FROM pois p
       LEFT JOIN pois o ON p.owner_id = o.id AND o.poi_type = 'virtual'
+      LEFT JOIN eras e ON p.era_id = e.id
       WHERE p.id = $1`,
       [req.params.id]
     );
@@ -880,13 +882,14 @@ app.get('/api/filters', async (req, res) => {
         AND EXISTS (SELECT 1 FROM pois p WHERE p.owner_id = o.id)
       ORDER BY o.name
     `);
-    const eras = await pool.query('SELECT DISTINCT era FROM pois WHERE era IS NOT NULL ORDER BY era');
+    const eras = await pool.query('SELECT id, name FROM eras ORDER BY sort_order, id');
     const surfaces = await pool.query('SELECT DISTINCT surface FROM pois WHERE surface IS NOT NULL ORDER BY surface');
 
     res.json({
       owners: owners.rows.map(r => r.name),
       ownerOrganizations: owners.rows, // Include id and name for new UI
-      eras: eras.rows.map(r => r.era),
+      eras: eras.rows.map(r => r.name), // Keep backward compatibility
+      erasList: eras.rows, // Include id and name for new UI
       surfaces: surfaces.rows.map(r => r.surface)
     });
   } catch (error) {
@@ -974,7 +977,7 @@ app.get('/api/pois/virtual-in-viewport', async (req, res) => {
     // Find virtual POIs that have at least one associated physical POI within bounds
     const result = await pool.query(`
       SELECT DISTINCT vp.id, vp.name, vp.poi_type, vp.property_owner,
-             vp.brief_description, vp.era, vp.historical_description,
+             vp.brief_description, vp.era_id, e.name as era_name, vp.era, vp.historical_description,
              vp.primary_activities, vp.surface, vp.pets, vp.cell_signal,
              vp.more_info_link, vp.image_mime_type, vp.image_drive_file_id,
              vp.locally_modified, vp.deleted, vp.synced,
@@ -982,6 +985,7 @@ app.get('/api/pois/virtual-in-viewport', async (req, res) => {
       FROM pois vp
       JOIN poi_associations a ON vp.id = a.virtual_poi_id
       JOIN pois pp ON a.physical_poi_id = pp.id
+      LEFT JOIN eras e ON vp.era_id = e.id
       WHERE vp.poi_type = 'virtual'
         AND (vp.deleted IS NULL OR vp.deleted = FALSE)
         AND (pp.deleted IS NULL OR pp.deleted = FALSE)
@@ -1005,12 +1009,13 @@ app.get('/api/destinations', async (req, res) => {
     const result = await pool.query(`
       SELECT p.id, p.name, p.poi_type, p.latitude, p.longitude,
              p.owner_id, o.name as owner_name, p.property_owner,
-             p.brief_description, p.era, p.historical_description,
+             p.brief_description, p.era_id, e.name as era_name, p.era, p.historical_description,
              p.primary_activities, p.surface, p.pets, p.cell_signal, p.more_info_link,
              p.image_mime_type, p.image_drive_file_id, p.news_url, p.events_url,
              p.locally_modified, p.deleted, p.synced, p.created_at, p.updated_at
       FROM pois p
       LEFT JOIN pois o ON p.owner_id = o.id AND o.poi_type = 'virtual'
+      LEFT JOIN eras e ON p.era_id = e.id
       WHERE p.poi_type = 'point'
         AND p.latitude IS NOT NULL AND p.longitude IS NOT NULL
         AND (p.deleted IS NULL OR p.deleted = FALSE)
@@ -1028,12 +1033,13 @@ app.get('/api/destinations/:id', async (req, res) => {
     const result = await pool.query(`
       SELECT p.id, p.name, p.poi_type, p.latitude, p.longitude,
              p.owner_id, o.name as owner_name, p.property_owner,
-             p.brief_description, p.era, p.historical_description,
+             p.brief_description, p.era_id, e.name as era_name, p.era, p.historical_description,
              p.primary_activities, p.surface, p.pets, p.cell_signal, p.more_info_link,
              p.image_mime_type, p.image_drive_file_id, p.news_url, p.events_url,
              p.locally_modified, p.deleted, p.synced, p.created_at, p.updated_at
       FROM pois p
       LEFT JOIN pois o ON p.owner_id = o.id AND o.poi_type = 'virtual'
+      LEFT JOIN eras e ON p.era_id = e.id
       WHERE p.id = $1`,
       [req.params.id]
     );
@@ -1077,13 +1083,14 @@ app.get('/api/linear-features', async (req, res) => {
     const result = await pool.query(`
       SELECT p.id, p.name, p.poi_type as feature_type, p.geometry,
              p.owner_id, o.name as owner_name, p.property_owner,
-             p.brief_description, p.era, p.historical_description,
+             p.brief_description, p.era_id, e.name as era_name, p.era, p.historical_description,
              p.primary_activities, p.surface, p.pets, p.cell_signal, p.more_info_link,
              p.length_miles, p.difficulty, p.image_mime_type, p.image_drive_file_id,
              p.boundary_type, p.boundary_color, p.news_url, p.events_url,
              p.locally_modified, p.deleted, p.synced, p.created_at, p.updated_at
       FROM pois p
       LEFT JOIN pois o ON p.owner_id = o.id AND o.poi_type = 'virtual'
+      LEFT JOIN eras e ON p.era_id = e.id
       WHERE p.poi_type IN ('trail', 'river', 'boundary')
         AND (p.deleted IS NULL OR p.deleted = FALSE)
       ORDER BY p.poi_type, p.name
@@ -1100,13 +1107,14 @@ app.get('/api/linear-features/:id', async (req, res) => {
     const result = await pool.query(`
       SELECT p.id, p.name, p.poi_type as feature_type, p.geometry,
              p.owner_id, o.name as owner_name, p.property_owner,
-             p.brief_description, p.era, p.historical_description,
+             p.brief_description, p.era_id, e.name as era_name, p.era, p.historical_description,
              p.primary_activities, p.surface, p.pets, p.cell_signal, p.more_info_link,
              p.length_miles, p.difficulty, p.image_mime_type, p.image_drive_file_id,
              p.boundary_type, p.boundary_color,
              p.locally_modified, p.deleted, p.synced, p.created_at, p.updated_at
       FROM pois p
       LEFT JOIN pois o ON p.owner_id = o.id AND o.poi_type = 'virtual'
+      LEFT JOIN eras e ON p.era_id = e.id
       WHERE p.id = $1`,
       [req.params.id]
     );

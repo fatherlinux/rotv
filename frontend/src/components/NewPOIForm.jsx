@@ -9,6 +9,7 @@ function NewPOIForm({ onClose, onCreate, initialCoords }) {
     property_owner: '',
     brief_description: '',
     era: '',
+    era_id: null,
     historical_description: '',
     primary_activities: '',
     surface: '',
@@ -19,8 +20,9 @@ function NewPOIForm({ onClose, onCreate, initialCoords }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [availableOwnerOrgs, setAvailableOwnerOrgs] = useState([]);
+  const [availableEras, setAvailableEras] = useState([]);
 
-  // Fetch owner organizations on mount
+  // Fetch owner organizations and eras on mount
   useEffect(() => {
     async function fetchOwnerOrgs() {
       try {
@@ -35,7 +37,23 @@ function NewPOIForm({ onClose, onCreate, initialCoords }) {
         console.error('Failed to fetch owner organizations:', err);
       }
     }
+
+    async function fetchEras() {
+      try {
+        const response = await fetch('/api/admin/eras', {
+          credentials: 'include'
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setAvailableEras(data);
+        }
+      } catch (err) {
+        console.error('Failed to fetch eras:', err);
+      }
+    }
+
     fetchOwnerOrgs();
+    fetchEras();
   }, []);
 
   const handleChange = (field, value) => {
@@ -139,12 +157,25 @@ function NewPOIForm({ onClose, onCreate, initialCoords }) {
           <div className="form-row">
             <div className="form-section half">
               <label>Era</label>
-              <input
-                type="text"
-                value={formData.era}
-                onChange={(e) => handleChange('era', e.target.value)}
-                placeholder="e.g., Canal Era, Modern"
-              />
+              <select
+                value={formData.era_id || ''}
+                onChange={(e) => {
+                  const eraId = e.target.value ? parseInt(e.target.value) : null;
+                  const selectedEra = availableEras.find(era => era.id === eraId);
+                  handleChange('era_id', eraId);
+                  handleChange('era', selectedEra ? selectedEra.name : '');
+                }}
+              >
+                <option value="">Select an era...</option>
+                {availableEras.map(era => (
+                  <option key={era.id} value={era.id}>
+                    {era.name}
+                    {era.year_start || era.year_end
+                      ? ` (${era.year_start || ''}${era.year_start && era.year_end ? '-' : ''}${era.year_end || '+'})`
+                      : ''}
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="form-section half">
               <label>Property Owner</label>
