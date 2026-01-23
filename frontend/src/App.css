@@ -378,6 +378,21 @@ body {
   50% { opacity: 0.4; }
 }
 
+/* Satellite toggle button */
+.satellite-toggle-button:hover {
+  color: #FF8C00 !important;
+}
+
+.satellite-toggle-button.active {
+  color: #FF8C00 !important;
+  background: #fff3e0 !important;
+}
+
+.satellite-toggle-button svg {
+  width: 16px;
+  height: 16px;
+}
+
 /* User location marker pulse effect */
 .user-location-pulse {
   animation: user-pulse 2s infinite;
