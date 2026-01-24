@@ -17,7 +17,18 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build container image
+      - name: Build base image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Containerfile.base
+          push: false
+          load: true
+          tags: quay.io/fatherlinux/rotv-base:latest
+          cache-from: type=gha,scope=base
+          cache-to: type=gha,mode=max,scope=base
+
+      - name: Build application image
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -27,8 +38,8 @@ jobs:
           tags: quay.io/fatherlinux/rotv:test
           build-args: |
             BASE_IMAGE=quay.io/fatherlinux/rotv-base:latest
-          cache-from: type=gha,scope=test
-          cache-to: type=gha,mode=max,scope=test
+          cache-from: type=gha,scope=app
+          cache-to: type=gha,mode=max,scope=app
 
       - name: Prepare test seed data
         run: |
