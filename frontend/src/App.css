@@ -1016,14 +1016,17 @@ body {
   top: 0;
   z-index: 10;
   opacity: 1;
-  transform: translateY(0);
-  transition: opacity 0.5s ease-out, transform 0.5s ease-out;
+  max-height: 200px; /* Enough for carousel + padding */
+  overflow: hidden;
+  transition: opacity 0.5s ease-out, max-height 0.5s ease-out, padding 0.5s ease-out;
 }
 
 /* Auto-hide carousel after 5 seconds of inactivity */
 .thumbnail-carousel-wrapper.hidden {
   opacity: 0;
-  transform: translateY(-100%);
+  max-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
   pointer-events: none;
 }
 
@@ -1066,7 +1069,7 @@ body {
   gap: 0.5rem;
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 0 1rem 0.5rem 1rem;
+  padding: 0 1rem 1rem 1rem; /* Increased bottom padding to prevent scrollbar collision */
   scroll-behavior: smooth;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
