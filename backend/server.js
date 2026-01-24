@@ -173,6 +173,36 @@ async function importGeoJSONFeatures(client) {
 async function initDatabase() {
   const client = await pool.connect();
   try {
+    // Standardized eras table (must be created before pois for FK constraint)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS eras (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL UNIQUE,
+        year_start INTEGER,
+        year_end INTEGER,
+        description TEXT,
+        sort_order INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Seed default eras if table is empty
+    const eraCount = await client.query('SELECT COUNT(*) FROM eras');
+    if (parseInt(eraCount.rows[0].count) === 0) {
+      await client.query(`
+        INSERT INTO eras (name, year_start, year_end, description, sort_order) VALUES
+        ('Pre-Colonial', NULL, 1750, 'Native American settlement and early history', 1),
+        ('Early Settlement', 1750, 1827, 'European settlement and early farming communities', 2),
+        ('Canal Era', 1827, 1913, 'Ohio & Erie Canal construction and operation', 3),
+        ('Railroad Era', 1880, 1950, 'Valley Railroad and industrial transportation', 4),
+        ('Industrial Era', 1870, 1970, 'Manufacturing, quarrying, and industrial development', 5),
+        ('Conservation Era', 1970, 2000, 'Park establishment and early preservation efforts', 6),
+        ('Modern Era', 2000, NULL, 'National Park status and current stewardship', 7)
+        ON CONFLICT (name) DO NOTHING
+      `);
+    }
+
     // Unified POIs table (replaces destinations and linear_features)
     await client.query(`
       CREATE TABLE IF NOT EXISTS pois (
@@ -194,7 +224,7 @@ async function initDatabase() {
         property_owner VARCHAR(255),
         owner_id INTEGER REFERENCES pois(id),
         brief_description TEXT,
-        era_id INTEGER,
+        era_id INTEGER REFERENCES eras(id),
         historical_description TEXT,
         primary_activities TEXT,
         surface VARCHAR(255),
@@ -405,36 +435,6 @@ async function initDatabase() {
         ('Train Rides', 13),
         ('Nature Study', 14),
         ('Scenic Drives', 15)
-        ON CONFLICT (name) DO NOTHING
-      `);
-    }
-
-    // Standardized eras table
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS eras (
-        id SERIAL PRIMARY KEY,
-        name VARCHAR(255) NOT NULL UNIQUE,
-        year_start INTEGER,
-        year_end INTEGER,
-        description TEXT,
-        sort_order INTEGER DEFAULT 0,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-
-    // Seed default eras if table is empty
-    const eraCount = await client.query('SELECT COUNT(*) FROM eras');
-    if (parseInt(eraCount.rows[0].count) === 0) {
-      await client.query(`
-        INSERT INTO eras (name, year_start, year_end, description, sort_order) VALUES
-        ('Pre-Colonial', NULL, 1750, 'Native American settlement and early history', 1),
-        ('Early Settlement', 1750, 1827, 'European settlement and early farming communities', 2),
-        ('Canal Era', 1827, 1913, 'Ohio & Erie Canal construction and operation', 3),
-        ('Railroad Era', 1880, 1950, 'Valley Railroad and industrial transportation', 4),
-        ('Industrial Era', 1870, 1970, 'Manufacturing, quarrying, and industrial development', 5),
-        ('Conservation Era', 1970, 2000, 'Park establishment and early preservation efforts', 6),
-        ('Modern Era', 2000, NULL, 'National Park status and current stewardship', 7)
         ON CONFLICT (name) DO NOTHING
       `);
     }
