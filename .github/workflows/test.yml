@@ -16,6 +16,8 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker
 
       - name: Build base image (PostgreSQL, Node.js, Playwright)
         uses: docker/build-push-action@v5
@@ -23,7 +25,7 @@ jobs:
           context: .
           file: Containerfile.base
           tags: rotv-base:ci
-          outputs: type=docker
+          load: true
           cache-from: type=gha,scope=base
           cache-to: type=gha,mode=max,scope=base
 
@@ -36,7 +38,7 @@ jobs:
           build-args: |
             BASE_IMAGE=rotv-base:ci
             BUILD_ENV=test
-          outputs: type=docker
+          load: true
           cache-from: type=gha,scope=app
           cache-to: type=gha,mode=max,scope=app
 
