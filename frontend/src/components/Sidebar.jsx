@@ -339,20 +339,6 @@ function ReadOnlyView({ destination, isLinearFeature, isAdmin, showImage = true,
         )}
         </div>
       </div>
-
-      {/* Sticky footer for More Info link */}
-      {destination.more_info_link && (
-        <div className="view-buttons-footer">
-          <a
-            href={destination.more_info_link}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="more-info-btn"
-          >
-            More Information
-          </a>
-        </div>
-      )}
     </div>
   );
 }
@@ -2334,6 +2320,19 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
   const [swipeOffset, setSwipeOffset] = useState(0);
   const [isSwipingHorizontally, setIsSwipingHorizontally] = useState(false);
 
+  // Debounce navigation to prevent race conditions from rapid taps
+  const lastNavigationTime = React.useRef(0);
+  const NAVIGATION_DEBOUNCE_MS = 300;
+
+  const debouncedNavigate = (direction) => {
+    const now = Date.now();
+    if (now - lastNavigationTime.current < NAVIGATION_DEBOUNCE_MS) {
+      return; // Ignore rapid taps
+    }
+    lastNavigationTime.current = now;
+    onNavigate(direction);
+  };
+
   // Check for mobile on resize
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 768);
@@ -2343,6 +2342,18 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
 
   // Swipe gesture handlers
   const handleTouchStart = (e) => {
+    // Don't start swipe tracking if touch starts on the thumbnail carousel or navigation buttons
+    const target = e.target;
+    const isCarousel = target.closest('.thumbnail-carousel-wrapper, .thumbnail-carousel');
+    const isNavButton = target.closest('.image-nav-btn');
+
+    if (isCarousel || isNavButton) {
+      // Let the carousel handle its own scrolling, and let nav buttons handle their own clicks
+      touchStartX.current = null;
+      touchStartY.current = null;
+      return;
+    }
+
     touchStartX.current = e.touches[0].clientX;
     touchStartY.current = e.touches[0].clientY;
     setIsSwipingHorizontally(false);
@@ -2386,9 +2397,17 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
     const minSwipeDistance = 50;
     if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > minSwipeDistance) {
       if (deltaX > 0) {
-        onNavigate('prev');
+        // Swiping right = go to previous POI
+        // Check if not at the first POI
+        if (currentIndex > 0) {
+          onNavigate('prev');
+        }
       } else {
-        onNavigate('next');
+        // Swiping left = go to next POI
+        // Check if not at the last POI
+        if (poiNavigationList && currentIndex < poiNavigationList.length - 1) {
+          onNavigate('next');
+        }
       }
     }
 
@@ -2730,6 +2749,18 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
           />
         )}
 
+        {/* Swipe direction indicators */}
+        {swipeOffset > 10 && currentIndex > 0 && (
+          <div className="swipe-indicator swipe-indicator-left">
+            <span className="swipe-arrow">‹</span>
+          </div>
+        )}
+        {swipeOffset < -10 && poiNavigationList && currentIndex < poiNavigationList.length - 1 && (
+          <div className="swipe-indicator swipe-indicator-right">
+            <span className="swipe-arrow">›</span>
+          </div>
+        )}
+
         <div
           className="sidebar-content-wrapper"
           style={{
@@ -2762,6 +2793,47 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
               <img src={linearImageUrl} alt={linearFeature?.name} />
             ) : (
               <img src={getLinearDefaultThumbnail()} alt={linearFeature?.name} className="default-thumbnail" />
+            )}
+            {/* Navigation chevrons on image - mobile only */}
+            {isMobile && onNavigate && poiNavigationList && poiNavigationList.length > 1 && (
+              <>
+                {currentIndex > 0 && (
+                  <button
+                    className="image-nav-btn image-nav-prev"
+                    onTouchEnd={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      debouncedNavigate('prev');
+                    }}
+                    onClick={(e) => {
+                      // Fallback for desktop/non-touch devices
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
+                    aria-label="Previous POI"
+                  >
+                    <span className="image-nav-chevron">‹</span>
+                  </button>
+                )}
+                {currentIndex < poiNavigationList.length - 1 && (
+                  <button
+                    className="image-nav-btn image-nav-next"
+                    onTouchEnd={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      debouncedNavigate('next');
+                    }}
+                    onClick={(e) => {
+                      // Fallback for desktop/non-touch devices
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
+                    aria-label="Next POI"
+                  >
+                    <span className="image-nav-chevron">›</span>
+                  </button>
+                )}
+              </>
             )}
           </div>
         )}
@@ -2894,6 +2966,29 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
         </div>
         </div> {/* End sidebar-content-wrapper */}
 
+        {/* Sticky footer for More Info link - visible on Info tab only */}
+        {!isEditing && linearFeature && sidebarTab === 'view' && (
+          <div className="view-buttons-footer">
+            {linearFeature.more_info_link ? (
+              <a
+                href={linearFeature.more_info_link}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="more-info-btn"
+              >
+                More Information
+              </a>
+            ) : (
+              <button
+                className="more-info-btn disabled"
+                disabled
+              >
+                More Information
+              </button>
+            )}
+          </div>
+        )}
+
         <ShareModal
           isOpen={showShareModal}
           onClose={() => setShowShareModal(false)}
@@ -2942,6 +3037,18 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
         />
       )}
 
+      {/* Swipe direction indicators */}
+      {swipeOffset > 10 && currentIndex > 0 && (
+        <div className="swipe-indicator swipe-indicator-left">
+          <span className="swipe-arrow">‹</span>
+        </div>
+      )}
+      {swipeOffset < -10 && poiNavigationList && currentIndex < poiNavigationList.length - 1 && (
+        <div className="swipe-indicator swipe-indicator-right">
+          <span className="swipe-arrow">›</span>
+        </div>
+      )}
+
       <div
         className="sidebar-content-wrapper"
         style={{
@@ -2976,6 +3083,47 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
             <img src={imageUrl} alt={destination?.name} className={destination?.poi_type === 'virtual' ? 'logo-image' : ''} />
           ) : (
             <img src="/icons/thumbnails/destination.svg" alt={destination?.name} className="default-thumbnail" />
+          )}
+          {/* Navigation chevrons on image - mobile only */}
+          {isMobile && onNavigate && poiNavigationList && poiNavigationList.length > 1 && (
+            <>
+              {currentIndex > 0 && (
+                <button
+                  className="image-nav-btn image-nav-prev"
+                  onTouchEnd={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    debouncedNavigate('prev');
+                  }}
+                  onClick={(e) => {
+                    // Fallback for desktop/non-touch devices
+                    e.preventDefault();
+                    e.stopPropagation();
+                  }}
+                  aria-label="Previous POI"
+                >
+                  <span className="image-nav-chevron">‹</span>
+                </button>
+              )}
+              {currentIndex < poiNavigationList.length - 1 && (
+                <button
+                  className="image-nav-btn image-nav-next"
+                  onTouchEnd={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    debouncedNavigate('next');
+                  }}
+                  onClick={(e) => {
+                    // Fallback for desktop/non-touch devices
+                    e.preventDefault();
+                    e.stopPropagation();
+                  }}
+                  aria-label="Next POI"
+                >
+                  <span className="image-nav-chevron">›</span>
+                </button>
+              )}
+            </>
           )}
         </div>
       )}
@@ -3150,6 +3298,29 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
         )}
       </div>
       </div> {/* End sidebar-content-wrapper */}
+
+      {/* Sticky footer for More Info link - visible on Info tab only */}
+      {!isEditing && destination && sidebarTab === 'view' && (
+        <div className="view-buttons-footer">
+          {destination.more_info_link ? (
+            <a
+              href={destination.more_info_link}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="more-info-btn"
+            >
+              More Information
+            </a>
+          ) : (
+            <button
+              className="more-info-btn disabled"
+              disabled
+            >
+              More Information
+            </button>
+          )}
+        </div>
+      )}
 
       <ShareModal
         isOpen={showShareModal}
