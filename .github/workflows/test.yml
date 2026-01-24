@@ -54,25 +54,29 @@ jobs:
             -p 8080:8080 \
             --tmpfs /data/pgdata:rw,size=2G,mode=0700 \
             -v ~/.rotv/seed-data.sql:/tmp/seed-data.sql:ro \
-            -e PGDATABASE=rotv_test \
             quay.io/fatherlinux/rotv:test
 
-          # Wait for container to be ready
-          echo "Waiting for container to start..."
-          sleep 15
+          # Wait for server to start and initialize database
+          echo "Waiting for server to start and initialize database..."
+          sleep 20
 
-          # Setup test database
-          echo "Setting up test database..."
-          docker exec rotv psql -U postgres -d postgres -c "DROP DATABASE IF EXISTS rotv_test;" 2>/dev/null || true
-          docker exec rotv psql -U postgres -d postgres -c "CREATE DATABASE rotv_test;" 2>/dev/null || true
+          # Check if server is ready
+          for i in {1..30}; do
+            if docker exec rotv curl -s http://localhost:8080/api/destinations > /dev/null 2>&1; then
+              echo "✓ Server is ready"
+              break
+            fi
+            echo "Waiting for server... ($i/30)"
+            sleep 2
+          done
 
-          # Import seed data into test database
-          echo "Importing seed data into test database..."
-          docker exec rotv psql -U postgres -d rotv_test -f /tmp/seed-data.sql
+          # Import seed data into initialized database
+          echo "Importing seed data..."
+          docker exec rotv psql -U postgres -d rotv -f /tmp/seed-data.sql
 
           # Verify data was imported
           echo "Verifying data import..."
-          POI_COUNT=$(docker exec rotv psql -U postgres -d rotv_test -tAc "SELECT COUNT(*) FROM pois;")
+          POI_COUNT=$(docker exec rotv psql -U postgres -d rotv -tAc "SELECT COUNT(*) FROM pois;")
           echo "Imported $POI_COUNT POIs"
 
           if [ "$POI_COUNT" -eq 0 ]; then
@@ -80,7 +84,7 @@ jobs:
             exit 1
           fi
 
-          echo "✓ Test database ready"
+          echo "✓ Test database ready with $POI_COUNT POIs"
           echo ""
 
           # Run the tests inside container

@@ -1,30 +1,10 @@
 --
--- Minimal test seed data for CI/CD
--- Contains just enough data for tests to pass
+-- Test seed data for CI/CD
+-- Contains only POI data - schema is created by server.js initDatabase()
 --
-
--- Clean up
-DROP TABLE IF EXISTS poi_associations CASCADE;
-DROP TABLE IF EXISTS poi_events CASCADE;
-DROP TABLE IF EXISTS poi_news CASCADE;
-DROP TABLE IF EXISTS pois CASCADE;
-DROP TABLE IF EXISTS icons CASCADE;
-DROP TABLE IF EXISTS activities CASCADE;
-DROP TABLE IF EXISTS surfaces CASCADE;
-
--- Create minimal schema (will be extended by server.js initDatabase)
-CREATE TABLE IF NOT EXISTS pois (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(255) NOT NULL,
-    poi_type VARCHAR(50) DEFAULT 'point',
-    latitude DECIMAL(10, 8),
-    longitude DECIMAL(11, 8),
-    description TEXT,
-    image_data BYTEA,
-    image_mime_type VARCHAR(50),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+-- NOTE: This file should be imported AFTER the server has started and
+-- created the full schema, not before.
+--
 
 -- Insert 20 sample POIs for testing (alphabetically ordered for predictable tests)
 INSERT INTO pois (id, name, poi_type, latitude, longitude, description) VALUES
@@ -48,7 +28,4 @@ INSERT INTO pois (id, name, poi_type, latitude, longitude, description) VALUES
 (18, 'Bridal Veil Falls', 'point', 41.2845, -81.5678, 'Seasonal waterfall'),
 (19, 'Station Road Bridge', 'point', 41.2534, -81.5345, 'Historic bridge'),
 (20, 'Trail Mix', 'point', 41.2678, -81.5123, 'Trail junction')
-ON CONFLICT DO NOTHING;
-
--- Reset sequence
-SELECT setval('pois_id_seq', (SELECT MAX(id) FROM pois));
+ON CONFLICT (id) DO NOTHING;
