@@ -22,7 +22,6 @@ CREATE TABLE IF NOT EXISTS pois (
     description TEXT,
     image_data BYTEA,
     image_mime_type VARCHAR(50),
-    geom GEOMETRY,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
