@@ -314,13 +314,16 @@ function MapUpdater({ selectedDestination, selectedLinearFeature, skipFlyRef }) 
 
       // Fly to the selected destination with appropriate zoom
       const currentZoom = map.getZoom();
-      const targetZoom = Math.max(currentZoom, 15); // Zoom to at least 15, but don't zoom out
+      // On initial load (when map is at default zoom), zoom in more to show detailed view
+      // Otherwise, zoom to at least 15 but don't zoom out if already closer
+      const targetZoom = isInitialLoad ? 16 : Math.max(currentZoom, 15);
       map.flyTo([selectedDestination.latitude, selectedDestination.longitude], targetZoom, {
         animate: true,
-        duration: 0.5
+        duration: isInitialLoad ? 0.8 : 0.5 // Slightly longer animation on initial load
       });
 
       // Clear the flag after animation completes
+      const animationDuration = isInitialLoad ? 800 : 500;
       setTimeout(() => {
         map._isProgrammaticMove = false;
         // On initial load only, force a Results update by firing moveend
@@ -329,7 +332,7 @@ function MapUpdater({ selectedDestination, selectedLinearFeature, skipFlyRef }) 
           map._forceNextUpdate = true; // Signal to bypass threshold check
           map.fire('moveend');
         }
-      }, 600);
+      }, animationDuration + 100); // Add 100ms buffer
     }
   }, [selectedDestination, map, skipFlyRef]);
 

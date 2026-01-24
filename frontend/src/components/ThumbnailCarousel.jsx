@@ -1,9 +1,46 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 
 // Thumbnail carousel for mobile POI navigation
 function ThumbnailCarousel({ pois, currentIndex, onNavigate }) {
+  const wrapperRef = useRef(null);
   const carouselRef = useRef(null);
   const selectedRef = useRef(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  // Check scroll position to show/hide edge indicators
+  const updateScrollIndicators = () => {
+    const carousel = carouselRef.current;
+    if (!carousel) return;
+
+    const scrollLeft = carousel.scrollLeft;
+    const scrollWidth = carousel.scrollWidth;
+    const clientWidth = carousel.clientWidth;
+    const maxScroll = scrollWidth - clientWidth;
+
+    // Show left indicator if scrolled right (not at start)
+    setCanScrollLeft(scrollLeft > 5);
+
+    // Show right indicator if not at end
+    setCanScrollRight(scrollLeft < maxScroll - 5);
+  };
+
+  // Update indicators on scroll
+  useEffect(() => {
+    const carousel = carouselRef.current;
+    if (!carousel) return;
+
+    updateScrollIndicators();
+    carousel.addEventListener('scroll', updateScrollIndicators);
+
+    // Also update on resize
+    window.addEventListener('resize', updateScrollIndicators);
+
+    return () => {
+      carousel.removeEventListener('scroll', updateScrollIndicators);
+      window.removeEventListener('resize', updateScrollIndicators);
+    };
+  }, [pois]);
 
   // Auto-scroll to keep selected thumbnail visible
   useEffect(() => {
@@ -18,12 +55,18 @@ function ThumbnailCarousel({ pois, currentIndex, onNavigate }) {
 
   const handleThumbnailClick = (index) => {
     if (index === currentIndex) return;
-    const direction = index > currentIndex ? 'next' : 'prev';
-    const steps = Math.abs(index - currentIndex);
 
-    // Navigate multiple times if needed
-    for (let i = 0; i < steps; i++) {
-      setTimeout(() => onNavigate(direction), i * 100);
+    // For adjacent items (prev/next), navigate with animation
+    // For distant items, jump directly (onNavigate can handle this)
+    const distance = Math.abs(index - currentIndex);
+
+    if (distance === 1) {
+      // Adjacent - smooth animation
+      const direction = index > currentIndex ? 'next' : 'prev';
+      onNavigate(direction);
+    } else {
+      // Distant - direct jump (pass index directly)
+      onNavigate(index);
     }
   };
 
@@ -43,36 +86,20 @@ function ThumbnailCarousel({ pois, currentIndex, onNavigate }) {
     return '/icons/thumbnails/destination.svg';
   };
 
-  // Get type badge letter
-  const getTypeBadge = (poi) => {
-    if (poi._isVirtual) return 'O';
-    if (!poi._isLinear) return 'D';
-    if (poi.feature_type === 'river') return 'R';
-    if (poi.feature_type === 'boundary') return 'B';
-    return 'T';
-  };
-
-  // Get type class for styling
-  const getTypeClass = (poi) => {
-    if (poi._isVirtual) return 'virtual';
-    if (!poi._isLinear) return 'destination';
-    if (poi.feature_type === 'river') return 'river';
-    if (poi.feature_type === 'boundary') return 'boundary';
-    return 'trail';
-  };
-
   return (
-    <div className="thumbnail-carousel-wrapper">
+    <div
+      ref={wrapperRef}
+      className={`thumbnail-carousel-wrapper ${canScrollLeft ? 'can-scroll-left' : ''} ${canScrollRight ? 'can-scroll-right' : ''}`}
+    >
       <div className="thumbnail-carousel" ref={carouselRef}>
         {pois.map((poi, index) => {
           const isSelected = index === currentIndex;
-          const typeClass = getTypeClass(poi);
 
           return (
             <div
               key={`${poi._isLinear ? 'linear' : poi._isVirtual ? 'virtual' : 'point'}-${poi.id}`}
               ref={isSelected ? selectedRef : null}
-              className={`thumbnail-item ${isSelected ? 'selected' : ''} ${typeClass}`}
+              className={`thumbnail-item ${isSelected ? 'selected' : ''}`}
               onClick={() => handleThumbnailClick(index)}
               role="button"
               tabIndex={0}
@@ -80,17 +107,10 @@ function ThumbnailCarousel({ pois, currentIndex, onNavigate }) {
             >
               <div className="thumbnail-image">
                 <img src={getThumbnailUrl(poi)} alt={poi.name} loading="lazy" />
-                {isSelected && <div className="selected-indicator" />}
-              </div>
-              <div className={`thumbnail-type-badge ${typeClass}`}>
-                {getTypeBadge(poi)}
               </div>
             </div>
           );
         })}
-      </div>
-      <div className="thumbnail-carousel-count">
-        {currentIndex + 1} of {pois.length}
       </div>
     </div>
   );
