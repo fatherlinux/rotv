@@ -24,7 +24,7 @@ jobs:
           file: Containerfile.base
           push: false
           load: true
-          tags: quay.io/fatherlinux/rotv-base:latest
+          tags: rotv-base:ci
           cache-from: type=gha,scope=base
           cache-to: type=gha,mode=max,scope=base
 
@@ -37,7 +37,7 @@ jobs:
           load: true
           tags: quay.io/fatherlinux/rotv:test
           build-args: |
-            BASE_IMAGE=quay.io/fatherlinux/rotv-base:latest
+            BASE_IMAGE=rotv-base:ci
           cache-from: type=gha,scope=app
           cache-to: type=gha,mode=max,scope=app
 
