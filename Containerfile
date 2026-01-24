@@ -11,6 +11,9 @@ LABEL maintainer="fatherlinux"
 LABEL description="Roots of The Valley - Cuyahoga Valley National Park destination explorer"
 LABEL version="1.14.0"
 
+# Build environment: 'production' (default) or 'test' (includes dev deps)
+ARG BUILD_ENV=production
+
 WORKDIR /app
 
 # Build frontend
@@ -21,7 +24,11 @@ RUN cd frontend && npm run build
 
 # Install backend dependencies
 COPY backend/package*.json ./
-RUN npm install --only=production
+RUN if [ "$BUILD_ENV" = "test" ]; then \
+      npm install; \
+    else \
+      npm install --only=production; \
+    fi
 
 # Copy backend code
 COPY backend/ ./

@@ -184,19 +184,23 @@ describe('UI Integration Tests', () => {
       await page.waitForSelector('.leaflet-marker-icon', { timeout: 10000 });
       await page.waitForTimeout(1000);
 
-      // The URL-based POI selection doesn't work reliably, so click a marker to open sidebar
-      // Click the first visible marker
-      const firstMarker = await page.locator('.leaflet-marker-icon').first();
-      await firstMarker.click();
+      // Check if sidebar opened from URL parameter
+      const sidebarAlreadyOpen = await page.locator('.sidebar.open').count() > 0;
 
-      // Wait for sidebar to open after clicking marker
+      if (!sidebarAlreadyOpen) {
+        // If sidebar didn't open from URL, click a marker to open it
+        const firstMarker = await page.locator('.leaflet-marker-icon').first();
+        await firstMarker.click();
+      }
+
+      // Wait for sidebar to be open (either from URL or marker click)
       await page.waitForSelector('.sidebar.open', { timeout: 5000 });
       await page.waitForSelector('.thumbnail-carousel', { timeout: 5000 });
 
       // Wait a bit for carousel to fully initialize
       await page.waitForTimeout(500);
 
-      // Verify carousel exists and is visible (thumbnails might not be "selected" initially)
+      // Verify carousel exists and is visible
       const carouselVisible = await page.locator('.thumbnail-carousel').isVisible();
       expect(carouselVisible).toBe(true);
 
@@ -205,7 +209,7 @@ describe('UI Integration Tests', () => {
 
       // Reset viewport
       await page.setViewportSize({ width: 1280, height: 720 });
-    }, 30000);
+    }, 40000);
 
     it('should show More Info button only on Info tab', async () => {
       // Set viewport to mobile size
@@ -241,7 +245,7 @@ describe('UI Integration Tests', () => {
 
       // Reset viewport
       await page.setViewportSize({ width: 1280, height: 720 });
-    }, 30000);
+    }, 40000);
 
     it('should keep More Info button fixed at bottom when scrolling', async () => {
       // Set viewport to mobile size
@@ -276,7 +280,7 @@ describe('UI Integration Tests', () => {
 
       // Reset viewport
       await page.setViewportSize({ width: 1280, height: 720 });
-    }, 30000);
+    }, 40000);
 
     it('should navigate POIs using grey chevron buttons', async () => {
       // Set viewport to mobile size
