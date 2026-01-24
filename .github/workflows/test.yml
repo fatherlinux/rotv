@@ -21,7 +21,10 @@ jobs:
 
       - name: Build application image
         run: |
-          docker build --build-arg BASE_IMAGE=rotv-base:ci -t quay.io/fatherlinux/rotv:test .
+          docker build \
+            --build-arg BASE_IMAGE=rotv-base:ci \
+            --build-arg BUILD_ENV=test \
+            -t quay.io/fatherlinux/rotv:test .
           echo "✓ Application image built: quay.io/fatherlinux/rotv:test"
 
       - name: Prepare test seed data
