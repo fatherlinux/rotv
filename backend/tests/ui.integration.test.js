@@ -229,25 +229,28 @@ describe('UI Integration Tests', () => {
       // Wait for sidebar to open
       await page.waitForSelector('.sidebar.open', { timeout: 5000 });
 
-      // Wait for More Info button to appear (should be on Info tab by default)
-      await page.waitForSelector('.view-buttons-footer', { timeout: 5000 });
+      // Wait for More Info link to appear (should be on Info tab by default)
+      // Scroll to bottom of content to make link visible
+      const tabContent = await page.locator('.sidebar-tab-content');
+      await tabContent.evaluate(el => el.scrollTop = el.scrollHeight);
+      await page.waitForTimeout(300);
 
-      // Verify More Info button exists
-      const moreInfoButton = await page.locator('.view-buttons-footer .more-info-btn');
-      const buttonExists = await moreInfoButton.count();
-      expect(buttonExists).toBe(1);
+      // Verify More Info link exists at bottom of scrollable content
+      const moreInfoLink = await page.locator('.more-info-link');
+      const linkExists = await moreInfoLink.count();
+      expect(linkExists).toBe(1);
 
-      // Verify button is visible on Info tab (default)
-      let isVisible = await moreInfoButton.isVisible();
+      // Verify link is visible after scrolling to bottom
+      let isVisible = await moreInfoLink.isVisible();
       expect(isVisible).toBe(true);
 
-      // Test passes - button exists and is visible on Info tab
+      // Test passes - link exists at bottom of Info tab content
 
       // Reset viewport
       await page.setViewportSize({ width: 1280, height: 720 });
     }, 40000);
 
-    it('should keep More Info button fixed at bottom when scrolling', async () => {
+    it('should show More Info link at bottom of scrollable content', async () => {
       // Set viewport to mobile size
       await page.setViewportSize({ width: 375, height: 667 });
 
@@ -261,22 +264,24 @@ describe('UI Integration Tests', () => {
 
       // Wait for sidebar to open
       await page.waitForSelector('.sidebar.open', { timeout: 5000 });
-      await page.waitForSelector('.view-buttons-footer', { timeout: 5000 });
 
-      // Get initial position of More Info button
-      const moreInfoButton = await page.locator('.view-buttons-footer .more-info-btn');
-      const initialBoundingBox = await moreInfoButton.boundingBox();
-      expect(initialBoundingBox).not.toBeNull();
-
-      // Scroll the sidebar content (if there's scrollable content)
+      // More Info link is at bottom of scrollable content, so scroll down to see it
       const tabContent = await page.locator('.sidebar-tab-content');
-      await tabContent.evaluate(el => el.scrollTop = 100);
+      await tabContent.evaluate(el => el.scrollTop = el.scrollHeight);
       await page.waitForTimeout(300);
 
-      // Get new position - should be the same (fixed at bottom)
-      const newBoundingBox = await moreInfoButton.boundingBox();
-      expect(newBoundingBox).not.toBeNull();
-      expect(newBoundingBox.y).toBe(initialBoundingBox.y);
+      // Verify More Info link appears at bottom of content
+      const moreInfoLink = await page.locator('.more-info-link');
+      const linkVisible = await moreInfoLink.isVisible();
+      expect(linkVisible).toBe(true);
+
+      // Scroll back up - link should move out of view (not fixed)
+      await tabContent.evaluate(el => el.scrollTop = 0);
+      await page.waitForTimeout(300);
+
+      // Link should still exist but may not be in viewport (it scrolls with content)
+      const linkCount = await moreInfoLink.count();
+      expect(linkCount).toBe(1);
 
       // Reset viewport
       await page.setViewportSize({ width: 1280, height: 720 });

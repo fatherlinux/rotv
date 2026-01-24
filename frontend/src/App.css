@@ -1015,6 +1015,16 @@ body {
   position: sticky;
   top: 0;
   z-index: 10;
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 0.5s ease-out, transform 0.5s ease-out;
+}
+
+/* Auto-hide carousel after 5 seconds of inactivity */
+.thumbnail-carousel-wrapper.hidden {
+  opacity: 0;
+  transform: translateY(-100%);
+  pointer-events: none;
 }
 
 /* Edge fade indicators */
@@ -3643,59 +3653,36 @@ body {
   background: #ffebee;
 }
 
-/* Fixed footer for More Info button - always at bottom, never scrolls */
-.view-buttons-footer {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  display: flex;
-  padding: 1rem 1.25rem;
-  background: white;
-  border-top: 1px solid #ddd;
-  box-shadow: 0 -2px 8px rgba(0,0,0,0.1);
-  z-index: 1000;
+/* More Information link at bottom of Info tab content */
+.more-info-section {
+  padding: 1.5rem 1.25rem;
+  margin-top: 1rem;
+  border-top: 1px solid #e0e0e0;
 }
 
-/* On desktop, position within sidebar width (400px) */
-@media (min-width: 768px) {
-  .view-buttons-footer {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: auto;
-    width: 400px;
-  }
-}
-
-.view-buttons-footer .more-info-btn {
-  flex: 1;
-  display: block;
-  text-align: center;
-  padding: 0.65rem 1rem;
+.more-info-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.75rem 1.5rem;
   background: #3d6a1e;
   color: white;
   text-decoration: none;
-  border-radius: 6px;
-  font-size: 0.9rem;
+  border-radius: 8px;
+  font-size: 0.95rem;
   font-weight: 500;
-  transition: background 0.2s;
-  border: none;
-  cursor: pointer;
+  transition: background 0.2s, transform 0.1s;
+  width: 100%;
+  text-align: center;
 }
 
-.view-buttons-footer .more-info-btn:hover {
+.more-info-link:hover {
   background: #2d5016;
+  transform: translateY(-1px);
 }
 
-.view-buttons-footer .more-info-btn.disabled {
-  background: #ccc;
-  color: #888;
-  cursor: not-allowed;
-}
-
-.view-buttons-footer .more-info-btn.disabled:hover {
-  background: #ccc;
+.more-info-link:active {
+  transform: translateY(0);
 }
 
 .edit-buttons-right {
