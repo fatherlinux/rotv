@@ -7,6 +7,8 @@ function ThumbnailCarousel({ pois, currentIndex, onNavigate }) {
   const selectedRef = useRef(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
+  const [isVisible, setIsVisible] = useState(true);
+  const hideTimerRef = useRef(null);
 
   // Check scroll position to show/hide edge indicators
   const updateScrollIndicators = () => {
@@ -53,6 +55,29 @@ function ThumbnailCarousel({ pois, currentIndex, onNavigate }) {
     }
   }, [currentIndex]);
 
+  // Auto-hide carousel after 5 seconds
+  useEffect(() => {
+    // Clear any existing timer
+    if (hideTimerRef.current) {
+      clearTimeout(hideTimerRef.current);
+    }
+
+    // Show carousel initially or when currentIndex changes (user is navigating)
+    setIsVisible(true);
+
+    // Set timer to hide after 5 seconds
+    hideTimerRef.current = setTimeout(() => {
+      setIsVisible(false);
+    }, 5000);
+
+    // Cleanup timer on unmount or when currentIndex changes
+    return () => {
+      if (hideTimerRef.current) {
+        clearTimeout(hideTimerRef.current);
+      }
+    };
+  }, [currentIndex]);
+
   const handleThumbnailClick = (index) => {
     if (index === currentIndex) return;
 
@@ -89,7 +114,7 @@ function ThumbnailCarousel({ pois, currentIndex, onNavigate }) {
   return (
     <div
       ref={wrapperRef}
-      className={`thumbnail-carousel-wrapper ${canScrollLeft ? 'can-scroll-left' : ''} ${canScrollRight ? 'can-scroll-right' : ''}`}
+      className={`thumbnail-carousel-wrapper ${canScrollLeft ? 'can-scroll-left' : ''} ${canScrollRight ? 'can-scroll-right' : ''} ${!isVisible ? 'hidden' : ''}`}
     >
       <div className="thumbnail-carousel" ref={carouselRef}>
         {pois.map((poi, index) => {

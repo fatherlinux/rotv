@@ -207,7 +207,7 @@ function EditableCellSignal({ level, onChange }) {
 }
 
 // Read-only view component - works for both destinations and linear features
-function ReadOnlyView({ destination, isLinearFeature, isAdmin, showImage = true, onShare }) {
+function ReadOnlyView({ destination, isLinearFeature, isAdmin, showImage = true, onShare, moreInfoLink }) {
   // Use thumbnail service for faster loading
   // Include updated_at for cache busting when image changes
   const imageUrl = destination.image_mime_type
@@ -338,6 +338,23 @@ function ReadOnlyView({ destination, isLinearFeature, isAdmin, showImage = true,
           </div>
         )}
         </div>
+
+        {/* More Information link - at bottom of scrollable content */}
+        {moreInfoLink && (
+          <div className="more-info-section">
+            <a
+              href={moreInfoLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="more-info-link"
+            >
+              More Information
+              <svg viewBox="0 0 24 24" width="16" height="16" style={{ marginLeft: '8px' }}>
+                <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
+              </svg>
+            </a>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -2905,6 +2922,7 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
                 isAdmin={isAdmin}
                 showImage={false}
                 onShare={() => setShowShareModal(true)}
+                moreInfoLink={linearFeature.more_info_link}
               />
             )
           )}
@@ -2965,29 +2983,6 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
           )}
         </div>
         </div> {/* End sidebar-content-wrapper */}
-
-        {/* Sticky footer for More Info link - visible on Info tab only */}
-        {!isEditing && linearFeature && sidebarTab === 'view' && (
-          <div className="view-buttons-footer">
-            {linearFeature.more_info_link ? (
-              <a
-                href={linearFeature.more_info_link}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="more-info-btn"
-              >
-                More Information
-              </a>
-            ) : (
-              <button
-                className="more-info-btn disabled"
-                disabled
-              >
-                More Information
-              </button>
-            )}
-          </div>
-        )}
 
         <ShareModal
           isOpen={showShareModal}
@@ -3195,6 +3190,7 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
               isAdmin={isAdmin}
               showImage={false}
               onShare={() => setShowShareModal(true)}
+              moreInfoLink={destination.more_info_link}
             />
           )
         )}
@@ -3298,29 +3294,6 @@ function Sidebar({ destination, isNewPOI, newOrganization, isNewOrganization, on
         )}
       </div>
       </div> {/* End sidebar-content-wrapper */}
-
-      {/* Sticky footer for More Info link - visible on Info tab only */}
-      {!isEditing && destination && sidebarTab === 'view' && (
-        <div className="view-buttons-footer">
-          {destination.more_info_link ? (
-            <a
-              href={destination.more_info_link}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="more-info-btn"
-            >
-              More Information
-            </a>
-          ) : (
-            <button
-              className="more-info-btn disabled"
-              disabled
-            >
-              More Information
-            </button>
-          )}
-        </div>
-      )}
 
       <ShareModal
         isOpen={showShareModal}
