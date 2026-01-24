@@ -40,6 +40,8 @@ git checkout -b feature/my-new-feature
 
 # 4. Run all tests and verify they pass
 ./run.sh test
+# IMPORTANT: All 39 tests must pass before creating PR
+# GitHub Actions will run tests again automatically on PR
 
 # 5. Commit your changes (can be multiple commits)
 git add .
@@ -59,6 +61,8 @@ git push -u origin feature/my-new-feature
 # 9. Create Pull Request in GitHub
 # Use GitHub CLI or web interface:
 gh pr create --title "Add my new feature" --body "Description..."
+# GitHub Actions will automatically run all 39 tests on the PR
+# Check the "Checks" tab to see test results
 
 # 10. Create git tag for releases (AFTER PR is merged)
 git tag -a vX.Y.Z -m "Release vX.Y.Z - Description"
@@ -142,6 +146,8 @@ git push && git push --tags
 
 #### 3. Testing Requirements for PRs
 
+**📖 Full Testing Documentation:** See `docs/CI_CD_TESTING.md` for comprehensive testing guide, troubleshooting, and best practices.
+
 **Before creating a Pull Request:**
 
 ✅ **All tests must pass locally:**
@@ -165,9 +171,10 @@ git push && git push --tags
 ✅ **New features must include tests** (when applicable)
 
 **PR Checklist:**
-- [ ] Tests pass locally (`./run.sh test`)
+- [ ] Tests pass locally (`./run.sh test` - all 39 tests)
 - [ ] Container builds (`./run.sh build`)
 - [ ] Manual testing completed
+- [ ] GitHub Actions tests pass (check "Checks" tab on PR)
 - [ ] Version bumped correctly (SemVer)
 - [ ] CLAUDE.md updated (if workflow changed)
 - [ ] Architecture doc created (if major feature)
@@ -396,3 +403,4 @@ For all major features or significant refactors, create an architecture document
 **Examples:**
 - `docs/DEVELOPMENT_ARCHITECTURE.md` - Development workflow, ephemeral storage, production seeding, container optimization
 - `docs/NEWS_EVENTS_ARCHITECTURE.md` - News & events collection system with AI-powered content discovery
+- `docs/CI_CD_TESTING.md` - Automated testing with GitHub Actions, test suite architecture, troubleshooting guide
