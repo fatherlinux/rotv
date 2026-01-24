@@ -313,12 +313,51 @@ function AppContent() {
   // Ref to skip map fly animation on next selection (for Results/sidebar clicks)
   const skipNextFlyRef = useRef(false);
 
-  // Combined navigation list (destinations + linear features, sorted alphabetically)
+  // Combined navigation list (destinations + linear features + virtual POIs, sorted alphabetically)
   const poiNavigationList = useMemo(() => {
-    const dests = (viewportFilteredDestinations || []).map(d => ({ ...d, _isLinear: false }));
+    const dests = (viewportFilteredDestinations || []).map(d => ({
+      ...d,
+      _isLinear: false,
+      _isVirtual: d.poi_type === 'virtual'
+    }));
     const linear = (viewportFilteredLinearFeatures || []).map(f => ({ ...f, _isLinear: true }));
-    return [...dests, ...linear].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-  }, [viewportFilteredDestinations, viewportFilteredLinearFeatures]);
+    const virtual = (viewportFilteredVirtualPois || []).map(v => ({
+      ...v,
+      _isLinear: false,
+      _isVirtual: true
+    }));
+    return [...dests, ...linear, ...virtual].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  }, [viewportFilteredDestinations, viewportFilteredLinearFeatures, viewportFilteredVirtualPois]);
+
+  // Sync currentPoiIndex when selectedDestination changes (for URL loading and direct selection)
+  useEffect(() => {
+    if (selectedDestination && poiNavigationList.length > 0) {
+      // Convert IDs to strings for comparison to handle number/string mismatches
+      const index = poiNavigationList.findIndex(p => !p._isLinear && String(p.id) === String(selectedDestination.id));
+      if (index !== -1) {
+        setCurrentPoiIndex(index);
+      } else {
+        console.warn('[Navigation] Could not find selected destination in navigation list:', selectedDestination.name, 'ID:', selectedDestination.id);
+      }
+    } else if (!selectedDestination && !selectedLinearFeature) {
+      setCurrentPoiIndex(-1);
+    }
+  }, [selectedDestination, selectedLinearFeature, poiNavigationList]);
+
+  // Sync currentPoiIndex when selectedLinearFeature changes (for URL loading and direct selection)
+  useEffect(() => {
+    if (selectedLinearFeature && poiNavigationList.length > 0) {
+      // Convert IDs to strings for comparison to handle number/string mismatches
+      const index = poiNavigationList.findIndex(p => p._isLinear && String(p.id) === String(selectedLinearFeature.id));
+      if (index !== -1) {
+        setCurrentPoiIndex(index);
+      } else {
+        console.warn('[Navigation] Could not find selected linear feature in navigation list:', selectedLinearFeature.name, 'ID:', selectedLinearFeature.id);
+      }
+    } else if (!selectedDestination && !selectedLinearFeature) {
+      setCurrentPoiIndex(-1);
+    }
+  }, [selectedLinearFeature, selectedDestination, poiNavigationList]);
 
   // Apply filters when activeFilters change
   useEffect(() => {
@@ -410,8 +449,12 @@ function AppContent() {
     document.title = feature ? `${feature.name} | Roots of The Valley` : 'Roots of The Valley';
     // Sync navigation index
     if (feature) {
-      const index = poiNavigationList.findIndex(p => p._isLinear && p.id === feature.id);
+      // Convert IDs to strings for comparison to handle number/string mismatches
+      const index = poiNavigationList.findIndex(p => p._isLinear && String(p.id) === String(feature.id));
       setCurrentPoiIndex(index);
+      if (index === -1) {
+        console.warn('[Navigation] Could not find linear feature in list:', feature.name, 'ID:', feature.id);
+      }
       // Auto-enable the layer for the selected feature type so it's visible on the map
       if (feature.feature_type === 'boundary') {
         setVisibleBoundaries(prev => {
@@ -425,14 +468,14 @@ function AppContent() {
       } else if (feature.feature_type === 'river') {
         setShowRivers(true);
       }
-      // On mobile, switch to Results tab when linear feature is clicked from map
-      if (window.innerWidth < 768) {
+      // On mobile, switch to Results tab when linear feature is clicked from map (unless already in view mode)
+      if (window.innerWidth < 768 && activeTab !== 'view') {
         setActiveTab('results');
       }
     } else {
       setCurrentPoiIndex(-1);
     }
-  }, [updateUrlWithPoi, poiNavigationList]);
+  }, [updateUrlWithPoi, poiNavigationList, activeTab]);
 
   // Handle destination selection (clears linear feature selection) - wrapped in useCallback for stable reference
   const handleSelectDestination = useCallback((destination) => {
@@ -443,23 +486,31 @@ function AppContent() {
     document.title = destination ? `${destination.name} | Roots of The Valley` : 'Roots of The Valley';
     // Sync navigation index
     if (destination) {
-      const index = poiNavigationList.findIndex(p => !p._isLinear && p.id === destination.id);
+      // Convert IDs to strings for comparison to handle number/string mismatches
+      const index = poiNavigationList.findIndex(p => !p._isLinear && String(p.id) === String(destination.id));
       setCurrentPoiIndex(index);
-      // On mobile, switch to Results tab when POI is clicked from map
-      if (window.innerWidth < 768) {
+      if (index === -1) {
+        console.warn('[Navigation] Could not find destination in list:', destination.name, 'ID:', destination.id);
+      }
+      // On mobile, switch to Results tab when POI is clicked from map (unless already in view mode)
+      if (window.innerWidth < 768 && activeTab !== 'view') {
         setActiveTab('results');
       }
     } else {
       setCurrentPoiIndex(-1);
     }
-  }, [updateUrlWithPoi, poiNavigationList]);
+  }, [updateUrlWithPoi, poiNavigationList, activeTab]);
 
   // Navigate to next/prev POI in the list
   const handleNavigatePoi = useCallback((direction) => {
     if (poiNavigationList.length === 0) return;
 
     let newIndex;
-    if (currentPoiIndex === -1) {
+
+    // Support direct index jump (for carousel clicks to distant items)
+    if (typeof direction === 'number') {
+      newIndex = direction;
+    } else if (currentPoiIndex === -1) {
       // No current selection, start from beginning or end
       newIndex = direction === 'next' ? 0 : poiNavigationList.length - 1;
     } else {

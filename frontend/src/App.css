@@ -573,7 +573,7 @@ body {
   box-shadow: -4px 0 12px rgba(0,0,0,0.15);
   transform: translateX(100%);
   transition: transform 0.3s ease;
-  overflow-y: auto;
+  overflow: hidden; /* Don't scroll the sidebar itself - content scrolls inside */
   z-index: 1000;
   display: flex;
   flex-direction: column;
@@ -581,6 +581,15 @@ body {
 
 .sidebar.open {
   transform: translateX(0);
+}
+
+/* Sidebar content wrapper - container for swipe transform, doesn't scroll */
+.sidebar-content-wrapper {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0; /* Important for flex scrolling */
 }
 
 /* When in editing mode, sidebar doesn't scroll - the edit container does */
@@ -952,6 +961,7 @@ body {
 
 /* Sidebar Image */
 .sidebar-image {
+  position: relative;
   width: 100%;
   height: 200px;
   min-height: 200px;
@@ -1002,6 +1012,43 @@ body {
 .thumbnail-carousel-wrapper {
   background: #4a7c23;
   padding: 0.75rem 0;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+/* Edge fade indicators */
+.thumbnail-carousel-wrapper::before,
+.thumbnail-carousel-wrapper::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 40px;
+  pointer-events: none;
+  z-index: 2;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.thumbnail-carousel-wrapper::before {
+  left: 0;
+  background: linear-gradient(to right, #4a7c23, transparent);
+}
+
+.thumbnail-carousel-wrapper::after {
+  right: 0;
+  background: linear-gradient(to left, #4a7c23, transparent);
+}
+
+/* Show left fade when not at start */
+.thumbnail-carousel-wrapper.can-scroll-left::before {
+  opacity: 1;
+}
+
+/* Show right fade when not at end */
+.thumbnail-carousel-wrapper.can-scroll-right::after {
+  opacity: 1;
 }
 
 .thumbnail-carousel {
@@ -1014,6 +1061,7 @@ body {
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.3) transparent;
+  overscroll-behavior-x: contain; /* Prevent scroll chaining */
 }
 
 .thumbnail-carousel::-webkit-scrollbar {
@@ -1067,6 +1115,88 @@ body {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+/* Prevent browser swipe-to-go-back gesture */
+body {
+  overscroll-behavior-x: none;
+}
+
+/* Image navigation chevrons - faded grey */
+.image-nav-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(128, 128, 128, 0.3);
+  border: none;
+  padding: 0;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.2s;
+  z-index: 5;
+}
+
+.image-nav-btn:hover {
+  background: rgba(128, 128, 128, 0.5);
+}
+
+.image-nav-prev {
+  left: 8px;
+  border-radius: 0 4px 4px 0;
+}
+
+.image-nav-next {
+  right: 8px;
+  border-radius: 4px 0 0 4px;
+}
+
+.image-nav-chevron {
+  font-size: 32px;
+  font-weight: 300;
+  color: rgba(255, 255, 255, 0.8);
+  line-height: 1;
+}
+
+/* Swipe direction indicators - blue like Chrome's */
+.swipe-indicator {
+  position: fixed;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1000;
+  pointer-events: none;
+  animation: swipe-pulse 0.3s ease-out;
+}
+
+.swipe-indicator-left {
+  left: 20px;
+}
+
+.swipe-indicator-right {
+  right: 20px;
+}
+
+.swipe-arrow {
+  display: block;
+  font-size: 60px;
+  font-weight: 300;
+  color: #4285f4;
+  text-shadow: 0 2px 8px rgba(66, 133, 244, 0.5);
+  line-height: 1;
+}
+
+@keyframes swipe-pulse {
+  0% {
+    opacity: 0;
+    transform: translateY(-50%) scale(0.8);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(-50%) scale(1);
+  }
 }
 
 .selected-indicator {
@@ -1165,6 +1295,7 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  padding-bottom: 80px; /* Space for fixed More Info button */
 }
 
 /* When sidebar is in editing mode, tab-content shouldn't scroll - let EditView handle it */
@@ -3512,14 +3643,29 @@ body {
   background: #ffebee;
 }
 
-/* Fixed footer for View mode - More Info button */
+/* Fixed footer for More Info button - always at bottom, never scrolls */
 .view-buttons-footer {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
   display: flex;
   padding: 1rem 1.25rem;
   background: white;
   border-top: 1px solid #ddd;
   box-shadow: 0 -2px 8px rgba(0,0,0,0.1);
-  flex-shrink: 0;
+  z-index: 1000;
+}
+
+/* On desktop, position within sidebar width (400px) */
+@media (min-width: 768px) {
+  .view-buttons-footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: auto;
+    width: 400px;
+  }
 }
 
 .view-buttons-footer .more-info-btn {
@@ -3534,10 +3680,22 @@ body {
   font-size: 0.9rem;
   font-weight: 500;
   transition: background 0.2s;
+  border: none;
+  cursor: pointer;
 }
 
 .view-buttons-footer .more-info-btn:hover {
   background: #2d5016;
+}
+
+.view-buttons-footer .more-info-btn.disabled {
+  background: #ccc;
+  color: #888;
+  cursor: not-allowed;
+}
+
+.view-buttons-footer .more-info-btn.disabled:hover {
+  background: #ccc;
 }
 
 .edit-buttons-right {
