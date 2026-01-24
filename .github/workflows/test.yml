@@ -14,18 +14,31 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build base image (PostgreSQL, Node.js, Playwright)
-        run: |
-          docker build -f Containerfile.base -t rotv-base:ci .
-          echo "✓ Base image built: rotv-base:ci"
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Containerfile.base
+          tags: rotv-base:ci
+          outputs: type=docker
+          cache-from: type=gha,scope=base
+          cache-to: type=gha,mode=max,scope=base
 
       - name: Build application image
-        run: |
-          docker build \
-            --build-arg BASE_IMAGE=rotv-base:ci \
-            --build-arg BUILD_ENV=test \
-            -t quay.io/fatherlinux/rotv:test .
-          echo "✓ Application image built: quay.io/fatherlinux/rotv:test"
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Containerfile
+          tags: quay.io/fatherlinux/rotv:test
+          build-args: |
+            BASE_IMAGE=rotv-base:ci
+            BUILD_ENV=test
+          outputs: type=docker
+          cache-from: type=gha,scope=app
+          cache-to: type=gha,mode=max,scope=app
 
       - name: Prepare test seed data
         run: |
