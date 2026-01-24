@@ -7,7 +7,7 @@
 --
 
 -- Insert 20 sample POIs for testing (alphabetically ordered for predictable tests)
-INSERT INTO pois (id, name, poi_type, latitude, longitude, description) VALUES
+INSERT INTO pois (id, name, poi_type, latitude, longitude, brief_description) VALUES
 (1, 'Akron Hebrew Cemetery', 'point', 41.0850, -81.5150, 'Historic cemetery'),
 (2, 'Boston Store', 'point', 41.2567, -81.5678, 'Visitor center'),
 (3, 'Brandywine Falls', 'point', 41.2712, -81.5567, 'Beautiful waterfall'),
