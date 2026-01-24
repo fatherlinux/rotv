@@ -194,7 +194,7 @@ async function initDatabase() {
         property_owner VARCHAR(255),
         owner_id INTEGER REFERENCES pois(id),
         brief_description TEXT,
-        era VARCHAR(255),
+        era_id INTEGER REFERENCES eras(id),
         historical_description TEXT,
         primary_activities TEXT,
         surface VARCHAR(255),
