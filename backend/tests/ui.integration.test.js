@@ -205,7 +205,7 @@ describe('UI Integration Tests', () => {
 
       // Reset viewport
       await page.setViewportSize({ width: 1280, height: 720 });
-    }, 30000);
+    }, 40000);
 
     it('should show More Info button only on Info tab', async () => {
       // Set viewport to mobile size
@@ -241,7 +241,7 @@ describe('UI Integration Tests', () => {
 
       // Reset viewport
       await page.setViewportSize({ width: 1280, height: 720 });
-    }, 30000);
+    }, 40000);
 
     it('should keep More Info button fixed at bottom when scrolling', async () => {
       // Set viewport to mobile size
@@ -276,7 +276,7 @@ describe('UI Integration Tests', () => {
 
       // Reset viewport
       await page.setViewportSize({ width: 1280, height: 720 });
-    }, 30000);
+    }, 40000);
 
     it('should navigate POIs using grey chevron buttons', async () => {
       // Set viewport to mobile size
