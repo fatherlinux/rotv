@@ -30,35 +30,12 @@ jobs:
           cache-from: type=gha,scope=test
           cache-to: type=gha,mode=max,scope=test
 
-      - name: Download seed data from production
-        env:
-          PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
-          PRODUCTION_PORT: ${{ secrets.PRODUCTION_PORT }}
-          PRODUCTION_CONTAINER: ${{ secrets.PRODUCTION_CONTAINER }}
-          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+      - name: Prepare test seed data
         run: |
-          # Setup SSH for production access
-          mkdir -p ~/.ssh
-          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -p $PRODUCTION_PORT $PRODUCTION_HOST >> ~/.ssh/known_hosts 2>/dev/null || true
-
-          # Create seed data directory
+          # Use committed test fixture (minimal data for fast tests)
           mkdir -p ~/.rotv
-
-          # Pull data from production
-          echo "Downloading seed data from production..."
-          ssh -p "$PRODUCTION_PORT" root@"$PRODUCTION_HOST" \
-            "podman exec $PRODUCTION_CONTAINER pg_dump -U rotv --clean --if-exists --no-owner --no-acl rotv" \
-            > ~/.rotv/seed-data.sql
-
-          # Verify we got data
-          if [ ! -s ~/.rotv/seed-data.sql ]; then
-            echo "ERROR: Failed to download seed data"
-            exit 1
-          fi
-
-          echo "✓ Seed data downloaded successfully"
+          cp backend/tests/fixtures/test-seed-data.sql ~/.rotv/seed-data.sql
+          echo "✓ Test seed data ready"
 
       - name: Run tests
         run: |
