@@ -61,7 +61,17 @@ jobs:
 
           # Import seed data into test database
           echo "Importing seed data into test database..."
-          docker exec rotv psql -U postgres -d rotv_test -f /tmp/seed-data.sql 2>&1 | grep -c "^COPY" | xargs echo "Imported rows from tables:"
+          docker exec rotv psql -U postgres -d rotv_test -f /tmp/seed-data.sql
+
+          # Verify data was imported
+          echo "Verifying data import..."
+          POI_COUNT=$(docker exec rotv psql -U postgres -d rotv_test -tAc "SELECT COUNT(*) FROM pois;")
+          echo "Imported $POI_COUNT POIs"
+
+          if [ "$POI_COUNT" -eq 0 ]; then
+            echo "ERROR: No data was imported!"
+            exit 1
+          fi
 
           echo "✓ Test database ready"
           echo ""
